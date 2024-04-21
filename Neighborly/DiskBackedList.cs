@@ -2,6 +2,7 @@ using System.Collections;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+namespace Neighborly;
 
 /// <summary>
 /// List that stores items in memory up to a certain count, then spills over to disk.
@@ -56,8 +57,8 @@ public class DiskBackedList<T> : IList<T>
             else
             {
                 var path = Path.GetTempFileName();
-                var bytes = SerializeToBinary(item);
-                WriteToFile(path, bytes);
+                var bytes = HelperFunctions.SerializeToBinary(item);
+                HelperFunctions.WriteToFile(path, bytes);
                 _onDiskFilePaths.Add(path);
                 _isInMemory.Add(false);
             }
@@ -83,8 +84,8 @@ public class DiskBackedList<T> : IList<T>
             else
             {
                 var path = _onDiskFilePaths[index - _inMemoryItems.Count];
-                var bytes = ReadFromFile(path);
-                return DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                return HelperFunctions.DeserializeFromBinary<T>(bytes);
             }
         }
     }
@@ -112,8 +113,8 @@ public class DiskBackedList<T> : IList<T>
                     // Move the last in-memory item to disk
                     var lastInMemoryItem = _inMemoryItems[_inMemoryItems.Count - 1];
                     var path = Path.GetTempFileName();
-                    var bytes = SerializeToBinary(lastInMemoryItem);
-                    WriteToFile(path, bytes);
+                    var bytes = HelperFunctions.SerializeToBinary(lastInMemoryItem);
+                    HelperFunctions.WriteToFile(path, bytes);
                     _onDiskFilePaths.Insert(_inMemoryItems.Count - 1, path);
                     _isInMemory[_inMemoryItems.Count - 1] = false;
 
@@ -125,8 +126,8 @@ public class DiskBackedList<T> : IList<T>
             {
                 // The index is in the on-disk list
                 var path = Path.GetTempFileName();
-                var bytes = SerializeToBinary(item);
-                WriteToFile(path, bytes);
+                var bytes = HelperFunctions.SerializeToBinary(item);
+                HelperFunctions.WriteToFile(path, bytes);
                 _onDiskFilePaths.Insert(index - _inMemoryItems.Count, path);
                 _isInMemory.Insert(index, false);
             }
@@ -146,8 +147,8 @@ public class DiskBackedList<T> : IList<T>
             for (int i = 0; i < _onDiskFilePaths.Count; i++)
             {
                 var path = _onDiskFilePaths[i];
-                var bytes = ReadFromFile(path);
-                var diskItem = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 if (EqualityComparer<T>.Default.Equals(diskItem, item))
                 {
                     return _inMemoryItems.Count + i;
@@ -182,8 +183,8 @@ public class DiskBackedList<T> : IList<T>
 
             foreach (var path in _onDiskFilePaths)
             {
-                var bytes = ReadFromFile(path);
-                var diskItem = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 if (match(diskItem))
                 {
                     foundItems.Add(diskItem);
@@ -213,8 +214,8 @@ public class DiskBackedList<T> : IList<T>
 
             foreach (var path in _onDiskFilePaths)
             {
-                var bytes = ReadFromFile(path);
-                var diskItem = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 if (match(diskItem))
                 {
                     return diskItem;
@@ -252,8 +253,8 @@ public class DiskBackedList<T> : IList<T>
             for (int i = 0; i < _onDiskFilePaths.Count; i++)
             {
                 var path = _onDiskFilePaths[i];
-                var bytes = ReadFromFile(path);
-                var item = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var item = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 array[arrayIndex++] = item;
             }
         }
@@ -278,8 +279,8 @@ public class DiskBackedList<T> : IList<T>
                 else
                 {
                     var path = _onDiskFilePaths[index - _inMemoryItems.Count];
-                    var bytes = SerializeToBinary(value);
-                    WriteToFile(path, bytes);
+                    var bytes = HelperFunctions.SerializeToBinary(value);
+                    HelperFunctions.WriteToFile(path, bytes);
                 }
             }
         }
@@ -296,8 +297,8 @@ public class DiskBackedList<T> : IList<T>
 
             foreach (var path in _onDiskFilePaths)
             {
-                var bytes = ReadFromFile(path);
-                var diskItem = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 if (EqualityComparer<T>.Default.Equals(diskItem, item))
                 {
                     return true;
@@ -316,8 +317,8 @@ public class DiskBackedList<T> : IList<T>
 
         foreach (var path in _onDiskFilePaths)
         {
-            var bytes = ReadFromFile(path);
-            var item = DeserializeFromBinary(bytes);
+            var bytes = HelperFunctions.ReadFromFile(path);
+            var item = HelperFunctions.DeserializeFromBinary<T>(bytes);
             yield return item;
         }
     }
@@ -356,8 +357,8 @@ public class DiskBackedList<T> : IList<T>
             for (int i = 0; i < _onDiskFilePaths.Count; i++)
             {
                 var path = _onDiskFilePaths[i];
-                var bytes = ReadFromFile(path);
-                var diskItem = DeserializeFromBinary(bytes);
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
                 if (EqualityComparer<T>.Default.Equals(diskItem, item))
                 {
                     File.Delete(path);
@@ -502,39 +503,7 @@ public class DiskBackedList<T> : IList<T>
         }
     }
 
-    private byte[] SerializeToBinary(T item)
-    {
-        using (var memoryStream = new MemoryStream())
-        using (var writer = new BinaryWriter(memoryStream))
-        {
-            var bytes = Convert.ChangeType(item, typeof(byte[])) as byte[];
-            if (bytes != null)
-            {
-                writer.Write(bytes);
-            }
-            return memoryStream.ToArray();
-        }
-    }
 
-    private T DeserializeFromBinary(byte[] bytes)
-    {
-        using (var memoryStream = new MemoryStream(bytes))
-        using (var reader = new BinaryReader(memoryStream))
-        {
-            var itemBytes = reader.ReadBytes(bytes.Length);
-            return (T)Convert.ChangeType(itemBytes, typeof(T));
-        }
-    }
-
-    private void WriteToFile(string path, byte[] bytes)
-    {
-        File.WriteAllBytes(path, bytes);
-    }
-
-    private byte[] ReadFromFile(string path)
-    {
-        return File.ReadAllBytes(path);
-    }
 
 
 }

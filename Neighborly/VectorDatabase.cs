@@ -170,11 +170,11 @@ public class VectorDatabase : ICollection<Vector>
 
     public void Load(string path)
     {
+#if Save_VectorFiles
         if (!Directory.Exists(path))
         {
             throw new DirectoryNotFoundException($"The directory {path} does not exist.");
         }
-
         _rwLock.EnterWriteLock();
         try
         {
@@ -194,6 +194,27 @@ public class VectorDatabase : ICollection<Vector>
         {
             _rwLock.ExitWriteLock();
         }
+#else
+        string filePath = Path.Combine(path, "vectors.bin");
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"The file {filePath} does not exist.");
+        }
+
+        _rwLock.EnterWriteLock();
+        try
+        {
+            var bytes = HelperFunctions.Decompress(HelperFunctions.ReadFromFile(filePath));
+            _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
+
+            _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+#endif
+
     }
 
     public List<Vector> FindAll(Predicate<Vector> match)
@@ -213,6 +234,7 @@ public class VectorDatabase : ICollection<Vector>
             Directory.CreateDirectory(path);
         }
 
+#if Save_VectorFiles
         // Save the vectors to disk
         // Assuming each vector is saved as a separate file
         for (int i = 0; i < _vectors.Count; i++)
@@ -221,6 +243,13 @@ public class VectorDatabase : ICollection<Vector>
             string filePath = Path.Combine(path, fileName);
             File.WriteAllBytes(filePath, _vectors[i].ToBinary());
         }
+#else
+        // Save the vectors to a binary file
+        string filePath = Path.Combine(path, "vectors.bin");
+        var bytes = HelperFunctions.SerializeToBinary(_vectors);
+        HelperFunctions.WriteToFile(filePath, HelperFunctions.Compress(bytes));
+#endif
+
     }
 
 }

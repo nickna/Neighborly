@@ -1,5 +1,6 @@
 ﻿namespace Neighborly;
 
+[Serializable]
 public class Vector
 {
     public byte[] Values { get; }
