@@ -152,18 +152,9 @@ public class VectorDatabase : ICollection<Vector>
         catch (Exception ex)
         {
             // Log the exception, if you have a logging system
-            // Console.WriteLine(ex);
+            Console.WriteLine(ex);
 
-            // Handle the exception
-            // This could involve cleaning up resources, showing an error message to the user, etc.
-
-            // Rethrow the exception if you want it to be handled at a higher level
-            // throw;
-
-            // Or throw a new exception
-            // throw new ApplicationException("An error occurred while searching for vectors.", ex);
-
-            // If you don't want to throw an exception, you can return a default value
+            // return an empty list if an exception occurs
             return new List<Vector>();
         }
     }

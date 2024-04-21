@@ -22,9 +22,8 @@ public class DiskBackedList<T> : IList<T>
     /// </summary>
     public DiskBackedList()
     {
-        // Get current system memory
-        var performanceCounter = new PerformanceCounter("Memory", "Available Bytes");
-        var systemMemory = performanceCounter.NextValue();
+        // Get current system memory (available to .NET CLR's GC)
+        var systemMemory = GC.GetTotalMemory(forceFullCollection: false);
 
         // Calculate _maxInMemoryCount based on system memory
         _maxInMemoryCount = (int)(systemMemory / 1024 / 1024); // Convert bytes to megabytes
