@@ -51,7 +51,6 @@ public class DiskBackedList<T>
 
     public class DiskBackedList<T> : IEnumerable<T>
     {
-        // ... existing code ...
 
         public IEnumerator<T> GetEnumerator()
         {

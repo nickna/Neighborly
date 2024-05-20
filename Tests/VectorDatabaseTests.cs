@@ -229,4 +229,31 @@ public class VectorDatabaseTests
         Assert.AreEqual(0, notFoundVectors.Count, "FindAll should return an empty list if no vectors match the condition.");
     }
 
+    private Vector CreateVector(float[] floatArray)
+    {
+        byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
+        return new Vector(byteArray);
+    }
+
+    [Test]
+    public void Add_WhenItemIsNull_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => _db.Add(null));
+    }
+
+    [TestCase(new float[] { 1, 2, 3 })]
+    [TestCase(new float[] { 4, 5, 6 })]
+    public void Add_WhenItemIsValid_IncreasesCountByOne(float[] floatArray)
+    {
+        var vector = CreateVector(floatArray);
+        var initialCount = _db.Count;
+
+        _db.Add(vector);
+
+        Assert.AreEqual(initialCount + 1, _db.Count);
+        Assert.IsTrue(_db.Contains(vector));
+    }
+
+
 }
