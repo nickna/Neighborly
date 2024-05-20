@@ -14,7 +14,7 @@ Neighborly is an open-source vector database that efficiently stores and retriev
 ## DiskBackedList
 This class implements a list backed by disk storage, allowing for efficient handling of large data sets that exceed memory capacity. It provides methods for adding, retrieving, and managing vectors stored on disk.
 
-## VectorDatabase.cs
+## VectorDatabase
 The core class of Neighborly, VectorDatabase manages the vector data. It includes methods for inserting, updating, deleting, and querying vectors. The class ensures high performance through optimized indexing and retrieval algorithms.
 
 ## Search Algorithms
