@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+option csharp_namespace = "Neighborly.API.Protos";
+
+// The vector message, corresponds to your Vector class
+message VectorMessage {
+  bytes values = 1;
+}
+
+// The request message for the GetVectors operation
+message Request {
+}
+
+message Response {
+  bool success = 1;
+  string message = 2;
+}
+
+// The request message for the GetVectors operation
+message GetVectorsRequest {
+}
+
+
+// The request message for the AddVector operation
+message AddVectorRequest {
+  VectorMessage vector = 1;
+}
+
+
+// The Vector service definition
+service Vector {
+  rpc GetVectors (GetVectorsRequest) returns (GetVectorsResponse);
+  rpc AddVector (AddVectorRequest) returns (Response);
+  rpc GetVectorById (GetVectorByIdRequest) returns (GetVectorResponse);
+  rpc UpdateVector (UpdateVectorRequest) returns (Response);
+  rpc SearchNearest (SearchNearestRequest) returns (SearchResponse);
+  rpc ClearVectors (Request) returns (Response);
+
+}
+
+// The request message for the GetVectorById operation
+message GetVectorByIdRequest {
+  string id = 1;
+}
+
+// The response message for the GetVectorById operation
+message GetVectorResponse {
+  VectorMessage vector = 1;
+}
+
+message GetVectorsResponse {
+  repeated VectorMessage vectors = 1;
+}
+
+
+// The request message for the UpdateVector operation
+message UpdateVectorRequest {
+  string id = 1;
+  VectorMessage vector = 2;
+}
+
+// The request message for the SearchNearest operation
+message SearchNearestRequest {
+  VectorMessage query = 1;
+  int32 k = 2;
+}
+
+// The response message for the SearchNearest operation
+message SearchResponse {
+  repeated VectorMessage vectors = 1;
+}
+

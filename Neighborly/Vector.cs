@@ -3,11 +3,13 @@
 [Serializable]
 public class Vector
 {
+    public Guid Id { get; set; }
     public byte[] Values { get; }
 
     public Vector(byte[] values)
     {
         Values = values;
+        Id = Guid.NewGuid();
     }
 
     public int Dimension => Values.Length;
