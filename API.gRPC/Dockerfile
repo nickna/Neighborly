@@ -11,8 +11,8 @@ EXPOSE 8081
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
-COPY ["API.gRPC/API.gRPC.csproj", "API.gRPC/"]
-RUN dotnet restore "./API.gRPC/API.gRPC.csproj"
+COPY ["API.gRPC/API.gRPC.csproj", "./"]
+RUN dotnet restore "./API.gRPC.csproj"
 COPY . .
 WORKDIR "/src/API.gRPC"
 RUN dotnet build "./API.gRPC.csproj" -c $BUILD_CONFIGURATION -o /app/build
