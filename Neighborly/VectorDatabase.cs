@@ -159,7 +159,7 @@ public class VectorDatabase : ICollection<Vector>
         }
     }
 
-    public void Load(string path)
+    public void Load(string path, bool createOnNew = true)
     {
 #if Save_VectorFiles
         if (!Directory.Exists(path))
@@ -187,22 +187,29 @@ public class VectorDatabase : ICollection<Vector>
         }
 #else
         string filePath = Path.Combine(path, "vectors.bin");
-        if (!File.Exists(filePath))
+        bool fileExists = File.Exists(filePath);
+        if (!createOnNew && !fileExists)
         {
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
-
-        _rwLock.EnterWriteLock();
-        try
+        else if (createOnNew && !fileExists)
         {
-            var bytes = HelperFunctions.Decompress(HelperFunctions.ReadFromFile(filePath));
-            _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
-
-            _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
+            return;
         }
-        finally
+        else
         {
-            _rwLock.ExitWriteLock();
+            _rwLock.EnterWriteLock();
+            try
+            {
+                var bytes = HelperFunctions.Decompress(HelperFunctions.ReadFromFile(filePath));
+                _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
+
+                _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
+            }
+            finally
+            {
+                _rwLock.ExitWriteLock();
+            }
         }
 #endif
 

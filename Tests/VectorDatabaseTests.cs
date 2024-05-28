@@ -295,7 +295,7 @@ public class VectorDatabaseTests
         _db.Add(vector1);
         _db.Add(vector2);
 
-        var path = Path.GetTempFileName();
+        var path = Path.GetTempPath();
 
         // Act
         _db.Save(path);
@@ -308,7 +308,7 @@ public class VectorDatabaseTests
         Assert.IsTrue(_db.Contains(vector2), "Database should contain the second vector after loading.");
 
         // Clean up
-        File.Delete(path);
+        Directory.Delete(path, true);
     }
     [Test]
     public void TestUpdateNonExistentItem()
