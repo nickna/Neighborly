@@ -1,5 +1,4 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -8,24 +7,22 @@
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <Title>Neighborly</Title>
     <PackageProjectUrl>https://github.com/nickna/Neighborly/</PackageProjectUrl>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/nickna/Neighborly/</RepositoryUrl>
     <PackageTags>vector database</PackageTags>
     <AssemblyVersion>0.0.1.0</AssemblyVersion>
     <FileVersion>0.0.1.0</FileVersion>
     <Version>0.0.1</Version>
-    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <Description>Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with .NET, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.</Description>
     <Copyright>Copyright (c) 2024 Nicholas B. Nassiri</Copyright>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(DockerBuild)' != 'true'">
     <None Include="..\LICENSE.txt">
-      <Pack>True</Pack>
+      <Pack>False</Pack>
       <PackagePath>\</PackagePath>
     </None>
     <None Include="..\README.md">
-      <Pack>True</Pack>
+      <Pack>False</Pack>
       <PackagePath>\</PackagePath>
     </None>
   </ItemGroup>
@@ -33,5 +30,4 @@
   <ItemGroup>
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
   </ItemGroup>
-  
 </Project>

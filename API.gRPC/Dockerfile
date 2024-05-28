@@ -1,29 +1,35 @@
-# See https://aka.ms/customizecontainer to learn how to customize your debug container and how Visual Studio uses this Dockerfile to build your images for faster debugging.
+# Use the official .NET 8.0 SDK image as the build environment
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
 
-# This stage is used when running from VS in fast mode (Default for Debug configuration)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
-USER app
 WORKDIR /app
-EXPOSE 8080
-EXPOSE 8081
 
-# This stage is used to build the service project
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
-ARG BUILD_CONFIGURATION=Release
-WORKDIR /src
-COPY ["API.gRPC/API.gRPC.csproj", "./"]
-RUN dotnet restore "./API.gRPC.csproj"
-COPY . .
-WORKDIR "/src/API.gRPC"
-RUN dotnet build "./API.gRPC.csproj" -c $BUILD_CONFIGURATION -o /app/build
+# Copy csproj and restore dependencies
+COPY API.gRPC/*.csproj ./API.gRPC/
+COPY Neighborly/*.csproj ./Neighborly/
 
-# This stage is used to publish the service project to be copied to the final stage
-FROM build AS publish
-ARG BUILD_CONFIGURATION=Release
-RUN dotnet publish "./API.gRPC.csproj" -c $BUILD_CONFIGURATION -o /app/publish /p:UseAppHost=false
+# Copy the LICENSE.txt and README.md files
+COPY LICENSE.txt ./
+# COPY ../README.md ./
 
-# This stage is used in production or when running from VS in regular mode (Default when not using the Debug configuration)
-FROM base AS final
+WORKDIR /app/API.gRPC
+RUN dotnet restore
+
+# Copy the rest of the project files
 WORKDIR /app
-COPY --from=publish /app/publish .
+COPY API.gRPC/. ./API.gRPC/
+COPY Neighborly/. ./Neighborly/
+
+# Build the application
+WORKDIR /app/API.gRPC
+RUN dotnet publish -c Release -o out
+
+# Use the official .NET 8.0 runtime image as the base image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0
+
+WORKDIR /app
+
+# Copy the build output from the build environment
+COPY --from=build-env /app/API.gRPC/out .
+
+# Set the entry point of the application
 ENTRYPOINT ["dotnet", "API.gRPC.dll"]
