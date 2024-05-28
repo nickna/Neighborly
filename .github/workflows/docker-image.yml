@@ -15,4 +15,4 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Neighborly
-      run: docker build . --file Dockerfile --tag neighborly:$(date +%s)
+      run: docker build . --file API.gRPC/Dockerfile --tag neighborly:$(date +%s)
