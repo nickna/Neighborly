@@ -1,6 +1,4 @@
-using NUnit.Framework;
 using Neighborly;
-using System.Collections.Generic;
 
 [TestFixture]
 public class VectorDatabaseTests
@@ -13,6 +11,7 @@ public class VectorDatabaseTests
         _db = new VectorDatabase();
     }
 
+    // Replace all Assert.AreEqual calls with Assert.That calls
     [Test]
     public void TestAdd()
     {
@@ -23,7 +22,7 @@ public class VectorDatabaseTests
 
         _db.Add(vector);
 
-        Assert.AreEqual(1, _db.Count, "Count should be 1 after adding a vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
         Assert.IsTrue(_db.Contains(vector), "Database should contain the added vector.");
     }
 
@@ -239,7 +238,7 @@ public class VectorDatabaseTests
     [Test]
     public void Add_WhenItemIsNull_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => _db.Add(null));
+        Assert.Throws<ArgumentNullException>(() => _db.Add(null!));
     }
 
     [TestCase(new float[] { 1, 2, 3 })]
@@ -253,6 +252,116 @@ public class VectorDatabaseTests
 
         Assert.AreEqual(initialCount + 1, _db.Count);
         Assert.IsTrue(_db.Contains(vector));
+    }
+    [Test]
+    public void TestSearch()
+    {
+        // Arrange
+        float[] floatArray1 = new float[] { 1, 2, 3 };
+        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
+        var vector1 = new Vector(byteArray1);
+
+        float[] floatArray2 = new float[] { 4, 5, 6 };
+        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
+        var vector2 = new Vector(byteArray2);
+
+        _db.Add(vector1);
+        _db.Add(vector2);
+
+        // Act
+        var query = CreateVector(new float[] { 2, 3, 4 });
+        var result = _db.Search(query, 1);
+
+        // Assert
+        Assert.That(result.Count, Is.EqualTo(1), "Search should return the correct number of vectors.");
+        Assert.Contains(vector1, result.ToList(), "Search should return the nearest vector.");
+    }
+    [Test]
+    public void TestSaveAndLoad()
+    {
+        // Arrange
+        float[] floatArray1 = new float[] { 1, 2, 3 };
+        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
+        var vector1 = new Vector(byteArray1);
+
+        float[] floatArray2 = new float[] { 4, 5, 6 };
+        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
+        var vector2 = new Vector(byteArray2);
+
+        _db.Add(vector1);
+        _db.Add(vector2);
+
+        var path = Path.GetTempFileName();
+
+        // Act
+        _db.Save(path);
+        _db.Clear();
+        _db.Load(path);
+
+        // Assert
+        Assert.AreEqual(2, _db.Count, "Count should be 2 after loading the saved database.");
+        Assert.IsTrue(_db.Contains(vector1), "Database should contain the first vector after loading.");
+        Assert.IsTrue(_db.Contains(vector2), "Database should contain the second vector after loading.");
+
+        // Clean up
+        File.Delete(path);
+    }
+    [Test]
+    public void TestUpdateNonExistentItem()
+    {
+        // Arrange
+        float[] floatArray1 = new float[] { 1, 2, 3 };
+        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
+        var vector1 = new Vector(byteArray1);
+
+        float[] floatArray2 = new float[] { 4, 5, 6 };
+        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
+        var vector2 = new Vector(byteArray2);
+
+        // Act
+        bool result = _db.Update(vector1, vector2);
+
+        // Assert
+        Assert.IsFalse(result, "Update should return false when the old item does not exist.");
+    }
+    [Test]
+    public void TestConcurrency()
+    {
+        // Arrange
+        int threadCount = 10;
+        int vectorsPerThread = 1000;
+        var threads = new Thread[threadCount];
+
+        // Act
+        for (int i = 0; i < threadCount; i++)
+        {
+            threads[i] = new Thread(() =>
+            {
+                for (int j = 0; j < vectorsPerThread; j++)
+                {
+                    float[] floatArray = new float[] { j, j + 1, j + 2 };
+                    byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
+                    Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
+                    var vector = new Vector(byteArray);
+                    _db.Add(vector);
+                }
+            });
+            threads[i].Start();
+        }
+
+        for (int i = 0; i < threadCount; i++)
+        {
+            threads[i].Join();
+        }
+
+        // Assert
+        Assert.AreEqual(threadCount * vectorsPerThread, _db.Count, "Count should be correct after concurrent additions.");
     }
 
 
