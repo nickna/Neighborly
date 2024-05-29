@@ -7,12 +7,20 @@ on:
     branches: [ "master" ]
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
-    - name: Neighborly
-      run: docker build . --file API.gRPC/Dockerfile --tag neighborly:$(date +%s)
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build and Tag Docker Image
+      run: docker build . --file API.gRPC/Dockerfile --tag nick206/neighborly:latest
+
+    - name: Push Docker Image
+      run: docker push nick206/neighborly:latest
