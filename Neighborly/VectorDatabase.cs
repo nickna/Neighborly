@@ -25,6 +25,13 @@ public class VectorDatabase : ICollection<Vector>
     /// </summary>
     public bool IsReadOnly => false;
 
+    private bool _isDirty = false;
+
+    /// <summary>
+    /// Gets a value indicating whether the database has been modified since the last save.
+    /// </summary>
+    public bool IsDirty => _isDirty;
+
     /// <summary>
     /// Gets the storage option used by the database.
     /// </summary>
@@ -54,6 +61,7 @@ public class VectorDatabase : ICollection<Vector>
         try
         {
             _vectors.AddRange(items);
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
         finally { _rwLock.ExitWriteLock(); }
     }
@@ -71,6 +79,7 @@ public class VectorDatabase : ICollection<Vector>
             {
                 _vectors.Remove(item);
             }
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
         finally
         {
@@ -102,6 +111,7 @@ public class VectorDatabase : ICollection<Vector>
             if (index != -1)
             {
                 _vectors[index] = newItem;
+                _isDirty = true; // Set the flag to indicate the database has been modified
                 return true;
             }
         }
@@ -125,6 +135,7 @@ public class VectorDatabase : ICollection<Vector>
 
             _vectors.Add(item);
             _kdTree.Build(_vectors);
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
         finally { _rwLock.ExitWriteLock(); }
     }
@@ -138,6 +149,7 @@ public class VectorDatabase : ICollection<Vector>
         try
         {
             _vectors.Clear();
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
         finally { _rwLock.ExitWriteLock(); }
     }
@@ -191,6 +203,7 @@ public class VectorDatabase : ICollection<Vector>
             if (result)
             {
                 _kdTree.Build(_vectors);
+                _isDirty = true; // Set the flag to indicate the database has been modified
             }
         }
         finally { _rwLock.ExitWriteLock(); }
@@ -279,6 +292,7 @@ public class VectorDatabase : ICollection<Vector>
                 _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
 
                 _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
+                _isDirty = false; // Set the flag to indicate the database hasn't been modified
             }
             finally
             {
@@ -316,6 +330,12 @@ public class VectorDatabase : ICollection<Vector>
     /// <param name="path">The file path to save the vectors to.</param>
     public void Save(string path)
     {
+        // If the database hasn't been modified, no need to save it
+        if (!_isDirty)
+        {
+            return;
+        }
+
         if (!Directory.Exists(path))
         {
             Directory.CreateDirectory(path);
@@ -336,7 +356,7 @@ public class VectorDatabase : ICollection<Vector>
         var bytes = HelperFunctions.SerializeToBinary(_vectors);
         HelperFunctions.WriteToFile(filePath, HelperFunctions.Compress(bytes));
 #endif
-
+        _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
 
 }
