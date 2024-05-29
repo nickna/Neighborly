@@ -8,6 +8,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{601827C2-D295-4429-B5E5-A8641B7F3BBB}"
 	ProjectSection(SolutionItems) = preProject
 		.gitflow-config = .gitflow-config
+		CONTRIBUTING.md = CONTRIBUTING.md
+		PULL_REQUEST_TEMPLATE.md = PULL_REQUEST_TEMPLATE.md
 		setup-dev.ps1 = setup-dev.ps1
 	EndProjectSection
 EndProject
