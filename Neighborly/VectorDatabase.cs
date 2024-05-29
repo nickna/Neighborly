@@ -324,6 +324,18 @@ public class VectorDatabase : ICollection<Vector>
     }
 
     /// <summary>
+    /// Saves the vectors to the current directory.
+    /// </summary>
+    public void Save()
+    {
+        // Get the current directory
+        string currentDirectory = Directory.GetCurrentDirectory();
+
+        // Call the existing Save method with the current directory
+        Save(currentDirectory);
+    }
+
+    /// <summary>
     /// Saves the vectors to a specified file path.
     /// (In the gRPC server, this method will be called when the host OS sends a shutdown signal.)
     /// </summary>
