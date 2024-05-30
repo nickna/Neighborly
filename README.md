@@ -1,39 +1,66 @@
 # Neighborly
-## An Open-Source Vector database
+## An Open-Source Vector Database
 
 ![neighborly-header](https://github.com/nickna/Neighborly/assets/4017153/2dd8a22d-511d-4457-bde5-ac4ceaecf166)
 
-Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with C#, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.
+Neighborly is a versatile open-source vector database built with C#, designed to efficiently store and retrieve high-dimensional vector data. It offers two flexible deployment options: a gRPC API in a Docker container and a lightweight bundled library. With its cross-platform compatibility, Neighborly can be seamlessly integrated into a wide range of applications, including Windows, Xbox, iOS, macOS, Android, and Linux.
 
 # Features
-* Disk-backed Storage: Efficiently store large volumes of vector data with disk-backed lists.
+* Disk-backed Storage: Efficiently handle large volumes of vector data with memory caching and disk storage for persistence. 
 * High Performance: Optimized for fast read and write operations.
-* Unit Testing: Comprehensive test suite to ensure reliability and stability.
+* API (gRPC): Access Neighborly's functionality through a gRPC API hosted in a Docker container.
+* Client Library (NuGet): Integrate Neighborly as a minimal library into your projects, similar to SQLite.
+* Cross-Platform Compatibility: Leverage Neighborly on various platforms, including Windows, Xbox, iOS, macOS, Android, and Linux.
+* Advanced Search Algorithms: Utilize k-NN, ANN, range search, and cosine similarity search for efficient vector queries.
+* Unit Testing: Ensure reliability and stability with a comprehensive test suite.
 
-# Code Overview
-## DiskBackedList
-This class implements a list backed by disk storage, allowing for efficient handling of large data sets that exceed memory capacity. It provides methods for adding, retrieving, and managing vectors stored on disk.
+# Getting Started
 
-## VectorDatabase
-The core class of Neighborly, VectorDatabase manages the vector data. It includes methods for inserting, updating, deleting, and querying vectors. The class ensures high performance through optimized indexing and retrieval algorithms.
+## Web Server (Docker Image)
+To use Neighborly as a web server, you can pull the Docker image from [DockerHub](https://hub.docker.com/repository/docker/nick206/neighborly/general):
 
-## Search Algorithms
-Neighborly uses advanced search algorithms to query vector data efficiently:
+`docker pull nick206/neighborly:latest`
 
-* k-Nearest Neighbors (k-NN): Finds the k closest vectors to a given query vector based on a specified distance metric (e.g., Euclidean distance).
-* Approximate Nearest Neighbor (ANN): Uses techniques like locality-sensitive hashing (LSH) to quickly find approximate nearest neighbors, providing a balance between speed and accuracy.
-* Range Search: Retrieves all vectors within a specified distance from a query vector.
-* Cosine Similarity Search: This method finds vectors that have the highest cosine similarity to the query vector. It is useful for applications involving text and other high-dimensional data.
+Once the image is pulled, you can run the container using the following command:
 
-## Usage
-To use Neighborly in your project, add a reference to the compiled DLL and utilize the provided classes and methods for managing vector data.
+`docker run -p 50051:50051 neighborly/server`
 
-## Contributing
+This will start the Neighborly server, and you can access the gRPC API at localhost:50051.
+
+## Client Library (NuGet Package)
+To use Neighborly as a client library in your .NET projects, you can install the [NuGet](https://www.nuget.org/packages/Neighborly) package using the following command:
+
+`PM> NuGet\Install-Package Neighborly`
+
+After installing the package, you can use the Neighborly client library in your code by importing the necessary namespaces:
+
+```
+using Neighborly;
+
+using Neighborly.Databases;
+```
+
+# Deployment Options
+## API Server for Web-based Applications
+Neighborly provides a gRPC API hosted in a Docker container, facilitating client-server architecture. 
+
+## Client Library for Desktop and Mobile Applications
+Neighborly can be used as a lightweight bundled library, similar to SQLite. Add a reference to the compiled DLL (or NuGet package) and utilize the provided classes and methods for managing vector data directly in your projects. The library can be seamlessly integrated into applications targeting Windows, Xbox, iOS, macOS, Android, and Linux platforms.
+
+# Search Algorithms
+Neighborly offers a range of advanced search algorithms to efficiently query vector data:
+
+* k-Nearest Neighbors (k-NN): Find the k closest vectors to a given query vector based on a specified distance metric.
+* Approximate Nearest Neighbor (ANN): Quickly find approximate nearest neighbors using techniques like locality-sensitive hashing (LSH).
+* Range Search: Retrieve all vectors within a specified distance from a query vector.
+* Cosine Similarity Search: Identify vectors with the highest cosine similarity to the query vector, ideal for text and high-dimensional data.
+
+# Contributing
 We welcome contributions! If you have ideas for new features or have found bugs, please open an issue or submit a pull request. For major changes, please discuss them in an issue first.
 
-## License
+# License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
-## Contact
+# Contact
 For any questions or further assistance, feel free to contact [![GitHub](https://img.shields.io/badge/GitHub-nickna-blue)](https://github.com/nickna)
 .
