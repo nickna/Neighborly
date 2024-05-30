@@ -502,7 +502,31 @@ public class DiskBackedList<T> : IList<T>
         }
     }
 
+    public int FindIndex(Predicate<T> match)
+    {
+        lock (_lock)
+        {
+            for (int i = 0; i < _inMemoryItems.Count; i++)
+            {
+                if (match(_inMemoryItems[i]))
+                {
+                    return i;
+                }
+            }
 
+            for (int i = 0; i < _onDiskFilePaths.Count; i++)
+            {
+                var path = _onDiskFilePaths[i];
+                var bytes = HelperFunctions.ReadFromFile(path);
+                var diskItem = HelperFunctions.DeserializeFromBinary<T>(bytes);
+                if (match(diskItem))
+                {
+                    return _inMemoryItems.Count + i;
+                }
+            }
 
+            return -1; // Return -1 if no match is found
+        }
+    }
 
 }
