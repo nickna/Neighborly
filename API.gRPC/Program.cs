@@ -22,6 +22,18 @@ if (string.IsNullOrEmpty(databasePath))
     databasePath = "";
 }
 
+bool gRPCEnable = Environment.GetEnvironmentVariable("PROTO_GRPC") == "true";
+bool RESTEnable = Environment.GetEnvironmentVariable("PROTO_REST") == "true";
+
+
+// Shutdown the application if both gRPC and REST are disabled
+if (!gRPCEnable && !RESTEnable)
+{
+    Console.WriteLine("Both gRPC and REST are disabled. Service is shutting down.");
+    await app.StopAsync();
+    return;
+}
+
 // Load Database on application start
 vectorDatabase.Load(databasePath);
 
@@ -31,8 +43,16 @@ lifetime.ApplicationStopping.Register(() =>
     vectorDatabase.Save(databasePath);
 });
 
-// Configure the HTTP request pipeline.
-app.MapGrpcService<VectorService>();
-app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
+// Configure the gRPC API
+if (gRPCEnable)
+{
+    app.MapGrpcService<VectorService>();
+}
+
+// Configure the REST API
+if (RESTEnable)
+{
+    API.Services.RestServices.MapVectorRoutes(app);
+}
 
 app.Run();

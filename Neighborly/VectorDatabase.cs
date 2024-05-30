@@ -89,6 +89,30 @@ public class VectorDatabase : ICollection<Vector>
 
     /// <summary>
     /// Updates an existing vector in the database.
+    /// Searches for the vector by its ID.
+    /// </summary>
+    /// <param name="vector"></param>
+    /// <returns>True if the Vector was updated; otherwise, false.</returns>
+    public bool Update(Vector vector)
+    {
+        _rwLock.EnterWriteLock();
+        try
+        {
+            var index = _vectors.FindIndex(v => v.Id == vector.Id);
+            if (index != -1)
+            {
+                _vectors[index] = vector;
+                _isDirty = true; // Set the flag to indicate the database has been modified
+                return true;
+            }
+        }
+        finally { _rwLock.ExitWriteLock(); }
+        return false;
+    }
+
+
+    /// <summary>
+    /// Updates an existing vector in the database.
     /// </summary>
     /// <param name="oldItem">The vector to be updated.</param>
     /// <param name="newItem">The updated vector.</param>
