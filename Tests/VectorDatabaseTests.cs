@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Neighborly;
 
 [TestFixture]
@@ -364,5 +365,37 @@ public class VectorDatabaseTests
         Assert.AreEqual(threadCount * vectorsPerThread, _db.Count, "Count should be correct after concurrent additions.");
     }
 
+    [Test]
+    public void Search_WhenSearchMethodThrowsAnException_ExceptionIsLogged()
+    {
+        // Arrange
+        var logger = new MockLogger<VectorDatabase>();
+        var db = new VectorDatabase(logger){ SearchMethod = new MockSearchMethod() };
 
+        var query = new Vector([  1, 2, 3 ]);
+        var k = 1;
+
+        // Act
+        db.Search(query, k);
+
+        // Assert
+        Assert.That(logger.LastLogLevel, Is.EqualTo(LogLevel.Error), "An error should be logged.");
+        Assert.That(logger.LastEventId?.Id, Is.EqualTo(0), "The event ID should be 0.");
+        if (logger.LastState is IReadOnlyList<KeyValuePair<string, object?>> state)
+        {
+            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("Query", query)), "The query should be logged.");
+            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("k", k)), "The number of neighbors should be logged.");
+            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("{OriginalFormat}", "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")), "The message template should be logged.");
+        }
+
+        Assert.That(logger.LastException, Is.InstanceOf<MockException>(), "The exception should be logged.");
+        Assert.That(logger.LastMessage, Is.EqualTo("Could not find vector `Neighborly.Vector` in the database searching the 1 nearest neighbor(s)."), "The message should be correct.");
+    }
+
+    [Test]
+    public void Ctor_WhenLoggerIsNull_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!));
+    }
+    
 }

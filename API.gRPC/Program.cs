@@ -5,6 +5,7 @@ using Neighborly.API;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
+builder.Services.AddLogging();
 builder.Services.AddGrpc();
 builder.Services.AddSingleton<VectorDatabase>();
 
@@ -29,7 +30,7 @@ bool RESTEnable = Environment.GetEnvironmentVariable("PROTO_REST") == "true";
 // Shutdown the application if both gRPC and REST are disabled
 if (!gRPCEnable && !RESTEnable)
 {
-    Console.WriteLine("Both gRPC and REST are disabled. Service is shutting down.");
+    app.Logger.LogCritical("Both gRPC and REST are disabled. Service is shutting down.");
     await app.StopAsync();
     return;
 }
