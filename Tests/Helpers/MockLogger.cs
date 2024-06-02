@@ -2,7 +2,7 @@ namespace Neighborly.Tests.Helpers;
 
 using Microsoft.Extensions.Logging;
 
-internal class MockLogger<TCategoryName> : ILogger<TCategoryName>
+internal sealed class MockLogger<TCategoryName> : ILogger<TCategoryName>
 {
     public LogLevel? LastLogLevel { get; private set; }
     public EventId? LastEventId { get; private set; }
