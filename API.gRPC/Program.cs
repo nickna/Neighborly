@@ -30,7 +30,7 @@ bool RESTEnable = Environment.GetEnvironmentVariable("PROTO_REST") == "true";
 // Shutdown the application if both gRPC and REST are disabled
 if (!gRPCEnable && !RESTEnable)
 {
-    app.Logger.LogCritical("Both gRPC and REST are disabled. Service is shutting down.");
+    app.Logger.AppShuttingDownAsNoProtocolsEnabled();
     await app.StopAsync();
     return;
 }
