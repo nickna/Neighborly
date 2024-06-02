@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Neighborly;
+using Neighborly.Tests.Helpers;
 
 [TestFixture]
 public class VectorDatabaseTests

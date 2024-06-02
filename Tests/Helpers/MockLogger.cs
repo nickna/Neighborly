@@ -1,3 +1,5 @@
+namespace Neighborly.Tests.Helpers;
+
 using Microsoft.Extensions.Logging;
 
 internal class MockLogger<TCategoryName> : ILogger<TCategoryName>

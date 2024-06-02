@@ -1,3 +1,5 @@
+namespace Neighborly.Tests.Helpers;
+
 using Neighborly;
 
 internal class MockSearchMethod : ISearchMethod
