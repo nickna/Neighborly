@@ -18,11 +18,19 @@ public partial class VectorDatabase : ICollection<Vector>
     private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
     private StorageOptionEnum _storageOption = StorageOptionEnum.Auto;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// </summary>
     public VectorDatabase()
         : this(NullLogger<VectorDatabase>.Instance)
     {
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// </summary>
+    /// <param name="logger">The logger to be used for logging.</param>
+    /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
     public VectorDatabase(ILogger<VectorDatabase> logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
