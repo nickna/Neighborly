@@ -24,6 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Parquet.Net" Version="4.23.5" />
     <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
   </ItemGroup>
 </Project>

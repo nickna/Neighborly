@@ -1,4 +1,5 @@
 ﻿using Neighborly;
+using Neighborly.ETL;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -393,6 +394,35 @@ public class VectorDatabase : ICollection<Vector>
         HelperFunctions.WriteToFile(filePath, HelperFunctions.Compress(bytes));
 #endif
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
+    }
+
+    Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
+    {
+        ETL.IETL etl = null;
+        
+        switch (contentType)
+        {
+            case ETL.ContentType.Parquet:
+                etl = new ETL.Parquet();
+                break;
+            case ETL.ContentType.CSV:
+                etl = new ETL.Csv();
+                break;
+            case ETL.ContentType.HDF5:
+                etl = new ETL.HDF5();
+                break;
+            default:
+                throw new NotSupportedException($"Content type {contentType} is not supported.");
+        }
+
+        etl.isDirectory = isDirectory;
+        etl.vectorDatabase = this;
+        return etl.ExportDataAsync(path);
+    }
+
+    Task ExportDataAsync(string path, ETL.ContentType contentType)
+    {
+        throw new NotImplementedException();
     }
 
 }
