@@ -1,19 +1,41 @@
 ﻿using Neighborly;
 using System.Collections;
 using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Neighborly;
 
 /// <summary>
 /// Represents a database for storing and searching vectors.
 /// </summary>
-public class VectorDatabase : ICollection<Vector>
+public partial class VectorDatabase : ICollection<Vector>
 {
+    private readonly ILogger<VectorDatabase> _logger;
     private DiskBackedList<Vector> _vectors = new DiskBackedList<Vector>();
     private KDTree _kdTree = new KDTree();
     private ISearchMethod _searchStrategy = new LinearSearch();
     private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
     private StorageOptionEnum _storageOption = StorageOptionEnum.Auto;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// </summary>
+    public VectorDatabase()
+        : this(NullLogger<VectorDatabase>.Instance)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// </summary>
+    /// <param name="logger">The logger to be used for logging.</param>
+    /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
+    public VectorDatabase(ILogger<VectorDatabase> logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+    }
 
     /// <summary>
     /// Gets the number of vectors in the database.
@@ -38,7 +60,7 @@ public class VectorDatabase : ICollection<Vector>
     public StorageOptionEnum StorageOption
     {
         // TODO: Implement the ability to move the storage from memory to disk while in operation
-        get { return _storageOption; } 
+        get { return _storageOption; }
     }
 
     /// <summary>
@@ -258,7 +280,7 @@ public class VectorDatabase : ICollection<Vector>
         catch (Exception ex)
         {
             // Log the exception, if you have a logging system
-            Console.WriteLine(ex);
+            CouldNotFindVectorInDb(query, k, ex);
 
             // return an empty list if an exception occurs
             return new List<Vector>();
@@ -394,5 +416,11 @@ public class VectorDatabase : ICollection<Vector>
 #endif
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
+
+    [LoggerMessage(
+        EventId = 0,
+        Level = LogLevel.Error,
+        Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
+    public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
 }
