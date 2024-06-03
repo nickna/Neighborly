@@ -295,31 +295,6 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
     public void Load(string path, bool createOnNew = true)
     {
-#if Save_VectorFiles
-        if (!Directory.Exists(path))
-        {
-            throw new DirectoryNotFoundException($"The directory {path} does not exist.");
-        }
-        _rwLock.EnterWriteLock();
-        try
-        {
-            _vectors.Clear(); // Clear the current vectors
-
-            var files = Directory.GetFiles(path, "vector_*.txt");
-            foreach (var file in files)
-            {
-                var vectorData = File.ReadAllBytes(file);
-                var vector = Vector.Parse(vectorData); // Assuming Vector has a Parse method
-                _vectors.Add(vector);
-            }
-
-            _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
-        }
-        finally
-        {
-            _rwLock.ExitWriteLock();
-        }
-#else
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
