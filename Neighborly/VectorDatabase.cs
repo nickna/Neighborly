@@ -396,10 +396,10 @@ public class VectorDatabase : ICollection<Vector>
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
 
-    Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
+    public async Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
     {
-        ETL.IETL etl = null;
-        
+        ETL.IETL etl;
+
         switch (contentType)
         {
             case ETL.ContentType.Parquet:
@@ -417,7 +417,7 @@ public class VectorDatabase : ICollection<Vector>
 
         etl.isDirectory = isDirectory;
         etl.vectorDatabase = this;
-        return etl.ExportDataAsync(path);
+        await etl.ImportDataAsync(path);
     }
 
     Task ExportDataAsync(string path, ETL.ContentType contentType)

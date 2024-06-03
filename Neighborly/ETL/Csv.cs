@@ -9,7 +9,7 @@ namespace Neighborly.ETL
     /// <summary>
     /// ETL operation for importing and exporting Comma Separated Values (CSV).
     /// </summary>
-    internal class Csv : IETL
+    public class Csv : IETL
     {
         public bool isDirectory { get; set; }
         public string fileExtension => ".csv";

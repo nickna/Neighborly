@@ -9,7 +9,7 @@ namespace Neighborly.ETL
     /// <summary>
     /// ETL operation for importing and exporting Hierarchical Data Format version 5 (HDF5).
     /// </summary>
-    internal class HDF5 : IETL
+    public class HDF5 : IETL
     {
         public bool isDirectory { get; set; }
         public string fileExtension => ".h5";

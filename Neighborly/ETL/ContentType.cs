@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace Neighborly.ETL
 {
-    internal enum ContentType
+    public enum ContentType
     {
         HDF5,       // Hierarchical Data Format version 5
         CSV,        // Comma Separated Values
