@@ -373,7 +373,7 @@ public class VectorDatabaseTests
         var logger = new MockLogger<VectorDatabase>();
         var db = new VectorDatabase(logger){ SearchMethod = new MockSearchMethod() };
 
-        var query = new Vector([  1, 2, 3 ]);
+        var query = new Vector([  1f, 2f, 3f ]);
         var k = 1;
 
         // Act
