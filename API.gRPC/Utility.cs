@@ -18,7 +18,7 @@ namespace Neighborly.API
         public static VectorMessage ConvertToVectorMessage(Vector vector)
         {
             // Convert the byte array to a ByteString
-            Google.Protobuf.ByteString values = Google.Protobuf.ByteString.CopyFrom(vector.Values);
+            Google.Protobuf.ByteString values = Google.Protobuf.ByteString.CopyFrom(vector.GetBinaryValues());
 
             // Create a new VectorMessage with the ByteString
             VectorMessage vectorMessage = new VectorMessage { Values = values };

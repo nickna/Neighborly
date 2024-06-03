@@ -4,24 +4,79 @@
 /// Core data structure for representing a vector of floats.
 /// </summary>
 [Serializable]
-public class Vector
+public partial class Vector
 {
     /// <summary>
     /// Gets or sets the unique identifier of the vector.
     /// This is automatically created when the vector is initialized.
     /// </summary>
     public Guid Id { get; set; }
-    public byte[] Values { get; }
+    /// <summary>
+    /// Embedding of the vector in a high-dimensional space.
+    /// </summary>
+    public float[] Values { get; }
+
+    /// <summary>
+    /// Returns vector as a byte array.
+    /// (This is used for serialization and storage.)
+    /// </summary>
+    public byte[] GetBinaryValues() 
+    { 
+        return ToBinary(); 
+    }
+
+    /// <summary>
+    /// The text that belongs to the vector.
+    /// </summary>
+    public string OriginalText { get; }
 
     /// <summary>
     /// Initializes a new instance of the Vector class with the specified values.
     /// </summary>
-    /// <param name="values">The array of bytes representing the values of the vector.</param>
-    public Vector(byte[] values)
+    /// <param name="values">The array of float values representing the vector</param>
+    public Vector(float[] values)
     {
         Values = values;
         Id = Guid.NewGuid();
+        OriginalText = string.Empty;
     }
+
+    /// <summary>
+    /// Initializes a new instance of the Vector class with the specified values and text.
+    /// </summary>
+    /// <param name="values">The array of float values representing the vector</param>
+    /// <param name="originalText"></param>
+    public Vector(float[] values, string originalText)
+    {
+        Values = values;
+        OriginalText = originalText;
+        Id = Guid.NewGuid();
+    }
+
+    public Vector(byte[] byteArray)
+    {
+        // Convert the byte array to a float array
+        float[] values = new float[byteArray.Length / sizeof(float)];
+        Buffer.BlockCopy(byteArray, 0, values, 0, byteArray.Length);
+
+        // Call the existing constructor
+        Values = values;
+        Id = Guid.NewGuid();
+        OriginalText = string.Empty;
+    }
+
+    public Vector(byte[] byteArray, string originalText)
+    {
+        // Convert the byte array to a float array
+        float[] values = new float[byteArray.Length / sizeof(float)];
+        Buffer.BlockCopy(byteArray, 0, values, 0, byteArray.Length);
+
+        // Call the existing constructor
+        Values = values;
+        OriginalText = originalText;
+        Id = Guid.NewGuid();
+    }
+
 
     /// <summary>
     /// Gets the dimension of the vector.
@@ -29,32 +84,84 @@ public class Vector
     public int Dimension => Values.Length;
 
     /// <summary>
-    /// Calculates the distance between this vector and another vector using the Euclidean distance.
+    /// Calculates the distance between this vector and another vector 
     /// </summary>
+    /// <param name="vectorDistanceMeasurement">The distance algorithm to use. Default is Euclidian</param>
     /// <param name="other">The other vector to calculate the distance to</param>
     /// <returns>The distance between the two vectors</returns>
-    public float Distance(Vector other)
+    public float Distance(Vector other, VectorDistanceMeasurement vectorDistanceMeasurement = VectorDistanceMeasurement.EuclideanDistance)
     {
-        // Implement a distance metric, e.g., Euclidean distance
-        float sum = 0;
-        for (int i = 0; i < Dimension; i++)
+        switch (vectorDistanceMeasurement)
         {
-            float diff = Values[i] - other.Values[i];
-            sum += diff * diff;
+            case VectorDistanceMeasurement.EuclideanDistance:
+                {
+                    // Calculate distance using Euclidean math
+                    float sum = 0;
+                    for (int i = 0; i < Dimension; i++)
+                    {
+                        float diff = Values[i] - other.Values[i];
+                        sum += diff * diff;
+                    }
+                    return (float)Math.Sqrt(sum);
+                }
+            case VectorDistanceMeasurement.ManhattanDistance:
+                {
+                    // Calculate distance metric using Manhattan distance
+                    float sum = 0;
+                    for (int i = 0; i < Dimension; i++)
+                    {
+                        float diff = Values[i] - other.Values[i];
+                        sum += Math.Abs(diff);
+                    }
+                    return sum;
+                }
+            case VectorDistanceMeasurement.ChebyshevDistance:
+                {
+                    // Calculate distance metric using Chebyshev distance
+                    float max = 0;
+                    for (int i = 0; i < Dimension; i++)
+                    {
+                        float diff = Math.Abs(Values[i] - other.Values[i]);
+                        if (diff > max)
+                        {
+                            max = diff;
+                        }
+                    }
+                    return max;
+                }
+            case VectorDistanceMeasurement.MinkowskiDistance:
+                {
+                    // Calculate distance metric using Minkowski distance
+                    float sum = 0;
+                    for (int i = 0; i < Dimension; i++)
+                    {
+                        float diff = Values[i] - other.Values[i];
+                        sum += (float)Math.Pow(Math.Abs(diff), 3);
+                    }
+                    return (float)Math.Pow(sum, 1.0 / 3.0);
+                }
+            case VectorDistanceMeasurement.CosineSimilarity:
+                {
+                    // Calculate distance metric using Cosine similarity
+                    float dotProduct = 0;
+                    float magnitudeA = 0;
+                    float magnitudeB = 0;
+                    for (int i = 0; i < Dimension; i++)
+                    {
+                        dotProduct += Values[i] * other.Values[i];
+                        magnitudeA += Values[i] * Values[i];
+                        magnitudeB += other.Values[i] * other.Values[i];
+                    }
+                    magnitudeA = (float)Math.Sqrt(magnitudeA);
+                    magnitudeB = (float)Math.Sqrt(magnitudeB);
+                    return dotProduct / (magnitudeA * magnitudeB);
+                }
+            default:
+                {
+                    throw new ArgumentException("Invalid distance measurement");
+                }
         }
-        return (float)Math.Sqrt(sum);
-    }
-
-    /// <summary>
-    /// Parses a byte array into a Vector object.
-    /// This is used for deserialization and retrieval.
-    /// </summary>
-    /// <param name="vectorData">The byte array representing the vector data.</param>
-    /// <returns>A new Vector object initialized with the parsed data.</returns>
-    /// <seealso cref="ToBinary"/>
-    internal static Vector Parse(byte[] vectorData)
-    {
-        return new Vector(vectorData);
+        
     }
 
     /// <summary>
@@ -69,11 +176,10 @@ public class Vector
         if (a.Dimension != b.Dimension)
             throw new ArgumentException("Dimensions must match");
 
-        byte[] result = new byte[a.Dimension];
+        float[] result = new float[a.Dimension];
         for (int i = 0; i < a.Dimension; i++)
         {
-            float sum = a[i] + b[i];
-            Buffer.BlockCopy(BitConverter.GetBytes(sum), 0, result, i * sizeof(float), sizeof(float));
+            result[i] = a[i] + b[i];
         }
         return new Vector(result);
     }
@@ -86,11 +192,10 @@ public class Vector
     /// <returns>A new vector representing the element-wise division of the vector by the scalar.</returns>
     public static Vector operator /(Vector a, int n)
     {
-        byte[] result = new byte[a.Dimension];
+        float[] result = new float[a.Dimension];
         for (int i = 0; i < a.Dimension; i++)
         {
-            float division = a[i] / n;
-            Buffer.BlockCopy(BitConverter.GetBytes(division), 0, result, i * sizeof(float), sizeof(float));
+            result[i] = a[i] / n;
         }
         return new Vector(result);
     }
@@ -107,11 +212,10 @@ public class Vector
         if (a.Dimension != b.Dimension)
             throw new ArgumentException("Dimensions must match");
 
-        byte[] result = new byte[a.Dimension];
+        float[] result = new float[a.Dimension];
         for (int i = 0; i < a.Dimension; i++)
         {
-            float difference = a[i] - b[i];
-            Buffer.BlockCopy(BitConverter.GetBytes(difference), 0, result, i * sizeof(float), sizeof(float));
+            result[i] = a[i] - b[i];
         }
         return new Vector(result);
     }
@@ -123,8 +227,8 @@ public class Vector
     /// <returns>The value at the specified index.</returns>
     public float this[int index]
     {
-        get { return BitConverter.ToSingle(Values, index * sizeof(float)); }
-        set { Buffer.BlockCopy(BitConverter.GetBytes(value), 0, Values, index * sizeof(float), sizeof(float)); }
+        get { return Values[index]; }
+        set { Values[index] = value; }
     }
 
     /// <summary>
@@ -157,8 +261,11 @@ public class Vector
     /// <returns>A new Vector object initialized with the binary data.</returns>
     public static Vector FromBinary(byte[] data)
     {
-        return new Vector(data);
+        float[] values = new float[data.Length / sizeof(float)];
+        Buffer.BlockCopy(data, 0, values, 0, data.Length);
+        return new Vector(values);
     }
+
 
     /// <summary>
     /// Gets the number of dimensions in the vector.
