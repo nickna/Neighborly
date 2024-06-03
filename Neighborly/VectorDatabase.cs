@@ -321,7 +321,6 @@ public partial class VectorDatabase : ICollection<Vector>
                 _rwLock.ExitWriteLock();
             }
         }
-#endif
 
     }
 
