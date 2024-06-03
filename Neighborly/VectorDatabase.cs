@@ -1,4 +1,5 @@
 ﻿using Neighborly;
+using Neighborly.ETL;
 using System.Collections;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
@@ -417,10 +418,40 @@ public partial class VectorDatabase : ICollection<Vector>
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
 
+
     [LoggerMessage(
         EventId = 0,
         Level = LogLevel.Error,
         Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
     public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
+
+    public async Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
+    {
+        ETL.IETL etl;
+
+        switch (contentType)
+        {
+            case ETL.ContentType.Parquet:
+                etl = new ETL.Parquet();
+                break;
+            case ETL.ContentType.CSV:
+                etl = new ETL.Csv();
+                break;
+            case ETL.ContentType.HDF5:
+                etl = new ETL.HDF5();
+                break;
+            default:
+                throw new NotSupportedException($"Content type {contentType} is not supported.");
+        }
+
+        etl.isDirectory = isDirectory;
+        etl.vectorDatabase = this;
+        await etl.ImportDataAsync(path);
+    }
+
+    Task ExportDataAsync(string path, ETL.ContentType contentType)
+    {
+        throw new NotImplementedException();
+    }
 
 }
