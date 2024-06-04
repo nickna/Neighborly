@@ -10,7 +10,7 @@ namespace Neighborly.API
             byte[] values = vectorMessage.Values.ToByteArray();
 
             // Create a new Vector with the byte array
-            Neighborly.Vector vector = Neighborly.Vector.FromBinary(values);
+            Neighborly.Vector vector = new Neighborly.Vector(values);
 
             return vector;
         }
@@ -18,7 +18,7 @@ namespace Neighborly.API
         public static VectorMessage ConvertToVectorMessage(Vector vector)
         {
             // Convert the byte array to a ByteString
-            Google.Protobuf.ByteString values = Google.Protobuf.ByteString.CopyFrom(vector.GetBinaryValues());
+            Google.Protobuf.ByteString values = Google.Protobuf.ByteString.CopyFrom(vector.ToBinary());
 
             // Create a new VectorMessage with the ByteString
             VectorMessage vectorMessage = new VectorMessage { Values = values };

@@ -300,9 +300,9 @@ public class VectorDatabaseTests
         var path = Path.GetTempPath();
 
         // Act
-        _db.Save(path);
+        _db.SaveAsync(path).RunSynchronously();
         _db.Clear();
-        _db.Load(path);
+        _db.LoadAsync(path).RunSynchronously();
 
         // Assert
         Assert.AreEqual(2, _db.Count, "Count should be 2 after loading the saved database.");

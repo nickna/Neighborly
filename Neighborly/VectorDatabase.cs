@@ -4,6 +4,9 @@ using System.Collections;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Reflection.PortableExecutable;
 
 namespace Neighborly;
 
@@ -293,7 +296,7 @@ public partial class VectorDatabase : ICollection<Vector>
     /// </summary>
     /// <param name="path">The file path to load the vectors from.</param>
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
-    public void Load(string path, bool createOnNew = true)
+    public async Task LoadAsync(string path, bool createOnNew = true)
     {
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
@@ -301,8 +304,9 @@ public partial class VectorDatabase : ICollection<Vector>
         {
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
-        else if (createOnNew && !fileExists)
+        else if (createOnNew && !fileExists) 
         {
+            // We'll create the file when SaveAsync() is called
             return;
         }
         else
@@ -310,8 +314,23 @@ public partial class VectorDatabase : ICollection<Vector>
             _rwLock.EnterWriteLock();
             try
             {
-                var bytes = HelperFunctions.Decompress(HelperFunctions.ReadFromFile(filePath));
-                _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
+                using (var inputStream = new FileStream(filePath, FileMode.Open))
+                using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
+                using (var reader = new BinaryReader(decompressionStream))
+                {
+                    _vectors.Clear();
+                    while (reader.BaseStream.Position != reader.BaseStream.Length)
+                    {
+                        var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
+
+                        for (int i = 0; i < vectorCount; i++)
+                        {
+                            var nextVector = reader.ReadInt32();    // File offset of the next Vector
+                            var vector = new Vector(reader.ReadBytes(nextVector));
+                            _vectors.Add(vector);
+                        }
+                    }
+                }
 
                 _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
                 _isDirty = false; // Set the flag to indicate the database hasn't been modified
@@ -347,13 +366,13 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <summary>
     /// Saves the vectors to the current directory.
     /// </summary>
-    public void Save()
+    public async Task SaveAsync()
     {
         // Get the current directory
         string currentDirectory = Directory.GetCurrentDirectory();
 
         // Call the existing Save method with the current directory
-        Save(currentDirectory);
+        await SaveAsync(currentDirectory);
     }
 
     /// <summary>
@@ -361,7 +380,7 @@ public partial class VectorDatabase : ICollection<Vector>
     /// (In the gRPC server, this method will be called when the host OS sends a shutdown signal.)
     /// </summary>
     /// <param name="path">The file path to save the vectors to.</param>
-    public void Save(string path)
+    public async Task SaveAsync(string path)
     {
         // If the database hasn't been modified, no need to save it
         if (!_isDirty)
@@ -374,21 +393,27 @@ public partial class VectorDatabase : ICollection<Vector>
             Directory.CreateDirectory(path);
         }
 
-#if Save_VectorFiles
-        // Save the vectors to disk
-        // Assuming each vector is saved as a separate file
-        for (int i = 0; i < _vectors.Count; i++)
-        {
-            string fileName = $"vector_{i}.txt";
-            string filePath = Path.Combine(path, fileName);
-            File.WriteAllBytes(filePath, _vectors[i].ToBinary());
-        }
-#else
+        _rwLock.EnterWriteLock();
+        
         // Save the vectors to a binary file
         string filePath = Path.Combine(path, "vectors.bin");
-        var bytes = HelperFunctions.SerializeToBinary(_vectors);
-        HelperFunctions.WriteToFile(filePath, HelperFunctions.Compress(bytes));
-#endif
+        var outputStream = new FileStream(filePath, FileMode.Create);
+        // TODO -- Experiment with other compression types. For now, GZip works.
+        using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
+        using (var writer = new BinaryWriter(compressionStream))
+        {
+            // TODO -- This should be async and potentially parallelized
+            writer.Write(_vectors.Count);
+            foreach (Vector v in _vectors)
+            {
+                byte[] bytes = v.ToBinary();
+                writer.Write(bytes.Length);    // File offset of the next Vector
+                writer.Write(bytes);           // The Vector itself
+            }
+            writer.Close();
+            outputStream.Close();
+        }
+        _rwLock.ExitWriteLock();
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
 
