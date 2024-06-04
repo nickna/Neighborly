@@ -1,4 +1,6 @@
-﻿namespace Neighborly;
+﻿using System.Text;
+
+namespace Neighborly;
 
 /// <summary>
 /// Core data structure for representing a vector of floats.
@@ -15,15 +17,6 @@ public partial class Vector
     /// Embedding of the vector in a high-dimensional space.
     /// </summary>
     public float[] Values { get; }
-
-    /// <summary>
-    /// Returns vector as a byte array.
-    /// (This is used for serialization and storage.)
-    /// </summary>
-    public byte[] GetBinaryValues() 
-    { 
-        return ToBinary(); 
-    }
 
     /// <summary>
     /// The text that belongs to the vector.
@@ -53,30 +46,50 @@ public partial class Vector
         Id = Guid.NewGuid();
     }
 
-    public Vector(byte[] byteArray)
+    public Vector(BinaryReader stream)
     {
-        // Convert the byte array to a float array
-        float[] values = new float[byteArray.Length / sizeof(float)];
-        Buffer.BlockCopy(byteArray, 0, values, 0, byteArray.Length);
+        // Read the Guid
+        byte[] idBytes = stream.ReadBytes(16);
+        Guid id = new Guid(idBytes);
 
-        // Call the existing constructor
-        Values = values;
-        Id = Guid.NewGuid();
-        OriginalText = string.Empty;
-    }
+        // Read the length of the values array
+        int valuesLength = stream.ReadInt32();
 
-    public Vector(byte[] byteArray, string originalText)
-    {
-        // Convert the byte array to a float array
-        float[] values = new float[byteArray.Length / sizeof(float)];
-        Buffer.BlockCopy(byteArray, 0, values, 0, byteArray.Length);
+        // Read the length of the original text
+        int originalTextLength = stream.ReadInt32();
 
-        // Call the existing constructor
+        // Read the original text
+        byte[] originalTextBytes = stream.ReadBytes(originalTextLength);
+        string originalText = Encoding.UTF8.GetString(originalTextBytes);
+
+        // Read the values
+        float[] values = new float[valuesLength];
+        for (int i = 0; i < valuesLength; i++)
+        {
+            values[i] = stream.ReadSingle();
+        }
+
+        // Assign the read values to the properties
+        Id = id;
         Values = values;
         OriginalText = originalText;
-        Id = Guid.NewGuid();
     }
 
+    public Vector(byte[] byteArray)
+    {
+        var id = new Guid(byteArray.Take(16).ToArray());
+        var valuesLength = BitConverter.ToInt32(byteArray, 16);
+        var originalTextLength = BitConverter.ToInt32(byteArray, 16 + sizeof(int));
+        var originalText = Encoding.UTF8.GetString(byteArray, 16 + sizeof(int) + sizeof(int), originalTextLength);
+        var values = new float[valuesLength];
+        for (int i = 0; i < valuesLength; i++)
+        {
+            values[i] = BitConverter.ToSingle(byteArray, 20 + valuesLength + (i * sizeof(float)));
+        }
+        Id = id;
+        Values = values;
+        OriginalText = originalText;
+    }
 
     /// <summary>
     /// Gets the dimension of the vector.
@@ -239,7 +252,6 @@ public partial class Vector
         get { return (float)Math.Sqrt(Values.Sum(x => x * x)); }
     }
 
-
     /// <summary>
     /// Converts the vector to a binary representation.
     /// This is used for serialization and storage.
@@ -248,24 +260,14 @@ public partial class Vector
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
-        byte[] binaryData = new byte[Values.Length * sizeof(float)];
-        Buffer.BlockCopy(Values, 0, binaryData, 0, binaryData.Length);
-        return binaryData;
+        // TODO: Make this more efficient
+        byte[] idBytes = Id.ToByteArray();
+        byte[] valuesLengthBytes = BitConverter.GetBytes(Values.Length);
+        byte[] originalTextLengthBytes = BitConverter.GetBytes(OriginalText.Length);
+        byte[] originalTextBytes = Encoding.UTF8.GetBytes(OriginalText);
+        byte[] values = new byte[Values.Length * sizeof(float)];
+        return idBytes.Concat(valuesLengthBytes).Concat(originalTextLengthBytes).Concat(originalTextBytes).Concat(values).ToArray();
     }
-
-    /// <summary>
-    /// Creates a new Vector object from a binary representation.
-    /// This is used for deserialization and retrieval.
-    /// </summary>
-    /// <param name="data">The binary data representing the vector.</param>
-    /// <returns>A new Vector object initialized with the binary data.</returns>
-    public static Vector FromBinary(byte[] data)
-    {
-        float[] values = new float[data.Length / sizeof(float)];
-        Buffer.BlockCopy(data, 0, values, 0, data.Length);
-        return new Vector(values);
-    }
-
 
     /// <summary>
     /// Gets the number of dimensions in the vector.

@@ -4,6 +4,9 @@ using System.Collections;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Reflection.PortableExecutable;
 
 namespace Neighborly;
 
@@ -95,19 +98,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <param name="items">The collection of vectors to remove.</param>
     public void RemoveRange(IEnumerable<Vector> items)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            foreach (var item in items)
-            {
-                _vectors.Remove(item);
-            }
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally
-        {
-            _rwLock.ExitWriteLock();
-        }
+        _vectors.RemoveRange(items);
+        _isDirty = true; // Set the flag to indicate the database has been modified
     }
 
     /// <summary>
@@ -118,19 +110,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the Vector was updated; otherwise, false.</returns>
     public bool Update(Vector vector)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            var index = _vectors.FindIndex(v => v.Id == vector.Id);
-            if (index != -1)
-            {
-                _vectors[index] = vector;
-                _isDirty = true; // Set the flag to indicate the database has been modified
-                return true;
-            }
-        }
-        finally { _rwLock.ExitWriteLock(); }
-        return false;
+        _vectors.Update(vector);
+        return true;
     }
 
 
@@ -142,27 +123,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the vector was successfully updated; otherwise, false.</returns>
     public bool Update(Vector oldItem, Vector newItem)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            if (oldItem == null)
-            {
-                throw new ArgumentNullException(nameof(oldItem), "Vector cannot be null");
-            }
-            if (newItem == null)
-            {
-                throw new ArgumentNullException(nameof(newItem), "Vector cannot be null");
-            }
-
-            var index = _vectors.IndexOf(oldItem);
-            if (index != -1)
-            {
-                _vectors[index] = newItem;
-                _isDirty = true; // Set the flag to indicate the database has been modified
-                return true;
-            }
-        }
-        finally { _rwLock.ExitWriteLock(); }
+        _vectors.Update(oldItem, newItem);
+        _isDirty = true; // Set the flag to indicate the database has been modified
         return false;
     }
 
@@ -172,33 +134,18 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <param name="item">The vector to add.</param>
     public void Add(Vector item)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            if (item == null)
-            {
-                throw new ArgumentNullException(nameof(item), "Vector cannot be null");
-            }
-
-            _vectors.Add(item);
-            _kdTree.Build(_vectors);
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally { _rwLock.ExitWriteLock(); }
+        _vectors.Add(item);
+        _kdTree.Build(_vectors);
+        _isDirty = true; // Set the flag to indicate the database has been modified
     }
 
     /// <summary>
     /// Removes all vectors from the database.
     /// </summary>
     public void Clear()
-    {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            _vectors.Clear();
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally { _rwLock.ExitWriteLock(); }
+    {        
+        _vectors.Clear();
+        _isDirty = true; // Set the flag to indicate the database has been modified   
     }
 
     /// <summary>
@@ -237,23 +184,12 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the vector was successfully removed; otherwise, false.</returns>
     public bool Remove(Vector item)
     {
-        _rwLock.EnterWriteLock();
-        bool result = false;
-        try
+        var result = _vectors.Remove(item);
+        if (result)
         {
-            if (item == null)
-            {
-                throw new ArgumentNullException(nameof(item), "Vector cannot be null");
-            }
-
-            result = _vectors.Remove(item);
-            if (result)
-            {
-                _kdTree.Build(_vectors);
-                _isDirty = true; // Set the flag to indicate the database has been modified
-            }
+            _kdTree.Build(_vectors);
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
-        finally { _rwLock.ExitWriteLock(); }
         return result;
     }
 
@@ -293,41 +229,17 @@ public partial class VectorDatabase : ICollection<Vector>
     /// </summary>
     /// <param name="path">The file path to load the vectors from.</param>
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
-    public void Load(string path, bool createOnNew = true)
+    public async Task LoadAsync(string path, bool createOnNew = true)
     {
-#if Save_VectorFiles
-        if (!Directory.Exists(path))
-        {
-            throw new DirectoryNotFoundException($"The directory {path} does not exist.");
-        }
-        _rwLock.EnterWriteLock();
-        try
-        {
-            _vectors.Clear(); // Clear the current vectors
-
-            var files = Directory.GetFiles(path, "vector_*.txt");
-            foreach (var file in files)
-            {
-                var vectorData = File.ReadAllBytes(file);
-                var vector = Vector.Parse(vectorData); // Assuming Vector has a Parse method
-                _vectors.Add(vector);
-            }
-
-            _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
-        }
-        finally
-        {
-            _rwLock.ExitWriteLock();
-        }
-#else
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
         {
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
-        else if (createOnNew && !fileExists)
+        else if (createOnNew && !fileExists) 
         {
+            // We'll create the file when SaveAsync() is called
             return;
         }
         else
@@ -335,8 +247,23 @@ public partial class VectorDatabase : ICollection<Vector>
             _rwLock.EnterWriteLock();
             try
             {
-                var bytes = HelperFunctions.Decompress(HelperFunctions.ReadFromFile(filePath));
-                _vectors = HelperFunctions.DeserializeFromBinary<DiskBackedList<Vector>>(bytes);
+                using (var inputStream = new FileStream(filePath, FileMode.Open))
+                using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
+                using (var reader = new BinaryReader(decompressionStream))
+                {
+                    _vectors.Clear();
+                    while (reader.BaseStream.Position != reader.BaseStream.Length)
+                    {
+                        var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
+
+                        for (int i = 0; i < vectorCount; i++)
+                        {
+                            var nextVector = reader.ReadInt32();    // File offset of the next Vector
+                            var vector = new Vector(reader.ReadBytes(nextVector));
+                            _vectors.Add(vector);
+                        }
+                    }
+                }
 
                 _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
                 _isDirty = false; // Set the flag to indicate the database hasn't been modified
@@ -346,7 +273,6 @@ public partial class VectorDatabase : ICollection<Vector>
                 _rwLock.ExitWriteLock();
             }
         }
-#endif
 
     }
 
@@ -373,13 +299,13 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <summary>
     /// Saves the vectors to the current directory.
     /// </summary>
-    public void Save()
+    public async Task SaveAsync()
     {
         // Get the current directory
         string currentDirectory = Directory.GetCurrentDirectory();
 
         // Call the existing Save method with the current directory
-        Save(currentDirectory);
+        await SaveAsync(currentDirectory);
     }
 
     /// <summary>
@@ -387,7 +313,7 @@ public partial class VectorDatabase : ICollection<Vector>
     /// (In the gRPC server, this method will be called when the host OS sends a shutdown signal.)
     /// </summary>
     /// <param name="path">The file path to save the vectors to.</param>
-    public void Save(string path)
+    public async Task SaveAsync(string path)
     {
         // If the database hasn't been modified, no need to save it
         if (!_isDirty)
@@ -400,21 +326,27 @@ public partial class VectorDatabase : ICollection<Vector>
             Directory.CreateDirectory(path);
         }
 
-#if Save_VectorFiles
-        // Save the vectors to disk
-        // Assuming each vector is saved as a separate file
-        for (int i = 0; i < _vectors.Count; i++)
-        {
-            string fileName = $"vector_{i}.txt";
-            string filePath = Path.Combine(path, fileName);
-            File.WriteAllBytes(filePath, _vectors[i].ToBinary());
-        }
-#else
+        _rwLock.EnterWriteLock();
+        
         // Save the vectors to a binary file
         string filePath = Path.Combine(path, "vectors.bin");
-        var bytes = HelperFunctions.SerializeToBinary(_vectors);
-        HelperFunctions.WriteToFile(filePath, HelperFunctions.Compress(bytes));
-#endif
+        var outputStream = new FileStream(filePath, FileMode.Create);
+        // TODO -- Experiment with other compression types. For now, GZip works.
+        using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
+        using (var writer = new BinaryWriter(compressionStream))
+        {
+            // TODO -- This should be async and potentially parallelized
+            writer.Write(_vectors.Count);
+            foreach (Vector v in _vectors)
+            {
+                byte[] bytes = v.ToBinary();
+                writer.Write(bytes.Length);    // File offset of the next Vector
+                writer.Write(bytes);           // The Vector itself
+            }
+            writer.Close();
+            outputStream.Close();
+        }
+        _rwLock.ExitWriteLock();
         _isDirty = false; // Set the flag to indicate the database hasn't been modified
     }
 

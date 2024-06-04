@@ -36,12 +36,12 @@ if (!gRPCEnable && !RESTEnable)
 }
 
 // Load Database on application start
-vectorDatabase.Load(databasePath);
+await vectorDatabase.LoadAsync(databasePath);
 
 // Save Database on application shutdown
 lifetime.ApplicationStopping.Register(() =>
 {
-    vectorDatabase.Save(databasePath);
+    vectorDatabase.SaveAsync(databasePath).RunSynchronously();
 });
 
 // Configure the gRPC API
