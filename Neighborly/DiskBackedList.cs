@@ -1,4 +1,6 @@
+using System;
 using System.Collections;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 using Neighborly;
@@ -9,7 +11,8 @@ namespace Neighborly;
 /// </summary>
 public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
 {
-    private List<Neighborly.Vector>? _inMemoryItems = new List<Neighborly.Vector>();
+    private List<Neighborly.Vector?> _vectorList = new List<Neighborly.Vector>();
+    private List<Guid> _guids = new List<Guid>();
     private List<string> _onDiskFilePaths = new List<string>();
     private int _maxInMemoryCount;
     private readonly object _lock = new object();
@@ -44,13 +47,13 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             if (disposing)
             {
                 // Dispose managed resources.
-                _inMemoryItems?.Clear();
+                _vectorList.Clear();
             }
 
             // Dispose unmanaged resources.
             foreach (var filePath in _onDiskFilePaths)
             {
-                if (File.Exists(filePath))
+                if (filePath != string.Empty && File.Exists(filePath))
                 {
                     File.Delete(filePath);
                 }
@@ -83,11 +86,13 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     {
         lock (_lock)
         {
-            _onDiskFilePaths.Add(Path.GetTempFileName());
-            _inMemoryItems.Add(item);
-            var itemIndex = _inMemoryItems.Count - 1;
+            _onDiskFilePaths.Add(string.Empty);
+            _vectorList.Add(item);
+            _guids.Add(item.Id);
 
-            if (_inMemoryItems.Count >= _maxInMemoryCount)
+            var itemIndex = _vectorList.Count - 1;
+
+            if (_vectorList.Count >= _maxInMemoryCount)
             {
                 MoveToDisk(itemIndex);
             }
@@ -107,55 +112,59 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     {
         lock (_lock)
         {
-            if (_inMemoryItems[index] != null)
+            if (_vectorList[index] != null)
             {
-                return _inMemoryItems[index];
+                // Vector found in memory
+                return _vectorList[index];
+            }
+            else if (_onDiskFilePaths[index] != string.Empty)
+            {
+                // Vector exists on disk
+                return ReadFromDisk(_onDiskFilePaths[index]);
+            }
+            else if (index > this.Count || index < 0)
+            {
+                throw new IndexOutOfRangeException();
             }
             else
             {
-                return ReadFromDisk(_onDiskFilePaths[index]);
+                // Vector not in memory or on disk -- this should never happen
+                throw new FileNotFoundException();
             }
         }
     }
     public void Insert(int index, Neighborly.Vector item)
     {
+        if (index < 0 || index > Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
+        }
+
         lock (_lock)
         {
-            if (index < 0 || index > Count)
+            // Check if this item can be inserted in memory
+            if (index < _maxInMemoryCount)
             {
-                throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
-            }
-
-            if (index < _inMemoryItems.Count)
-            {
-                // The index is in the in-memory list
-                if (_inMemoryItems.Count < _maxInMemoryCount)
-                {
-                    // There is room in the in-memory list
-                    _inMemoryItems.Insert(index, item);
-                }
-                else
-                {
-                    // There is no room in the in-memory list
-                    // Move the last in-memory item to disk
-                    var lastInMemoryItem = _inMemoryItems.Count - 1;
-                    
-                    MoveToDisk(lastInMemoryItem);
-
-                    var path = Path.GetTempFileName();
-                    _onDiskFilePaths.Insert(_inMemoryItems.Count - 1, path);
-
-                    // Insert the new item in the in-memory list
-                    _inMemoryItems[index] = item;
-                }
+                // There is room in the in-memory list
+                _vectorList.Insert(index, item);
+                _onDiskFilePaths.Insert(index, string.Empty); // Empty string indicates that the item is in memory
+                _guids.Insert(index, item.Id);
             }
             else
             {
-                // The index is in the on-disk list
+                // There is no room in the in-memory list
+                // Store the item on disk
+
                 var path = Path.GetTempFileName();
-                MoveToDisk(index);
-                _onDiskFilePaths.Insert(index - _inMemoryItems.Count, path);
+
+                _vectorList.Insert(index, null);    // null indicates that the item is on disk
+                _onDiskFilePaths.Insert(index, path);
+                _guids.Insert(index, item.Id);
+
+                SaveToDisk(item, path);
+ 
             }
+         
         }
     }
 
@@ -163,19 +172,20 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     {
         lock (_lock)
         {
-            int index = _inMemoryItems.IndexOf(item);
+            int index = _vectorList.IndexOf(item);
             if (index != -1)
             {
                 return index;
             }
 
+            // Vector not found in memory, check on disk
             for (int i = 0; i < _onDiskFilePaths.Count; i++)
             {
                 var path = _onDiskFilePaths[i];
-                var diskItem = ReadFromDisk(path);
-                if (EqualityComparer<Neighborly.Vector>.Default.Equals(diskItem, item))
+                var vectorFromDisk = ReadFromDisk(path);
+                if (EqualityComparer<Neighborly.Vector>.Default.Equals(vectorFromDisk, item))
                 {
-                    return _inMemoryItems.Count + i;
+                    return _vectorList.Count + i;
                 }
             }
 
@@ -197,9 +207,9 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
 
             var foundItems = new List<Neighborly.Vector>();
 
-            foreach (var item in _inMemoryItems)
+            foreach (var item in _vectorList)
             {
-                if (match(item))
+                if (item != null && match(item))
                 {
                     foundItems.Add(item);
                 }
@@ -208,7 +218,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             foreach (var path in _onDiskFilePaths)
             {
                 Neighborly.Vector diskItem = ReadFromDisk(path);
-                if (match(diskItem))
+                if (path != string.Empty && match(diskItem))
                 {
                     foundItems.Add(diskItem);
                 }
@@ -227,9 +237,9 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                 throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
             }
 
-            foreach (var item in _inMemoryItems)
+            foreach (var item in _vectorList)
             {
-                if (match(item))
+                if (item != null && match(item))
                 {
                     return item;
                 }
@@ -238,7 +248,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             foreach (var path in _onDiskFilePaths)
             {
                 Neighborly.Vector diskItem = ReadFromDisk(path);
-                if (match(diskItem))
+                if (path != string.Empty && match(diskItem))
                 {
                     return diskItem;
                 }
@@ -267,7 +277,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                 throw new ArgumentException("The number of elements in the list is greater than the available space from arrayIndex to the end of the destination array");
             }
 
-            foreach (var item in _inMemoryItems)
+            foreach (var item in _vectorList)
             {
                 array[arrayIndex++] = item;
             }
@@ -283,12 +293,12 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
 
     public Neighborly.Vector this[int index]
     {
-        get 
-        { 
-            lock (_lock) 
-            { 
-                return Get(index); 
-            } 
+        get
+        {
+            lock (_lock)
+            {
+                return Get(index);
+            }
         }
         set
         {
@@ -299,18 +309,19 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                     throw new IndexOutOfRangeException();
                 }
 
-                if (index < _inMemoryItems.Count)
+                if (index < _maxInMemoryCount)
                 {
-                    _inMemoryItems[index] = value;
+                    _vectorList[index] = value;
                 }
                 else
                 {
-                    var path = _onDiskFilePaths[index - _inMemoryItems.Count];
-                    using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
-                    using (var writer = new BinaryWriter(stream))
+                    var path = _onDiskFilePaths[index];
+                    if (path == string.Empty)
                     {
-                        writer.Write(value.ToBinary());
+                        path = Path.GetTempFileName();
+                        _onDiskFilePaths[index] = path;
                     }
+                    SaveToDisk(value, path);
                 }
             }
         }
@@ -321,13 +332,15 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     {
         lock (_lock)
         {
-            if (_inMemoryItems.Contains(item))
+            if (_vectorList.Contains(item))
             {
                 return true;
             }
 
             foreach (var path in _onDiskFilePaths)
             {
+                if (path == string.Empty) continue;
+
                 var diskItem = ReadFromDisk(path);
                 if (EqualityComparer<Neighborly.Vector>.Default.Equals(diskItem, item))
                 {
@@ -340,16 +353,20 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
 
     public IEnumerator<Neighborly.Vector> GetEnumerator()
     {
-        foreach (var item in _inMemoryItems)
+        lock (_lock)
         {
-            yield return item;
+            for (int i = 0; i < _vectorList.Count; i++)
+            {
+                if (_vectorList[i] != null)
+                    yield return _vectorList[i];
+                else if (_onDiskFilePaths[i] != string.Empty)
+                    yield return ReadFromDisk(_onDiskFilePaths[i]);
+                else
+                    // This should never happen
+                    throw new FileNotFoundException();
+            }
         }
 
-        foreach (var path in _onDiskFilePaths)
-        {
-            var item = ReadFromDisk(path);
-            yield return item;
-        }
     }
     public void RemoveAt(int index)
     {
@@ -360,70 +377,43 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                 throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
             }
 
-            if (index < _inMemoryItems.Count)
-            {
-                // The index is in the in-memory list
-                _inMemoryItems.RemoveAt(index);
-            }
-            else
-            {
-                // The index is in the on-disk list
-                var path = _onDiskFilePaths[index - _inMemoryItems.Count];
-                File.Delete(path);
-                _onDiskFilePaths.RemoveAt(index - _inMemoryItems.Count);
-            }
+            _vectorList.RemoveAt(index);
+
+            // Remove the item from disk if it exists
+            if (_onDiskFilePaths[index] != string.Empty)
+                File.Delete(_onDiskFilePaths[index]);
+
+            _onDiskFilePaths.RemoveAt(index);
+
         }
     }
 
-    private bool RemoveItem(Neighborly.Vector item)
-    {
-        bool removed = _inMemoryItems.Remove(item);
 
-        if (!removed)
-        {
-            for (int i = 0; i < _onDiskFilePaths.Count; i++)
-            {
-                var path = _onDiskFilePaths[i];
-                var diskItem = ReadFromDisk(path);
-                if (EqualityComparer<Neighborly.Vector>.Default.Equals(diskItem, item))
-                {
-                    File.Delete(path);
-                    _onDiskFilePaths.RemoveAt(i);
-                    removed = true;
-                    break;
-                }
-            }
-        }
-
-        return removed;
-    }
 
     public bool Remove(Neighborly.Vector item)
     {
-        lock (_lock)
-        {
-            return RemoveItem(item);
-        }
+        var index = _vectorList.FindIndex(x => x == item);
+        RemoveAt(index);
+        return true;
     }
 
-    public int Count => _inMemoryItems.Count + _onDiskFilePaths.Count;
+    public int Count => _vectorList.Count + _onDiskFilePaths.Count;
 
 
     public void Clear()
     {
         lock (_lock)
         {
-            _inMemoryItems.Clear();
+            _vectorList.Clear();
             foreach (var path in _onDiskFilePaths)
             {
-                File.Delete(path);
+                if (path != string.Empty && File.Exists(path))
+                    File.Delete(path);
             }
             _onDiskFilePaths.Clear();
+            _guids.Clear();
         }
     }
-
-    
-
 
     IEnumerator IEnumerable.GetEnumerator()
     {
@@ -457,20 +447,20 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     {
         lock (_lock)
         {
-            if (index < 0 || index >= _inMemoryItems.Count)
+            if (index < 0 || index >= _vectorList.Count)
             {
                 throw new IndexOutOfRangeException();
             }
 
             // Check if the item is already on disk. This is evident if the item is null.
-            if (_inMemoryItems[index] == null)
+            if (_vectorList[index] == null)
                 return;
 
-            Neighborly.Vector v = _inMemoryItems[index];
+            Neighborly.Vector v = _vectorList[index];
             var path = Path.GetTempFileName();
             SaveToDisk(v, path);
             _onDiskFilePaths[index] = path;
-            _inMemoryItems[index] = null;
+            _vectorList[index] = null;
         }
     }
 
@@ -484,49 +474,27 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             }
 
             // Check if the item is already in memory. This is evident if the item is not null.
-            if (_inMemoryItems[index] != null)
+            if (_vectorList[index] != null)
                 return;
 
             var path = _onDiskFilePaths[index];
-            _inMemoryItems[index] = ReadFromDisk(path);
+            _vectorList[index] = ReadFromDisk(path);
             File.Delete(path);
+            _onDiskFilePaths[index] = string.Empty;
         }
     }
 
-
-    /// <summary>
-    /// Shows the memory and disk size statistics of the list.
-    /// </summary>
-    /// <returns>Memory and disk consumption (in bytes)</returns>
-    public (long memorySize, long diskSize) GetSizeStatistics()
+    public int FindIndexById(Guid id)
     {
-        lock (_lock)
-        {
-            long memorySize = 0;
-            foreach (var item in _inMemoryItems)
-            {
-                var json = JsonSerializer.Serialize(item);
-                memorySize += Encoding.UTF8.GetByteCount(json);
-            }
-
-            long diskSize = 0;
-            foreach (var path in _onDiskFilePaths)
-            {
-                var fileInfo = new FileInfo(path);
-                diskSize += fileInfo.Length;
-            }
-
-            return (memorySize, diskSize);
-        }
+        return _guids.FindIndex(x => x == id);
     }
-
     public int FindIndex(Predicate<Neighborly.Vector> match)
     {
         lock (_lock)
         {
-            for (int i = 0; i < _inMemoryItems.Count; i++)
+            for (int i = 0; i < _vectorList.Count; i++)
             {
-                if (match(_inMemoryItems[i]))
+                if (match(_vectorList[i]))
                 {
                     return i;
                 }
@@ -538,12 +506,70 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                 var diskItem = ReadFromDisk(path);
                 if (match(diskItem))
                 {
-                    return _inMemoryItems.Count + i;
+                    return _vectorList.Count + i;
                 }
             }
 
             return -1; // Return -1 if no match is found
         }
+    }
+
+    internal void RemoveRange(IEnumerable<Neighborly.Vector> items)
+    {
+        lock (_lock)
+        {
+            foreach (var item in items)
+            {
+                Remove(item);
+            }
+        }
+    }
+
+    internal void Update(Neighborly.Vector vector)
+    {
+        lock (_lock)
+        {
+            int index = IndexOf(vector);
+            if (index != -1)
+            {
+                if (_vectorList[index] != null)
+                {
+                    _vectorList[index] = vector;
+                }
+                else if (_onDiskFilePaths[index] != string.Empty)
+                {
+                    SaveToDisk(vector, _onDiskFilePaths[index]);
+                }
+                else
+                {
+                    // This should never happen
+                    throw new FileNotFoundException();
+                }
+            }
+            else
+            {
+                throw new ArgumentException("Item not found in list");
+            }
+        }
+
+    }
+
+    internal void Update(Neighborly.Vector oldItem, Neighborly.Vector newItem)
+    {
+        if (oldItem == null || newItem == null)
+        {
+            throw new ArgumentNullException("Item cannot be null");
+        }
+        if (!Contains(oldItem))
+        {
+            throw new ArgumentException("Item not found in list");
+        }
+        if (newItem.Id != oldItem.Id)
+        {
+            throw new ArgumentException("Item Id cannot be changed");
+        }
+        Update(newItem);
+
     }
 
 }

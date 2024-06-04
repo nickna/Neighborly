@@ -98,19 +98,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <param name="items">The collection of vectors to remove.</param>
     public void RemoveRange(IEnumerable<Vector> items)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            foreach (var item in items)
-            {
-                _vectors.Remove(item);
-            }
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally
-        {
-            _rwLock.ExitWriteLock();
-        }
+        _vectors.RemoveRange(items);
+        _isDirty = true; // Set the flag to indicate the database has been modified
     }
 
     /// <summary>
@@ -121,19 +110,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the Vector was updated; otherwise, false.</returns>
     public bool Update(Vector vector)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            var index = _vectors.FindIndex(v => v.Id == vector.Id);
-            if (index != -1)
-            {
-                _vectors[index] = vector;
-                _isDirty = true; // Set the flag to indicate the database has been modified
-                return true;
-            }
-        }
-        finally { _rwLock.ExitWriteLock(); }
-        return false;
+        _vectors.Update(vector);
+        return true;
     }
 
 
@@ -145,27 +123,8 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the vector was successfully updated; otherwise, false.</returns>
     public bool Update(Vector oldItem, Vector newItem)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            if (oldItem == null)
-            {
-                throw new ArgumentNullException(nameof(oldItem), "Vector cannot be null");
-            }
-            if (newItem == null)
-            {
-                throw new ArgumentNullException(nameof(newItem), "Vector cannot be null");
-            }
-
-            var index = _vectors.IndexOf(oldItem);
-            if (index != -1)
-            {
-                _vectors[index] = newItem;
-                _isDirty = true; // Set the flag to indicate the database has been modified
-                return true;
-            }
-        }
-        finally { _rwLock.ExitWriteLock(); }
+        _vectors.Update(oldItem, newItem);
+        _isDirty = true; // Set the flag to indicate the database has been modified
         return false;
     }
 
@@ -175,33 +134,18 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <param name="item">The vector to add.</param>
     public void Add(Vector item)
     {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            if (item == null)
-            {
-                throw new ArgumentNullException(nameof(item), "Vector cannot be null");
-            }
-
-            _vectors.Add(item);
-            _kdTree.Build(_vectors);
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally { _rwLock.ExitWriteLock(); }
+        _vectors.Add(item);
+        _kdTree.Build(_vectors);
+        _isDirty = true; // Set the flag to indicate the database has been modified
     }
 
     /// <summary>
     /// Removes all vectors from the database.
     /// </summary>
     public void Clear()
-    {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            _vectors.Clear();
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally { _rwLock.ExitWriteLock(); }
+    {        
+        _vectors.Clear();
+        _isDirty = true; // Set the flag to indicate the database has been modified   
     }
 
     /// <summary>
@@ -240,23 +184,12 @@ public partial class VectorDatabase : ICollection<Vector>
     /// <returns>True if the vector was successfully removed; otherwise, false.</returns>
     public bool Remove(Vector item)
     {
-        _rwLock.EnterWriteLock();
-        bool result = false;
-        try
+        var result = _vectors.Remove(item);
+        if (result)
         {
-            if (item == null)
-            {
-                throw new ArgumentNullException(nameof(item), "Vector cannot be null");
-            }
-
-            result = _vectors.Remove(item);
-            if (result)
-            {
-                _kdTree.Build(_vectors);
-                _isDirty = true; // Set the flag to indicate the database has been modified
-            }
+            _kdTree.Build(_vectors);
+            _isDirty = true; // Set the flag to indicate the database has been modified
         }
-        finally { _rwLock.ExitWriteLock(); }
         return result;
     }
 
