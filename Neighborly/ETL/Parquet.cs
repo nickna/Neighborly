@@ -66,52 +66,32 @@ namespace Neighborly.ETL
                                     // Iterate through the columns in the row group
                                     foreach (DataField field in reader.Schema.GetDataFields())
                                     {
-                                        // Check if the column is a byte array (i.e. a Vector)
-                                        //if (field.ClrType == typeof(byte[]))
-                                        
-                                        if (field.ClrType == typeof(Single) || field.ClrType == typeof(byte) )
+                                        // Check if the column is a float array (i.e. a Vector)
+                                        if (field.ClrType == typeof(float[]))
                                         {
-                                            // Read byte array
+                                            // Read float array
                                             var data = await groupReader.ReadColumnAsync(field);
                                             var numValues = data.NumValues;
                                             if (numValues > 0)
                                             {
-                                                // Convert byte array to Vector
-                                                // byte[]? d = data.Data as byte[];
-                                                byte[] d = new byte[numValues];
-                                                if (field.ClrType == typeof(Single))
-                                                {
-                                                    for (int j = 0; j < numValues; j++)
-                                                    {
-                                                        d[j] = (byte)((float[])data.Data)[j];
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    for (int j = 0; j < numValues; j++)
-                                                    {
-                                                        d[j] = (byte)((byte[])data.Data)[j];
-                                                    }
-                                                }
+                                                // Convert float array to Vector
+                                                float[] d = data.Data as float[];
                                                 if (d != null)
                                                 {
-                                                    // Convert byte array to Vector
+                                                    // Convert float array to Vector
                                                     var vector = new Vector(d);
                                                     vectorDatabase.Add(vector);
                                                 }
                                             }
-                                            
-
                                         }
                                     }
                                 }
                             }
-
                         }
                     }
                 }
             }
-
         }
+
     }
 }
