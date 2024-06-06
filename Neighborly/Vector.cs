@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Buffers;
+using System.Text;
 
 namespace Neighborly;
 
@@ -174,7 +175,7 @@ public partial class Vector
                     throw new ArgumentException("Invalid distance measurement");
                 }
         }
-        
+
     }
 
     /// <summary>
@@ -260,13 +261,42 @@ public partial class Vector
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
-        // TODO: Make this more efficient
-        byte[] idBytes = Id.ToByteArray();
-        byte[] valuesLengthBytes = BitConverter.GetBytes(Values.Length);
-        byte[] originalTextLengthBytes = BitConverter.GetBytes(OriginalText.Length);
-        byte[] originalTextBytes = Encoding.UTF8.GetBytes(OriginalText);
-        byte[] values = new byte[Values.Length * sizeof(float)];
-        return idBytes.Concat(valuesLengthBytes).Concat(originalTextLengthBytes).Concat(originalTextBytes).Concat(values).ToArray();
+        int resultLength = 16 + sizeof(int) + sizeof(int) + sizeof(int) + OriginalText.Length + Values.Length * sizeof(float);
+        Span<byte> result = stackalloc byte[resultLength];
+        Span<byte> idBytes = result[..16];
+        if (!Id.TryWriteBytes(idBytes))
+        {
+            throw new InvalidOperationException("Failed to write the Id to bytes");
+        }
+        
+        Span<byte> valuesLengthBytes = result[16..(16 + sizeof(int))];
+        if (!BitConverter.TryWriteBytes(valuesLengthBytes, Values.Length))
+        {
+            throw new InvalidOperationException("Failed to write Values.Length to bytes");
+        }
+
+        Span<byte> originalTextLengthBytes = result[(16 + sizeof(int))..(16 + sizeof(int) + sizeof(int))];
+        if (!BitConverter.TryWriteBytes(originalTextLengthBytes, OriginalText.Length))
+        {
+            throw new InvalidOperationException("Failed to write OriginalText.Length to bytes");
+        }
+
+        Span<byte> originalTextBytes = result[(16 + sizeof(int) + sizeof(int))..(16 + sizeof(int) + sizeof(int) + OriginalText.Length)];
+        if (!Encoding.UTF8.TryGetBytes(OriginalText, originalTextBytes, out int bytesWritten))
+        {
+            throw new InvalidOperationException("Failed to write OriginalText to bytes");
+        }
+
+        Span<byte> values = result[(16 + sizeof(int) + sizeof(int) + OriginalText.Length)..];
+        for (int i = 0; i < Values.Length; i++)
+        {
+            if (!BitConverter.TryWriteBytes(values[(i * sizeof(float))..], Values[i]))
+            {
+                throw new InvalidOperationException($"Failed to write Valuee[{i}] to bytes");
+            }
+        }
+
+        return result.ToArray();
     }
 
     /// <summary>
