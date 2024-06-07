@@ -1,0 +1,191 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Neighborly
+{
+    /// <summary>
+    /// VectorTags are simple strings (tags) that can be associated with a vector.
+    /// Each tag is assigned a unique id (short) which can be used to identify the tag.
+    /// The tags are case-insensitive and are stored in lower case.
+    /// </summary>
+    public class VectorTags
+    {
+        private Dictionary<short, string> _tags = new();
+        private Dictionary<short, List<Guid>> _tagMap = new();
+        public VectorList VectorList { get; set; }
+
+
+        public short GetId(string tag)
+        {
+            var key = _tags.FirstOrDefault(pair => pair.Value == tag.Trim().ToLower()).Key;
+            if (key != default(short))
+            {
+                return key;
+            }
+            else
+                return -1;
+        }
+
+        public short[] GetIdRange(string[] tags)
+        {
+            return tags.Select(tag => GetId(tag)).ToArray();
+        }
+
+        public string[] GetRange(short[] tagIds)
+        {
+            return tagIds.Select(tagId => _tags[tagId]).ToArray();
+        }
+
+        public short Add(string tag)
+        {
+            if ( _tags.Count >= short.MaxValue)
+            {
+                throw new InvalidOperationException("Maximum number of tags reached");
+            }
+
+            if (_tags.ContainsValue(tag.Trim().ToLower()))
+            {
+                return GetId(tag);
+            }
+
+            lock(_tags)
+            {
+                short newTagId = (short)(_tags.Count + 1);
+                _tags.Add(newTagId, tag.Trim().ToLower());
+                return newTagId;
+            }
+        }
+
+        public void Clear()
+        {
+            lock (_tags)
+            {
+                _tags.Clear();
+            }
+        }
+
+        public int Count
+        {
+            get { return _tags.Count; }
+        }
+
+        public bool Contains(string tag) 
+        {
+            return _tags.ContainsValue(tag.Trim().ToLower());
+        }
+
+        /// <summary>
+        /// Returns the tag string for the given tag id
+        /// </summary>
+        /// <param name="tagId"></param>
+        /// <returns></returns>
+        public string this[short tagId]
+        {
+            get
+            {
+                return _tags[tagId];
+            }
+        }
+
+        /// <summary>
+        /// Returns the tag id for the given tag string
+        /// </summary>
+        /// <param name="tag"></param>
+        /// <returns></returns>
+        public short this[string tag]
+        {
+            get
+            {
+                return GetId(tag);
+            }
+        }
+
+        /// <summary>
+        /// Convert tags to binary data
+        /// </summary>
+        /// <returns></returns>
+        public byte[] ToBinary()
+        {
+            var bytes = new List<byte>();
+            foreach (var tag in _tags)
+            {
+                bytes.AddRange(BitConverter.GetBytes(tag.Key));
+                bytes.AddRange(BitConverter.GetBytes(tag.Value.Length));
+                bytes.AddRange(Encoding.UTF8.GetBytes(tag.Value));
+            }
+            return bytes.ToArray();
+        }
+
+        /// <summary>
+        /// Deserialize binary data to tags
+        /// </summary>
+        /// <param name="data"></param>
+        public void FromBinary(byte[] data)
+        {
+            _tags.Clear();
+            for (int i = 0; i < data.Length;)
+            {
+                short tagId = BitConverter.ToInt16(data, i);
+                i += sizeof(short);
+                int tagLength = BitConverter.ToInt32(data, i);
+                i += sizeof(int);
+                string tag = Encoding.UTF8.GetString(data, i, tagLength);
+                i += tagLength;
+                _tags.Add(tagId, tag);
+            }
+        }
+
+        /// <summary>
+        /// Get a text representation of the tags
+        /// </summary>
+        /// <param name="tagIds"></param>
+        /// <returns></returns>
+        public string GetRangeAsString(short[] tagIds)
+        {
+            if (tagIds == null || tagIds.Length == 0)
+            {
+                return string.Empty;
+            }
+            var tags = new List<string>();
+            foreach (var tagId in tagIds)
+            {
+                tags.Add(_tags[tagId]);
+            }
+            return string.Join(", ", tags);
+        }
+
+        /// <summary>
+        /// Creates a tag map for the vectors
+        /// </summary>
+        /// <seealso cref="VectorList"/>
+        /// <exception cref="ArgumentNullException"></exception>
+        public void BuildMap()
+        {
+            if (VectorList == null || VectorList.Count == 0)
+            {
+                throw new ArgumentNullException(nameof(VectorList));
+            }
+            lock (_tagMap)
+            {
+                _tagMap.Clear();
+                for (int i = 0; i < VectorList.Count; i++)
+                {
+                    var vector = VectorList[i];
+                    foreach (var tagId in vector.Tags)
+                    {
+                        if (!_tagMap.ContainsKey(tagId))
+                        {
+                            _tagMap.Add(tagId, new List<Guid>());
+                        }
+                        _tagMap[tagId].Add(vector.Id);
+                    }
+                }
+            }
+
+        }
+
+    }
+}

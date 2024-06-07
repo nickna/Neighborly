@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Neighborly;
@@ -9,31 +10,32 @@ namespace Neighborly;
 /// <summary>
 /// List that stores items in memory up to a certain count, then spills over to disk.
 /// </summary>
-public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
+public class VectorList : IList<Neighborly.Vector>, IDisposable
 {
-    private List<Neighborly.Vector?> _vectorList = new List<Neighborly.Vector>();
-    private List<Guid> _guids = new List<Guid>();
-    private List<string> _onDiskFilePaths = new List<string>();
+    private List<Neighborly.Vector?> _vectorList = new();
+    private List<Guid> _guids = new();
+    public List<Guid> Guids
+    {
+        get { return _guids; }
+    }
+    private List<string> _onDiskFilePaths = new();
+    private VectorTags _tags = new();
+    public VectorTags Tags => _tags;
     private int _maxInMemoryCount;
-    private readonly object _lock = new object();
+    private readonly object _lock = new();
     private bool _disposed = false;
+
+    /// <summary>
+    /// Event that is triggered when data has changed
+    /// </summary>
+    public event EventHandler Modified;
 
     /// <summary>
     /// Creates a new instance of DiskBackedList with a maximum in-memory count based on system memory.
     /// </summary>
-    public DiskBackedList()
+    public VectorList()
     {
-        // Get current system memory (available to .NET CLR's GC)
-        var systemMemory = GC.GetTotalMemory(forceFullCollection: false);
-
-        // Calculate _maxInMemoryCount based on system memory
-        _maxInMemoryCount = (int)(systemMemory / 1024 / 1024); // Convert bytes to megabytes
-
-        // Set a minimum value for _maxInMemoryCount
-        if (_maxInMemoryCount < 100)
-        {
-            _maxInMemoryCount = 100;
-        }
+        this._tags.VectorList = this;
     }
 
     /// <summary>
@@ -68,7 +70,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    ~DiskBackedList()
+    ~VectorList()
     {
         Dispose(false);
     }
@@ -77,7 +79,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
     /// Creates a new instance and Sets the maximum in-memory count.
     /// </summary>
     /// <param name="maxInMemoryCount"></param>
-    public DiskBackedList(int maxInMemoryCount)
+    public VectorList(int maxInMemoryCount)
     {
         _maxInMemoryCount = maxInMemoryCount;
     }
@@ -96,8 +98,9 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             {
                 MoveToDisk(itemIndex);
             }
-
         }
+        Modified?.Invoke(this, EventArgs.Empty);
+
     }
 
     public void AddRange(IEnumerable<Neighborly.Vector> items)
@@ -115,7 +118,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             if (_vectorList[index] != null)
             {
                 // Vector found in memory
-                return _vectorList[index];
+                return _vectorList[index]!;
             }
             else if (_onDiskFilePaths[index] != string.Empty)
             {
@@ -133,6 +136,19 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Gets all vectors.
+    /// WARNING: This method is memory and CPU intensive and should not be used in production.
+    /// </summary>
+    /// <returns>All Vector objects in a List</returns>
+    public List<Vector> GetAllVectors()
+    {
+        // Added for support in Semantic Kernel's Memory Store.
+        // It's a bad idea to call this on a production server.
+        return _vectorList.ToList();
+    }
+
     public void Insert(int index, Neighborly.Vector item)
     {
         if (index < 0 || index > Count)
@@ -166,6 +182,8 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             }
          
         }
+        Modified?.Invoke(this, EventArgs.Empty);
+
     }
 
     public int IndexOf(Neighborly.Vector item)
@@ -324,6 +342,8 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
                     SaveToDisk(value, path);
                 }
             }
+            Modified?.Invoke(this, EventArgs.Empty);
+
         }
     }
 
@@ -386,6 +406,8 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             _onDiskFilePaths.RemoveAt(index);
 
         }
+        Modified?.Invoke(this, EventArgs.Empty);
+
     }
 
 
@@ -412,6 +434,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             }
             _onDiskFilePaths.Clear();
             _guids.Clear();
+            Modified?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -514,7 +537,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    internal void RemoveRange(IEnumerable<Neighborly.Vector> items)
+    public void RemoveRange(IEnumerable<Neighborly.Vector> items)
     {
         lock (_lock)
         {
@@ -525,7 +548,7 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    internal void Update(Neighborly.Vector vector)
+    public bool Update(Neighborly.Vector vector)
     {
         lock (_lock)
         {
@@ -550,25 +573,22 @@ public class DiskBackedList<Vector> : IList<Neighborly.Vector>, IDisposable
             {
                 throw new ArgumentException("Item not found in list");
             }
+            Modified?.Invoke(this, EventArgs.Empty);
+            return true;
         }
 
     }
 
-    internal void Update(Neighborly.Vector oldItem, Neighborly.Vector newItem)
+    public void RemoveById(Guid guid)
     {
-        if (oldItem == null || newItem == null)
+        lock (_lock)
         {
-            throw new ArgumentNullException("Item cannot be null");
+            int index = FindIndexById(guid);
+            if (index != -1)
+            {
+                RemoveAt(index);
+            }
         }
-        if (!Contains(oldItem))
-        {
-            throw new ArgumentException("Item not found in list");
-        }
-        if (newItem.Id != oldItem.Id)
-        {
-            throw new ArgumentException("Item Id cannot be changed");
-        }
-        Update(newItem);
 
     }
 

@@ -10,6 +10,7 @@
     <RepositoryUrl>https://github.com/nickna/Neighborly/</RepositoryUrl>
     <PackageTags>vector database</PackageTags>
     <Description>Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with .NET, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(DockerBuild)' != 'true'">

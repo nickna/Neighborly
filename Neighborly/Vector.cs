@@ -9,10 +9,17 @@ namespace Neighborly;
 public partial class Vector
 {
     /// <summary>
-    /// Gets or sets the unique identifier of the vector.
+    /// Gets the unique identifier of the vector.
     /// This is automatically created when the vector is initialized.
     /// </summary>
-    public Guid Id { get; set; }
+    public Guid Id { get; }
+
+    /// <summary>
+    /// Tags that associate the vector with a specific category or group.
+    /// <seealso cref="VectorTags"/>
+    /// </summary>
+    public short[] Tags { get; }
+
     /// <summary>
     /// Embedding of the vector in a high-dimensional space.
     /// </summary>
@@ -32,6 +39,7 @@ public partial class Vector
         Values = values;
         Id = Guid.NewGuid();
         OriginalText = string.Empty;
+        Tags = new short[0];
     }
 
     /// <summary>
@@ -44,6 +52,8 @@ public partial class Vector
         Values = values;
         OriginalText = originalText;
         Id = Guid.NewGuid();
+        Tags = new short[0];
+
     }
 
     public Vector(BinaryReader stream)
@@ -69,6 +79,14 @@ public partial class Vector
             values[i] = stream.ReadSingle();
         }
 
+        // Read the length of the tags array
+        int tagsLength = stream.ReadInt16();
+        short[] tags = new short[tagsLength];
+        for (int i = 0; i < tagsLength; i++)
+        {
+            tags[i] = stream.ReadInt16();
+        }
+
         // Assign the read values to the properties
         Id = id;
         Values = values;
@@ -82,13 +100,20 @@ public partial class Vector
         var originalTextLength = BitConverter.ToInt32(byteArray, 16 + sizeof(int));
         var originalText = Encoding.UTF8.GetString(byteArray, 16 + sizeof(int) + sizeof(int), originalTextLength);
         var values = new float[valuesLength];
+        var tagsLength = BitConverter.ToInt16(byteArray,16 + sizeof(int) + sizeof(int) + originalTextLength);
+        var tags = new short[tagsLength];
+        for (int i = 0; i < tagsLength; i++)
+        {
+            tags[i] = BitConverter.ToInt16(byteArray, 16 + sizeof(int) + sizeof(int) + originalTextLength + sizeof(int) + (i * sizeof(short)));
+        }
         for (int i = 0; i < valuesLength; i++)
         {
-            values[i] = BitConverter.ToSingle(byteArray, 20 + valuesLength + (i * sizeof(float)));
+            values[i] = BitConverter.ToSingle(byteArray, 16 + sizeof(int) + sizeof(int) + originalTextLength + sizeof(short) + (tagsLength * sizeof(short)) + (i * sizeof(float)));
         }
         Id = id;
         Values = values;
         OriginalText = originalText;
+        Tags = tags;
     }
 
     /// <summary>
@@ -260,13 +285,24 @@ public partial class Vector
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
-        // TODO: Make this more efficient
         byte[] idBytes = Id.ToByteArray();
         byte[] valuesLengthBytes = BitConverter.GetBytes(Values.Length);
         byte[] originalTextLengthBytes = BitConverter.GetBytes(OriginalText.Length);
         byte[] originalTextBytes = Encoding.UTF8.GetBytes(OriginalText);
-        byte[] values = new byte[Values.Length * sizeof(float)];
-        return idBytes.Concat(valuesLengthBytes).Concat(originalTextLengthBytes).Concat(originalTextBytes).Concat(values).ToArray();
+        byte[] valuesBytes = new byte[Values.Length * sizeof(float)];
+        for (int i = 0; i < Values.Length; i++)
+        {
+            byte[] bytes = BitConverter.GetBytes(Values[i]);
+            Array.Copy(bytes, 0, valuesBytes, i * sizeof(float), sizeof(float));
+        }
+        byte[] tagsLengthBytes = BitConverter.GetBytes(Tags.Length);
+        byte[] tagsBytes = new byte[Tags.Length * sizeof(short)];
+        for (int i = 0; i < Tags.Length; i++)
+        {
+            byte[] bytes = BitConverter.GetBytes(Tags[i]);
+            Array.Copy(bytes, 0, tagsBytes, i * sizeof(short), sizeof(short));
+        }
+        return idBytes.Concat(valuesLengthBytes).Concat(originalTextLengthBytes).Concat(originalTextBytes).Concat(valuesBytes).Concat(tagsLengthBytes).Concat(tagsBytes).ToArray();
     }
 
     /// <summary>
