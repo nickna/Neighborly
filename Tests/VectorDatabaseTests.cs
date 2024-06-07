@@ -38,11 +38,11 @@ public class VectorDatabaseTests
         var vector = new Vector(byteArray);
 
         _db.Vectors.Add(vector);
-        Assert.AreEqual(1, _db.Count, "Count should be 1 after adding a vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
 
         _db.Vectors.Remove(vector);
-        Assert.AreEqual(0, _db.Count, "Count should be 0 after removing the vector.");
-        Assert.IsFalse(_db.Vectors.Contains(vector), "Database should not contain the removed vector.");
+        Assert.That(_db.Count, Is.EqualTo(0), "Count should be 0 after removing the vector.");
+        Assert.That(_db.Vectors.Contains(vector), Is.False, "Database should not contain the removed vector.");
     }
 
     [Test]
@@ -59,13 +59,13 @@ public class VectorDatabaseTests
         var vector2 = new Vector(byteArray2);
 
         _db.Vectors.Add(vector1);
-        Assert.AreEqual(1, _db.Count, "Count should be 1 after adding a vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the added vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
 
         _db.Vectors.Update(vector2);
-        Assert.AreEqual(1, _db.Count, "Count should still be 1 after updating a vector.");
-        Assert.IsFalse(_db.Vectors.Contains(vector1), "Database should not contain the old vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the new vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should still be 1 after updating a vector.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the old vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the new vector.");
     }
 
     [Test]
@@ -85,9 +85,9 @@ public class VectorDatabaseTests
 
         _db.Vectors.AddRange(vectors);
 
-        Assert.AreEqual(2, _db.Count, "Count should be 2 after adding two vectors.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the first added vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the second added vector.");
+        Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding two vectors.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first added vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second added vector.");
     }
 
 
@@ -107,12 +107,12 @@ public class VectorDatabaseTests
         List<Vector> vectors = new List<Vector> { vector1, vector2 };
 
         _db.Vectors.AddRange(vectors);
-        Assert.AreEqual(2, _db.Count, "Count should be 2 after adding two vectors.");
+        Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding two vectors.");
 
         _db.Vectors.RemoveRange(vectors);
-        Assert.AreEqual(0, _db.Count, "Count should be 0 after removing the vectors.");
-        Assert.IsFalse(_db.Vectors.Contains(vector1), "Database should not contain the first removed vector.");
-        Assert.IsFalse(_db.Vectors.Contains(vector2), "Database should not contain the second removed vector.");
+        Assert.That(_db.Count, Is.EqualTo(0), "Count should be 0 after removing the vectors.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the first removed vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.False, "Database should not contain the second removed vector.");
     }
 
     [Test]
@@ -130,14 +130,14 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector1);
 
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the added vector.");
-        Assert.IsFalse(_db.Vectors.Contains(vector2), "Database should not contain a vector that was not added.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.False, "Database should not contain a vector that was not added.");
     }
 
     [Test]
     public void TestCount()
     {
-        Assert.AreEqual(0, _db.Count, "Count should be 0 for an empty database.");
+        Assert.That(_db.Count, Is.EqualTo(0), "Count should be 0 for an empty database.");
 
         float[] floatArray1 = new float[] { 1, 2, 3 };
         byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
@@ -145,7 +145,7 @@ public class VectorDatabaseTests
         var vector1 = new Vector(byteArray1);
 
         _db.Vectors.Add(vector1);
-        Assert.AreEqual(1, _db.Count, "Count should be 1 after adding a vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
 
         float[] floatArray2 = new float[] { 4, 5, 6 };
         byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
@@ -153,10 +153,10 @@ public class VectorDatabaseTests
         var vector2 = new Vector(byteArray2);
 
         _db.Vectors.Add(vector2);
-        Assert.AreEqual(2, _db.Count, "Count should be 2 after adding a second vector.");
+        Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding a second vector.");
 
         _db.Vectors.Remove(vector1);
-        Assert.AreEqual(1, _db.Count, "Count should be 1 after removing a vector.");
+        Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after removing a vector.");
     }
 
     [Test]
@@ -174,12 +174,12 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
-        Assert.AreEqual(2, _db.Count, "Count should be 2 after adding two vectors.");
+        Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding two vectors.");
 
         _db.Vectors.Clear();
-        Assert.AreEqual(0, _db.Count, "Count should be 0 after clearing the database.");
-        Assert.IsFalse(_db.Vectors.Contains(vector1), "Database should not contain the first vector after clearing.");
-        Assert.IsFalse(_db.Vectors.Contains(vector2), "Database should not contain the second vector after clearing.");
+        Assert.That(_db.Count, Is.EqualTo(0), "Count should be 0 after clearing the database.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the first vector after clearing.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.False, "Database should not contain the second vector after clearing.");
     }
 
     [Test]
@@ -199,10 +199,10 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector2);
 
         var foundVector = _db.Vectors.Find(v => v.Equals(vector1));
-        Assert.AreEqual(vector1, foundVector, "Find should return the correct vector.");
+        Assert.That(foundVector, Is.EqualTo(vector1), "Find should return the correct vector.");
 
         var notFoundVector = _db.Vectors.Find(v => v.Equals(new Vector(new byte[] { 7, 8, 9 })));
-        Assert.IsNull(notFoundVector, "Find should return null if no vector matches the condition.");
+        Assert.That(notFoundVector, Is.Null, "Find should return null if no vector matches the condition.");
     }
 
     [Test]
@@ -222,12 +222,12 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector2);
 
         var foundVectors = _db.Vectors.FindAll(v => v.Equals(vector1) || v.Equals(vector2));
-        Assert.AreEqual(2, foundVectors.Count, "FindAll should return all matching vectors.");
-        Assert.Contains(vector1, foundVectors, "FindAll should include the first matching vector.");
-        Assert.Contains(vector2, foundVectors, "FindAll should include the second matching vector.");
+        Assert.That(foundVectors.Count, Is.EqualTo(2), "FindAll should return all matching vectors.");
+        Assert.That(foundVectors, Does.Contain(vector1), "FindAll should include the first matching vector.");
+        Assert.That(foundVectors, Does.Contain(vector2), "FindAll should include the second matching vector.");
 
         var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector(new byte[] { 7, 8, 9 })));
-        Assert.AreEqual(0, notFoundVectors.Count, "FindAll should return an empty list if no vectors match the condition.");
+        Assert.That(notFoundVectors.Count, Is.EqualTo(0), "FindAll should return an empty list if no vectors match the condition.");
     }
 
     private Vector CreateVector(float[] floatArray)
@@ -252,7 +252,7 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector);
 
-        Assert.AreEqual(initialCount + 1, _db.Count);
+        Assert.That(_db.Count, Is.EqualTo(initialCount + 1));
         Assert.IsTrue(_db.Vectors.Contains(vector));
     }
     [Test]
@@ -305,9 +305,9 @@ public class VectorDatabaseTests
         _db.LoadAsync(path).RunSynchronously();
 
         // Assert
-        Assert.AreEqual(2, _db.Count, "Count should be 2 after loading the saved database.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the first vector after loading.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the second vector after loading.");
+        Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after loading the saved database.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first vector after loading.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second vector after loading.");
 
         // Clean up
         Directory.Delete(path, true);
@@ -363,7 +363,7 @@ public class VectorDatabaseTests
         }
 
         // Assert
-        Assert.AreEqual(threadCount * vectorsPerThread, _db.Count, "Count should be correct after concurrent additions.");
+        Assert.That(_db.Count, Is.EqualTo(threadCount * vectorsPerThread), "Count should be correct after concurrent additions.");
     }
 
     [Test]
