@@ -80,7 +80,7 @@ namespace Neighborly.ETL
                                                 {
                                                     // Convert float array to Vector
                                                     var vector = new Vector(d);
-                                                    vectorDatabase.Add(vector);
+                                                    vectorDatabase.Vectors.Add(vector);
                                                 }
                                             }
                                         }
