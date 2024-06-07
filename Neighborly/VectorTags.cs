@@ -11,12 +11,13 @@ namespace Neighborly
     /// Each tag is assigned a unique id (short) which can be used to identify the tag.
     /// The tags are case-insensitive and are stored in lower case.
     /// </summary>
-    public class VectorTags
+    public class VectorTags 
     {
         private Dictionary<short, string> _tags = new();
         private Dictionary<short, List<Guid>> _tagMap = new();
         public VectorList VectorList { get; set; }
 
+        public event EventHandler Modified;
 
         public short GetId(string tag)
         {
@@ -55,6 +56,7 @@ namespace Neighborly
             {
                 short newTagId = (short)(_tags.Count + 1);
                 _tags.Add(newTagId, tag.Trim().ToLower());
+                Modified?.Invoke(this, EventArgs.Empty);
                 return newTagId;
             }
         }
@@ -65,6 +67,7 @@ namespace Neighborly
             {
                 _tags.Clear();
             }
+            Modified?.Invoke(this, EventArgs.Empty);
         }
 
         public int Count
@@ -187,5 +190,19 @@ namespace Neighborly
 
         }
 
+        /// <summary>
+        /// Return a list of all Tags in their human-readable format
+        /// </summary>
+        /// <returns></returns>
+        public IAsyncEnumerable<string> GetAll()
+        {
+            return _tags.Values.ToAsyncEnumerable();
+        }
+
+        public void Remove(short tagId)
+        {
+            Modified?.Invoke(this, EventArgs.Empty);
+            throw new NotImplementedException();
+        }
     }
 }

@@ -36,6 +36,8 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
     public VectorList()
     {
         this._tags.VectorList = this;
+        // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
+        this._tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>

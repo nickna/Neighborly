@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics.Eventing.Reader;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading.Tasks;
 using Microsoft.SemanticKernel.Memory;
 using Neighborly;
@@ -92,22 +95,33 @@ namespace NeighborlyMemory
 
         public Task CreateCollectionAsync(string collectionName, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Create Vector Tag
+            _vectorDatabase.Vectors.Tags.Add(collectionName);
+            return Task.CompletedTask;
+
         }
 
         public IAsyncEnumerable<string> GetCollectionsAsync(CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Get Vector Tags
+            var collections = _vectorDatabase.Vectors.Tags.GetAll();
+            return collections;
         }
 
         public Task<bool> DoesCollectionExistAsync(string collectionName, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Check if Vector Tag exists
+            var exists = _vectorDatabase.Vectors.Tags.Contains(collectionName);
+            return Task.FromResult(exists);
+
         }
 
         public Task DeleteCollectionAsync(string collectionName, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var tagId = _vectorDatabase.Vectors.Tags.GetId(collectionName);
+            // Remove Vector Tag
+            _vectorDatabase.Vectors.Tags.Remove(tagId);
+            return Task.CompletedTask;
         }
 
         public Task<string> UpsertAsync(string collectionName, MemoryRecord record, CancellationToken cancellationToken = default)
@@ -122,22 +136,50 @@ namespace NeighborlyMemory
 
         public Task<MemoryRecord?> GetAsync(string collectionName, string key, bool withEmbedding = false, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Get Vector by Id
+            // Todo: Implement withEmbedding
+            var vector = _vectorDatabase.Vectors.Find(v => v.Id == Guid.Parse(key));
+            return Task.FromResult(vector == null ? null : new MemoryRecord
+            (
+                metadata: new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty),
+                key: vector.Id.ToString(),
+                embedding: new ReadOnlyMemory<float>(vector.Values),
+                timestamp: null
+            ));
+
         }
 
         public IAsyncEnumerable<MemoryRecord> GetBatchAsync(string collectionName, IEnumerable<string> keys, bool withEmbeddings = false, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Get Vectors by Ids
+            var vectors = _vectorDatabase.Vectors.FindAll(v => keys.Contains(v.Id.ToString()));
+            var records = vectors.Select(vector => new MemoryRecord
+            (
+                metadata: new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty),
+                key: vector.Id.ToString(),
+                embedding: new ReadOnlyMemory<float>(vector.Values),
+                timestamp: null
+            ));
+            return records.ToAsyncEnumerable();
         }
 
         public Task RemoveAsync(string collectionName, string key, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Remove Vector by Id
+            _vectorDatabase.Vectors.RemoveById(Guid.Parse(key));
+            return Task.CompletedTask;
+
         }
 
         public Task RemoveBatchAsync(string collectionName, IEnumerable<string> keys, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            // Remove Vectors by Ids
+            foreach (var key in keys)
+            {
+                _vectorDatabase.Vectors.RemoveById(Guid.Parse(key));
+            }
+            return Task.CompletedTask;
+
         }
 
         public IAsyncEnumerable<(MemoryRecord, double)> GetNearestMatchesAsync(string collectionName, ReadOnlyMemory<float> embedding, int limit, double minRelevanceScore = 0, bool withEmbeddings = false, CancellationToken cancellationToken = default)
@@ -148,8 +190,8 @@ namespace NeighborlyMemory
         public Task<(MemoryRecord, double)?> GetNearestMatchAsync(string collectionName, ReadOnlyMemory<float> embedding, double minRelevanceScore = 0, bool withEmbedding = false, CancellationToken cancellationToken = default)
         {
             throw new NotImplementedException();
+
         }
     }
-#pragma warning restore SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-
+#pragma warning restore SKEXP0001 
 }
