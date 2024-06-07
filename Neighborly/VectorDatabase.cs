@@ -31,6 +31,7 @@ public partial class VectorDatabase // : ICollection<Vector>
     {
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
+        StartIndexService();
     }
 
     /// <summary>
@@ -43,6 +44,7 @@ public partial class VectorDatabase // : ICollection<Vector>
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
         _vectors.Modified += VectorList_Modified;
+        StartIndexService();
     }
 
     /// <summary>
@@ -55,16 +57,18 @@ public partial class VectorDatabase // : ICollection<Vector>
     /// </summary>
     public bool IsReadOnly => false;
 
-    private bool _isDirty = false;
+    private bool _hasUnsavedChanges = false;
+    private bool _hasOutdatedIndex = false;
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
     /// </summary>
-    public bool IsDirty { get { return _isDirty; } }
+    public bool IsDirty { get { return _hasUnsavedChanges; } }
 
     private void VectorList_Modified(object sender, EventArgs e)
     {
-        _isDirty = true;
+        _hasUnsavedChanges = true;
+        _hasOutdatedIndex = true;
     }
 
     /// <summary>
@@ -151,7 +155,9 @@ public partial class VectorDatabase // : ICollection<Vector>
                 }
 
                 _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
-                _isDirty = false; // Set the flag to indicate the database hasn't been modified
+                _vectors.Tags.BuildMap(); // Rebuild the tag map
+                _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
+                _hasOutdatedIndex = false; // Set the flag to indicate the index is up-to-date
             }
             finally
             {
@@ -159,6 +165,41 @@ public partial class VectorDatabase // : ICollection<Vector>
             }
         }
 
+    }
+
+    private void StartIndexService() 
+    {
+        // Create a new thread that will react when _hasOutdatedIndex is set to true
+        var indexService = new Thread(() => 
+        {
+            while (!_vectors.IsReadOnly)
+            {
+                if (_hasOutdatedIndex && _vectors.Count > 0)
+                {
+                    RebuildIndex();
+                }
+                Thread.Sleep(5000);
+            }
+        });
+        indexService.Priority = ThreadPriority.Lowest;
+    }
+
+    /// <summary>
+    /// Creates a new kd-tree index for the vectors and a map of tags to vector IDs.
+    /// (This method is eventually calls when the database is modified.)
+    /// </summary>
+    public void RebuildIndex()
+    {
+        if (!_hasOutdatedIndex || _vectors == null || _vectors.Count == 0)
+        {
+            return;
+        }
+        lock (_kdTree)
+        {
+            _kdTree.Build(_vectors);
+        }
+        _vectors.Tags.BuildMap();
+        _hasOutdatedIndex = false;
     }
 
     /// <summary>
@@ -181,7 +222,7 @@ public partial class VectorDatabase // : ICollection<Vector>
     public async Task SaveAsync(string path)
     {
         // If the database hasn't been modified, no need to save it
-        if (!_isDirty)
+        if (!_hasUnsavedChanges)
         {
             return;
         }
@@ -212,7 +253,7 @@ public partial class VectorDatabase // : ICollection<Vector>
             outputStream.Close();
         }
         _rwLock.ExitWriteLock();
-        _isDirty = false; // Set the flag to indicate the database hasn't been modified
+        _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
     }
     #endregion
 
