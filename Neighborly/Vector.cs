@@ -289,7 +289,7 @@ public partial class Vector
     {
         const int idBytesLength = 16;
         const int valuesLengthBytesLength = sizeof(int);
-        const int tagsLengthBytesLength = sizeof(int);
+        const int tagsLengthBytesLength = sizeof(short);
         const int originalTextLengthBytesLength = sizeof(int);
         int valuesBytesLength = Values.Length * sizeof(float);
         int tagsBytesLength = Tags.Length * sizeof(short);
@@ -297,7 +297,7 @@ public partial class Vector
         int resultLength = idBytesLength + valuesLengthBytesLength + originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + tagsLengthBytesLength + tagsBytesLength;
 
         const int valuesLengthOffset = idBytesLength;
-        const int originalTextLengthOffset = valuesLengthOffset + tagsLengthBytesLength;
+        const int originalTextLengthOffset = valuesLengthOffset + valuesLengthBytesLength;
         const int originalTextOffset = originalTextLengthOffset + originalTextLengthBytesLength;
         int valuesOffset = originalTextOffset + originalTextBytesLength;
         int tagsLengthOffset = valuesOffset + valuesBytesLength;
@@ -317,7 +317,7 @@ public partial class Vector
         }
 
         Span<byte> tagsLengthBytes = result[tagsLengthOffset..(tagsLengthOffset + tagsLengthBytesLength)];
-        if (!BitConverter.TryWriteBytes(tagsLengthBytes, Tags.Length))
+        if (!BitConverter.TryWriteBytes(tagsLengthBytes, (short)Tags.Length))
         {
             throw new InvalidOperationException("Failed to write Tags.Length to bytes");
         }
