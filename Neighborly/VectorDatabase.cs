@@ -29,9 +29,6 @@ public partial class VectorDatabase // : ICollection<Vector>
     public VectorDatabase()
         : this(NullLogger<VectorDatabase>.Instance)
     {
-        // Wire up the event handler for the VectorList.Modified event
-        _vectors.Modified += VectorList_Modified;
-        StartIndexService();
     }
 
     /// <summary>
@@ -43,6 +40,8 @@ public partial class VectorDatabase // : ICollection<Vector>
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
+
+        // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
         StartIndexService();
     }
@@ -65,7 +64,7 @@ public partial class VectorDatabase // : ICollection<Vector>
     /// </summary>
     public bool IsDirty { get { return _hasUnsavedChanges; } }
 
-    private void VectorList_Modified(object sender, EventArgs e)
+    private void VectorList_Modified(object? sender, EventArgs e)
     {
         _hasUnsavedChanges = true;
         _hasOutdatedIndex = true;
