@@ -1,5 +1,4 @@
-﻿using System.Buffers;
-using System.Text;
+﻿using System.Text;
 
 namespace Neighborly;
 
@@ -9,6 +8,15 @@ namespace Neighborly;
 [Serializable]
 public partial class Vector
 {
+    private const int s_idBytesLength = 16;
+    private const int s_valuesLengthBytesLength = sizeof(int);
+    private const int s_tagsLengthBytesLength = sizeof(short);
+    private const int s_originalTextLengthBytesLength = sizeof(int);
+
+    private const int s_valuesLengthOffset = s_idBytesLength;
+    private const int s_originalTextLengthOffset = s_valuesLengthOffset + s_valuesLengthBytesLength;
+    private const int s_originalTextOffset = s_originalTextLengthOffset + s_originalTextLengthBytesLength;
+
     /// <summary>
     /// Gets the unique identifier of the vector.
     /// This is automatically created when the vector is initialized.
@@ -60,7 +68,7 @@ public partial class Vector
     public Vector(BinaryReader stream)
     {
         // Read the Guid
-        byte[] idBytes = stream.ReadBytes(16);
+        byte[] idBytes = stream.ReadBytes(s_idBytesLength);
         Guid id = new Guid(idBytes);
 
         // Read the length of the values array
@@ -96,22 +104,38 @@ public partial class Vector
     }
 
     public Vector(byte[] byteArray)
+        : this(byteArray.AsSpan())
     {
-        var id = new Guid(byteArray.Take(16).ToArray());
-        var valuesLength = BitConverter.ToInt32(byteArray, 16);
-        var originalTextLength = BitConverter.ToInt32(byteArray, 16 + sizeof(int));
-        var originalText = Encoding.UTF8.GetString(byteArray, 16 + sizeof(int) + sizeof(int), originalTextLength);
+    }
+
+    public Vector(ReadOnlySpan<byte> source)
+    {
+        var id = new Guid(source[..s_idBytesLength]);
+        var valuesLength = BitConverter.ToInt32(source[s_valuesLengthOffset..(s_valuesLengthOffset + s_valuesLengthBytesLength)]);
+        var originalTextBytesLength = BitConverter.ToInt32(source[s_originalTextLengthOffset..(s_originalTextLengthOffset + s_originalTextLengthBytesLength)]);
+
+        int valuesOffset = s_originalTextOffset + originalTextBytesLength;
+
+        var originalText = Encoding.UTF8.GetString(source[s_originalTextOffset..(s_originalTextOffset + originalTextBytesLength)]);
         var values = new float[valuesLength];
-        var tagsLength = BitConverter.ToInt16(byteArray, 16 + sizeof(int) + sizeof(int) + originalTextLength);
+
+        var valuesBytesLength = valuesLength * sizeof(float);
+        var valuesSource = source[valuesOffset..(valuesOffset + valuesBytesLength)];
+        for (int i = 0; i < valuesLength; i++)
+        {
+            values[i] = BitConverter.ToSingle(valuesSource[(i * sizeof(float))..((i + 1) * sizeof(float))]);
+        }
+
+        int tagsLengthOffset = valuesOffset + valuesBytesLength;
+        int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
+        var tagsLength = BitConverter.ToInt16(source[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)]);
+        var tagsSource = source[tagsOffset..(tagsOffset + (tagsLength * sizeof(short)))];
         var tags = new short[tagsLength];
         for (int i = 0; i < tagsLength; i++)
         {
-            tags[i] = BitConverter.ToInt16(byteArray, 16 + sizeof(int) + sizeof(int) + originalTextLength + sizeof(int) + (i * sizeof(short)));
+            tags[i] = BitConverter.ToInt16(tagsSource[(i * sizeof(short))..((i + 1) * sizeof(short))]);
         }
-        for (int i = 0; i < valuesLength; i++)
-        {
-            values[i] = BitConverter.ToSingle(byteArray, 16 + sizeof(int) + sizeof(int) + originalTextLength + sizeof(short) + (tagsLength * sizeof(short)) + (i * sizeof(float)));
-        }
+
         Id = id;
         Values = values;
         OriginalText = originalText;
@@ -287,48 +311,41 @@ public partial class Vector
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
-        const int idBytesLength = 16;
-        const int valuesLengthBytesLength = sizeof(int);
-        const int tagsLengthBytesLength = sizeof(short);
-        const int originalTextLengthBytesLength = sizeof(int);
         int valuesBytesLength = Values.Length * sizeof(float);
         int tagsBytesLength = Tags.Length * sizeof(short);
         int originalTextBytesLength = Encoding.UTF8.GetByteCount(OriginalText);
-        int resultLength = idBytesLength + valuesLengthBytesLength + originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + tagsLengthBytesLength + tagsBytesLength;
+        int resultLength = s_idBytesLength + s_valuesLengthBytesLength + s_originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + s_tagsLengthBytesLength + tagsBytesLength;
 
-        const int valuesLengthOffset = idBytesLength;
-        const int originalTextLengthOffset = valuesLengthOffset + valuesLengthBytesLength;
-        const int originalTextOffset = originalTextLengthOffset + originalTextLengthBytesLength;
-        int valuesOffset = originalTextOffset + originalTextBytesLength;
+        int valuesOffset = s_originalTextOffset + originalTextBytesLength;
         int tagsLengthOffset = valuesOffset + valuesBytesLength;
-        int tagsOffset = tagsLengthOffset + tagsLengthBytesLength;
+        int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
 
         Span<byte> result = stackalloc byte[resultLength];
-        Span<byte> idBytes = result[..idBytesLength];
+        Span<byte> idBytes = result[..s_idBytesLength];
         if (!Id.TryWriteBytes(idBytes))
         {
             throw new InvalidOperationException("Failed to write the Id to bytes");
         }
 
-        Span<byte> valuesLengthBytes = result[valuesLengthOffset..(valuesLengthOffset + valuesLengthBytesLength)];
+        Span<byte> valuesLengthBytes = result[s_valuesLengthOffset..(s_valuesLengthOffset + s_valuesLengthBytesLength)];
         if (!BitConverter.TryWriteBytes(valuesLengthBytes, Values.Length))
         {
             throw new InvalidOperationException("Failed to write Values.Length to bytes");
         }
 
-        Span<byte> tagsLengthBytes = result[tagsLengthOffset..(tagsLengthOffset + tagsLengthBytesLength)];
+        Span<byte> tagsLengthBytes = result[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)];
         if (!BitConverter.TryWriteBytes(tagsLengthBytes, (short)Tags.Length))
         {
             throw new InvalidOperationException("Failed to write Tags.Length to bytes");
         }
 
-        Span<byte> originalTextLengthBytes = result[originalTextLengthOffset..(originalTextLengthOffset + originalTextLengthBytesLength)];
+        Span<byte> originalTextLengthBytes = result[s_originalTextLengthOffset..(s_originalTextLengthOffset + s_originalTextLengthBytesLength)];
         if (!BitConverter.TryWriteBytes(originalTextLengthBytes, OriginalText.Length))
         {
             throw new InvalidOperationException("Failed to write OriginalText.Length to bytes");
         }
 
-        Span<byte> originalTextBytes = result[originalTextOffset..(originalTextOffset + originalTextBytesLength)];
+        Span<byte> originalTextBytes = result[s_originalTextOffset..(s_originalTextOffset + originalTextBytesLength)];
         if (!Encoding.UTF8.TryGetBytes(OriginalText, originalTextBytes, out int bytesWritten))
         {
             throw new InvalidOperationException("Failed to write OriginalText to bytes");
@@ -339,7 +356,7 @@ public partial class Vector
         {
             if (!BitConverter.TryWriteBytes(valuesBytes[(i * sizeof(float))..], Values[i]))
             {
-                throw new InvalidOperationException($"Failed to write Valuee[{i}] to bytes");
+                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
             }
         }
 
@@ -348,7 +365,7 @@ public partial class Vector
         {
             if (!BitConverter.TryWriteBytes(tagsBytes[(i * sizeof(short))..], Tags[i]))
             {
-                throw new InvalidOperationException($"Failed to write Valuee[{i}] to bytes");
+                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
             }
         }
 
