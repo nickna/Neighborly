@@ -22,7 +22,7 @@ namespace Neighborly.API
             var response = new GetVectorsResponse();
 
             // Get the vectors from the database
-            var vectors = _db.ToList();
+            var vectors = _db.Vectors.GetAllVectors();
 
             // Convert each Vector to a VectorMessage and add it to the response
             foreach (var vector in vectors)
@@ -39,7 +39,7 @@ namespace Neighborly.API
 
         public override Task<GetVectorResponse> GetVectorById(GetVectorByIdRequest request, ServerCallContext context)
         {
-            var vector = _db.Find(v => v.Id == Guid.Parse(request.Id));
+            var vector = _db.Vectors.Find(v => v.Id == Guid.Parse(request.Id));
             var response = new GetVectorResponse
             {
                 Vector = Utility.ConvertToVectorMessage(vector)
@@ -52,11 +52,8 @@ namespace Neighborly.API
             // Convert the VectorMessage from the request to a Vector
             var newVector = Utility.ConvertToVector(request.Vector);
 
-            // Find the old vector in the database using the Id
-            var oldVector = _db.Find(v => v.Id == Guid.Parse(request.Id));
-
             // Update the vector in the database
-            var success = _db.Update(oldVector, newVector);
+            var success = _db.Vectors.Update(newVector);
 
             // Create the response
             var response = new Response { Success = success };
@@ -84,7 +81,7 @@ namespace Neighborly.API
             var vector = Utility.ConvertToVector(request.Vector);
 
             // Add the vector to the database
-            await Task.Run(() => _db.Add(vector));
+            await Task.Run(() => _db.Vectors.Add(vector));
 
             // Construct the response
             var response = new Response { Success = true};
@@ -95,7 +92,7 @@ namespace Neighborly.API
         public override Task<Response> ClearVectors(Request request, ServerCallContext context)
         {
             // Clear the vectors in the database
-            _db.Clear();
+            _db.Vectors.Clear();
 
             // Create the response
             var response = new Response { Success = true };

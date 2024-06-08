@@ -11,13 +11,13 @@ namespace API.Services
         {
             app.MapPost("/vector", (VectorDatabase db, Vector vector) =>
             {
-                db.Add(vector);
+                db.Vectors.Add(vector);
                 return Results.Created($"/vectors/{vector.Id}", vector);
             });
 
             app.MapGet("/vector/{id}", (VectorDatabase db, Guid id) =>
             {
-                var vector = db.FirstOrDefault(v => v.Id == id);
+                var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
 
                 if (vector == null)
                 {
@@ -31,7 +31,7 @@ namespace API.Services
 
             app.MapPut("/vector/{id}", (VectorDatabase db, Vector vector) =>
             {
-                if (db.Update(vector))
+                if (db.Vectors.Update(vector))
                 {
                     return Results.Ok(vector);
                 }
@@ -43,7 +43,7 @@ namespace API.Services
 
             app.MapDelete("/vector/{id}", (VectorDatabase db, Guid id) =>
             {
-                var vector = db.FirstOrDefault(v => v.Id == id);
+                var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
 
                 if (vector == null)
                 {
@@ -51,7 +51,7 @@ namespace API.Services
                 }
                 else
                 {
-                    db.Remove(vector);
+                    db.Vectors.Add(vector);
                 }
 
                 return Results.NoContent();
@@ -72,7 +72,7 @@ namespace API.Services
 
             app.MapDelete("/db/clear", (VectorDatabase db) =>
             {
-                db.Clear();
+                db.Vectors.Clear();
                 return Results.NoContent();
             });
         }

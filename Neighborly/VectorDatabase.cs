@@ -13,13 +13,14 @@ namespace Neighborly;
 /// <summary>
 /// Represents a database for storing and searching vectors.
 /// </summary>
-public partial class VectorDatabase : ICollection<Vector>
+public partial class VectorDatabase // : ICollection<Vector>
 {
     private readonly ILogger<VectorDatabase> _logger;
-    private DiskBackedList<Vector> _vectors = new DiskBackedList<Vector>();
-    private KDTree _kdTree = new KDTree();
+    private VectorList _vectors = new();
+    public VectorList Vectors => _vectors;
+    private KDTree _kdTree = new();
     private ISearchMethod _searchStrategy = new LinearSearch();
-    private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
+    private ReaderWriterLockSlim _rwLock = new();
     private StorageOptionEnum _storageOption = StorageOptionEnum.Auto;
 
     /// <summary>
@@ -28,6 +29,9 @@ public partial class VectorDatabase : ICollection<Vector>
     public VectorDatabase()
         : this(NullLogger<VectorDatabase>.Instance)
     {
+        // Wire up the event handler for the VectorList.Modified event
+        _vectors.Modified += VectorList_Modified;
+        StartIndexService();
     }
 
     /// <summary>
@@ -39,6 +43,8 @@ public partial class VectorDatabase : ICollection<Vector>
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
+        _vectors.Modified += VectorList_Modified;
+        StartIndexService();
     }
 
     /// <summary>
@@ -51,12 +57,19 @@ public partial class VectorDatabase : ICollection<Vector>
     /// </summary>
     public bool IsReadOnly => false;
 
-    private bool _isDirty = false;
+    private bool _hasUnsavedChanges = false;
+    private bool _hasOutdatedIndex = false;
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
     /// </summary>
-    public bool IsDirty => _isDirty;
+    public bool IsDirty { get { return _hasUnsavedChanges; } }
+
+    private void VectorList_Modified(object sender, EventArgs e)
+    {
+        _hasUnsavedChanges = true;
+        _hasOutdatedIndex = true;
+    }
 
     /// <summary>
     /// Gets the storage option used by the database.
@@ -78,136 +91,12 @@ public partial class VectorDatabase : ICollection<Vector>
     }
 
     /// <summary>
-    /// Adds a range of vectors to the database.
-    /// </summary>
-    /// <param name="items">The collection of vectors to add.</param>
-    public void AddRange(IEnumerable<Vector> items)
-    {
-        _rwLock.EnterWriteLock();
-        try
-        {
-            _vectors.AddRange(items);
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        finally { _rwLock.ExitWriteLock(); }
-    }
-
-    /// <summary>
-    /// Removes a range of vectors from the database.
-    /// </summary>
-    /// <param name="items">The collection of vectors to remove.</param>
-    public void RemoveRange(IEnumerable<Vector> items)
-    {
-        _vectors.RemoveRange(items);
-        _isDirty = true; // Set the flag to indicate the database has been modified
-    }
-
-    /// <summary>
-    /// Updates an existing vector in the database.
-    /// Searches for the vector by its ID.
-    /// </summary>
-    /// <param name="vector"></param>
-    /// <returns>True if the Vector was updated; otherwise, false.</returns>
-    public bool Update(Vector vector)
-    {
-        _vectors.Update(vector);
-        return true;
-    }
-
-
-    /// <summary>
-    /// Updates an existing vector in the database.
-    /// </summary>
-    /// <param name="oldItem">The vector to be updated.</param>
-    /// <param name="newItem">The updated vector.</param>
-    /// <returns>True if the vector was successfully updated; otherwise, false.</returns>
-    public bool Update(Vector oldItem, Vector newItem)
-    {
-        _vectors.Update(oldItem, newItem);
-        _isDirty = true; // Set the flag to indicate the database has been modified
-        return false;
-    }
-
-    /// <summary>
-    /// Adds a vector to the database.
-    /// </summary>
-    /// <param name="item">The vector to add.</param>
-    public void Add(Vector item)
-    {
-        _vectors.Add(item);
-        _kdTree.Build(_vectors);
-        _isDirty = true; // Set the flag to indicate the database has been modified
-    }
-
-    /// <summary>
-    /// Removes all vectors from the database.
-    /// </summary>
-    public void Clear()
-    {        
-        _vectors.Clear();
-        _isDirty = true; // Set the flag to indicate the database has been modified   
-    }
-
-    /// <summary>
-    /// Determines whether the database contains a specific vector.
-    /// </summary>
-    /// <param name="item">The vector to locate in the database.</param>
-    /// <returns>True if the vector is found in the database; otherwise, false.</returns>
-    public bool Contains(Vector item)
-    {
-        return _vectors.Contains(item);
-    }
-
-    /// <summary>
-    /// Copies the vectors of the database to an array, starting at a particular array index.
-    /// </summary>
-    /// <param name="array">The one-dimensional array that is the destination of the elements copied from the database.</param>
-    /// <param name="arrayIndex">The zero-based index in array at which copying begins.</param>
-    public void CopyTo(Vector[] array, int arrayIndex)
-    {
-        _vectors.CopyTo(array, arrayIndex);
-    }
-
-    /// <summary>
-    /// Returns an enumerator that iterates through the vectors in the database.
-    /// </summary>
-    /// <returns>An enumerator for the vectors in the database.</returns>
-    public IEnumerator<Vector> GetEnumerator()
-    {
-        return _vectors.GetEnumerator();
-    }
-
-    /// <summary>
-    /// Removes a specific vector from the database.
-    /// </summary>
-    /// <param name="item">The vector to remove.</param>
-    /// <returns>True if the vector was successfully removed; otherwise, false.</returns>
-    public bool Remove(Vector item)
-    {
-        var result = _vectors.Remove(item);
-        if (result)
-        {
-            _kdTree.Build(_vectors);
-            _isDirty = true; // Set the flag to indicate the database has been modified
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Returns an enumerator that iterates through the vectors in the database.
-    /// </summary>
-    /// <returns>An enumerator for the vectors in the database.</returns>
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
-
-    /// <summary>
     /// Searches for the k nearest neighbors to a given query vector.
     /// </summary>
     /// <param name="query">The query vector.</param>
     /// <param name="k">The number of nearest neighbors to retrieve.</param>
     /// <returns>A list of the k nearest neighbors to the query vector.</returns>
+    /// TODO -- Search should move out of VectorDatabase 
     public IList<Vector> Search(Vector query, int k)
     {
         try
@@ -223,7 +112,7 @@ public partial class VectorDatabase : ICollection<Vector>
             return new List<Vector>();
         }
     }
-
+    #region Load/Save
     /// <summary>
     /// Loads vectors from a specified file path.
     /// </summary>
@@ -266,7 +155,9 @@ public partial class VectorDatabase : ICollection<Vector>
                 }
 
                 _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
-                _isDirty = false; // Set the flag to indicate the database hasn't been modified
+                _vectors.Tags.BuildMap(); // Rebuild the tag map
+                _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
+                _hasOutdatedIndex = false; // Set the flag to indicate the index is up-to-date
             }
             finally
             {
@@ -276,24 +167,39 @@ public partial class VectorDatabase : ICollection<Vector>
 
     }
 
-    /// <summary>
-    /// Retrieves all vectors that match a specified predicate.
-    /// </summary>
-    /// <param name="match">The predicate to match against.</param>
-    /// <returns>A list of vectors that match the specified predicate.</returns>
-    public List<Vector> FindAll(Predicate<Vector> match)
+    private void StartIndexService() 
     {
-        return _vectors.FindAll(match);
+        // Create a new thread that will react when _hasOutdatedIndex is set to true
+        var indexService = new Thread(() => 
+        {
+            while (!_vectors.IsReadOnly)
+            {
+                if (_hasOutdatedIndex && _vectors.Count > 0)
+                {
+                    RebuildIndex();
+                }
+                Thread.Sleep(5000);
+            }
+        });
+        indexService.Priority = ThreadPriority.Lowest;
     }
 
     /// <summary>
-    /// Retrieves the first vector that matches a specified predicate.
+    /// Creates a new kd-tree index for the vectors and a map of tags to vector IDs.
+    /// (This method is eventually calls when the database is modified.)
     /// </summary>
-    /// <param name="match">The predicate to match against.</param>
-    /// <returns>The first vector that matches the specified predicate.</returns
-    public Vector Find(Predicate<Vector> match)
+    public void RebuildIndex()
     {
-        return _vectors.Find(match);
+        if (!_hasOutdatedIndex || _vectors == null || _vectors.Count == 0)
+        {
+            return;
+        }
+        lock (_kdTree)
+        {
+            _kdTree.Build(_vectors);
+        }
+        _vectors.Tags.BuildMap();
+        _hasOutdatedIndex = false;
     }
 
     /// <summary>
@@ -316,7 +222,7 @@ public partial class VectorDatabase : ICollection<Vector>
     public async Task SaveAsync(string path)
     {
         // If the database hasn't been modified, no need to save it
-        if (!_isDirty)
+        if (!_hasUnsavedChanges)
         {
             return;
         }
@@ -347,9 +253,9 @@ public partial class VectorDatabase : ICollection<Vector>
             outputStream.Close();
         }
         _rwLock.ExitWriteLock();
-        _isDirty = false; // Set the flag to indicate the database hasn't been modified
+        _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
     }
-
+    #endregion
 
     [LoggerMessage(
         EventId = 0,
@@ -357,6 +263,7 @@ public partial class VectorDatabase : ICollection<Vector>
         Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
     public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
+    #region Import/Export
     public async Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
     {
         ETL.IETL etl;
@@ -385,5 +292,6 @@ public partial class VectorDatabase : ICollection<Vector>
     {
         throw new NotImplementedException();
     }
+    #endregion
 
 }
