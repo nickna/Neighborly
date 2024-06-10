@@ -2,23 +2,30 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Neighborly
+namespace Neighborly.Search
 {
+    /// <summary>
+    /// K-D Tree search (see Wikipedia: https://en.wikipedia.org/wiki/K-d_tree)
+    /// </summary>
     public class KDTree
     {
-        private Node? root;
+        private KDTreeNode? root;
 
-        public void Build(IList<Vector> vectors)
+        public void Build(VectorList vectors)
         {
             if (vectors == null)
             {
                 throw new ArgumentNullException(nameof(vectors), "Vector list cannot be null");
             }
+            if (vectors.Count == 0)
+            {
+                return;
+            }
 
             root = Build(vectors, 0);
         }
 
-        private Node? Build(IList<Vector> vectors, int depth)
+        private KDTreeNode? Build(IList<Vector> vectors, int depth)
         {
             if (!vectors.Any())
                 return null;
@@ -28,7 +35,7 @@ namespace Neighborly
 
             var median = sortedVectors.Count / 2;
 
-            return new Node
+            return new KDTreeNode
             {
                 Vector = sortedVectors[median],
                 Left = Build(sortedVectors.Take(median).ToList(), depth + 1),
@@ -54,7 +61,7 @@ namespace Neighborly
 
         }
 
-        private List<Tuple<Vector, double>>? NearestNeighbors(Node? node, Vector query, int k, int depth)
+        private List<Tuple<Vector, double>>? NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth)
         {
             if (node == null || node.Vector == null)
                 return new List<Tuple<Vector, double>>();
@@ -82,11 +89,13 @@ namespace Neighborly
             return best;
         }
 
-        private class Node
+        public IList<Vector> Search(Vector query, int k)
         {
-            public Vector? Vector { get; set; }
-            public Node? Left { get; set; }
-            public Node? Right { get; set; }
+            // Perform the nearest neighbor search
+            var results = NearestNeighbors(query, k);
+
+            return results;
         }
+       
     }
 }

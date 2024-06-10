@@ -8,10 +8,10 @@ namespace Neighborly;
 public class VectorList : IList<Vector>, IDisposable
 {
     private List<Vector?> _vectorList = new();
-    private List<Guid> _guids = new();
+    private readonly List<Guid> _guids = new();
     public List<Guid> Guids => _guids;
     private readonly List<string> _onDiskFilePaths = new();
-    private readonly VectorTags _tags = new();
+    private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
     private readonly int _maxInMemoryCount;
     private readonly object _lock = new();
@@ -27,9 +27,9 @@ public class VectorList : IList<Vector>, IDisposable
     /// </summary>
     public VectorList()
     {
-        this._tags.VectorList = this;
+        _tags = new VectorTags(this);
         // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
-        this._tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
+        _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -220,11 +220,21 @@ public class VectorList : IList<Vector>, IDisposable
 
             var foundItems = new List<Vector>();
 
-            foreach (var item in _vectorList)
+            for (int i = 0; i < _vectorList.Count; i++)
             {
-                if (item != null && match(item))
+                // Check if the Vector is in memory and matches the predicate
+                if (_vectorList[i]!= null && match(_vectorList[i]))
                 {
-                    foundItems.Add(item);
+                    foundItems.Add(_vectorList[i]);
+                }
+                // Load the Vector from disk and check if it matches the predicate
+                else
+                {
+                    Neighborly.Vector diskItem = ReadFromDisk(_onDiskFilePaths[i]);
+                    if (diskItem != null && match(diskItem))
+                    {
+                        foundItems.Add(diskItem);
+                    }
                 }
             }
 
@@ -392,12 +402,11 @@ public class VectorList : IList<Vector>, IDisposable
                 throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
             }
 
-            _vectorList.RemoveAt(index);
-
             // Remove the item from disk if it exists
             if (_onDiskFilePaths[index] != string.Empty)
                 File.Delete(_onDiskFilePaths[index]);
 
+            _vectorList.RemoveAt(index);
             _onDiskFilePaths.RemoveAt(index);
 
         }
@@ -423,12 +432,12 @@ public class VectorList : IList<Vector>, IDisposable
     {
         lock (_lock)
         {
-            _vectorList.Clear();
             foreach (var path in _onDiskFilePaths)
             {
                 if (path != string.Empty && File.Exists(path))
                     File.Delete(path);
             }
+            _vectorList.Clear();
             _onDiskFilePaths.Clear();
             _guids.Clear();
             Modified?.Invoke(this, EventArgs.Empty);
@@ -480,7 +489,7 @@ public class VectorList : IList<Vector>, IDisposable
             var path = Path.GetTempFileName();
             SaveToDisk(v, path);
             _onDiskFilePaths[index] = path;
-            _vectorList[index] = null;
+            _vectorList[index] = null;           
         }
     }
 
@@ -514,19 +523,20 @@ public class VectorList : IList<Vector>, IDisposable
         {
             for (int i = 0; i < _vectorList.Count; i++)
             {
-                if (match(_vectorList[i]))
+                // Check if the item is in memory and matches the predicate
+                if (_vectorList[i] != null && match(_vectorList[i]))
                 {
                     return i;
                 }
-            }
-
-            for (int i = 0; i < _onDiskFilePaths.Count; i++)
-            {
-                var path = _onDiskFilePaths[i];
-                var diskItem = ReadFromDisk(path);
-                if (match(diskItem))
+                // Load the item from disk and check if it matches the predicate
+                else
                 {
-                    return _vectorList.Count + i;
+                    var path = _onDiskFilePaths[i];
+                    var diskItem = ReadFromDisk(path);
+                    if (diskItem != null && match(diskItem))
+                    {
+                        return i;
+                    }
                 }
             }
 

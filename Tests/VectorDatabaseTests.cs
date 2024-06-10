@@ -52,12 +52,12 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector1);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the added vector.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
 
         _db.Vectors.Update(vector2);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should still be 1 after updating a vector.");
         Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the old vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the new vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the new vector.");
     }
 
     [Test]
@@ -74,8 +74,8 @@ public class VectorDatabaseTests
         _db.Vectors.AddRange(vectors);
 
         Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding two vectors.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the first added vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the second added vector.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first added vector.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second added vector.");
     }
 
 
@@ -110,7 +110,7 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector1);
 
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the added vector.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
         Assert.That(_db.Vectors.Contains(vector2), Is.False, "Database should not contain a vector that was not added.");
     }
 
@@ -170,7 +170,7 @@ public class VectorDatabaseTests
         Assert.That(foundVector, Is.EqualTo(vector1), "Find should return the correct vector.");
 
         var notFoundVector = _db.Vectors.Find(v => v.Equals(new Vector([7f, 8, 9])));
-        Assert.IsNull(notFoundVector, "Find should return null if no vector matches the condition.");
+        Assert.That(notFoundVector, Is.Null, "Find should return null if no vector matches the condition.");
     }
 
     [Test]
@@ -187,11 +187,18 @@ public class VectorDatabaseTests
 
         var foundVectors = _db.Vectors.FindAll(v => v.Equals(vector1) || v.Equals(vector2));
         Assert.That(foundVectors.Count, Is.EqualTo(2), "FindAll should return all matching vectors.");
-        Assert.Contains(vector1, foundVectors, "FindAll should include the first matching vector.");
-        Assert.Contains(vector2, foundVectors, "FindAll should include the second matching vector.");
+        Assert.That(foundVectors, Does.Contain(vector1), "FindAll should include the first matching vector.");
+        Assert.That(foundVectors, Does.Contain(vector2), "FindAll should include the second matching vector.");
 
-        var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector([7f, 8, 9])));
+         var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector([7f, 8, 9])));
         Assert.That(notFoundVectors.Count, Is.EqualTo(0), "FindAll should return an empty list if no vectors match the condition.");
+    }
+
+    private Vector CreateVector(float[] floatArray)
+    {
+        byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
+        Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
+        return new Vector(byteArray);
     }
 
     [Test]
@@ -255,8 +262,8 @@ public class VectorDatabaseTests
 
         // Assert
         Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after loading the saved database.");
-        Assert.IsTrue(_db.Vectors.Contains(vector1), "Database should contain the first vector after loading.");
-        Assert.IsTrue(_db.Vectors.Contains(vector2), "Database should contain the second vector after loading.");
+        Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first vector after loading.");
+        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second vector after loading.");
 
         // Clean up
         Directory.Delete(path, true);
@@ -314,7 +321,8 @@ public class VectorDatabaseTests
     {
         // Arrange
         var logger = new MockLogger<VectorDatabase>();
-        var db = new VectorDatabase(logger) { SearchMethod = new MockSearchMethod() };
+        //var db = new VectorDatabase(logger){ Search.SearchAlgorithm = new MockSearchService() };
+        var db = new VectorDatabase(logger) {  };
 
         var query = new Vector([1f, 2f, 3f]);
         var k = 1;

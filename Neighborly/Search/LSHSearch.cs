@@ -1,12 +1,12 @@
-﻿namespace Neighborly;
+﻿namespace Neighborly.Search;
 
 /// <summary>
 /// Locality Sensitive Hashing (LSH) search method.
 /// A hash function that maps similar input items to the same "bucket" with high probability.
 /// </summary>
-public class LSHSearch : ISearchMethod
+public class LSHSearch
 {
-    public IList<Vector> Search(IList<Vector> vectors, Vector query, int k)
+    public static IList<Vector> Search(VectorList vectors, Vector query, int k)
     {
         List<Vector> results = new List<Vector>();
 
