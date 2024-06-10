@@ -1,27 +1,25 @@
-using System;
 using System.Collections;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.Json;
-using Neighborly;
+
 namespace Neighborly;
 
 /// <summary>
 /// List that stores items in memory up to a certain count, then spills over to disk.
 /// </summary>
-public class VectorList : IList<Neighborly.Vector>, IDisposable
+public class VectorList : IList<Vector>, IDisposable
 {
-    private List<Neighborly.Vector?> _vectorList = new();
+    private List<Vector?> _vectorList = new();
     private List<Guid> _guids = new();
-    public List<Guid> Guids
+    public readonly List<Guid> Guids
     {
         get { return _guids; }
     }
     private List<string> _onDiskFilePaths = new();
     private VectorTags _tags;
+    public List<Guid> Guids => _guids;
+    private readonly List<string> _onDiskFilePaths = new();
+    private readonly VectorTags _tags = new();
     public VectorTags Tags => _tags;
-    private int _maxInMemoryCount;
+    private readonly int _maxInMemoryCount;
     private readonly object _lock = new();
     private bool _disposed = false;
 
@@ -86,8 +84,10 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         _maxInMemoryCount = maxInMemoryCount;
     }
 
-    public void Add(Neighborly.Vector item)
+    public void Add(Vector item)
     {
+        ArgumentNullException.ThrowIfNull(item);
+
         lock (_lock)
         {
             _onDiskFilePaths.Add(string.Empty);
@@ -105,7 +105,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
 
     }
 
-    public void AddRange(IEnumerable<Neighborly.Vector> items)
+    public void AddRange(IEnumerable<Vector> items)
     {
         foreach (var item in items)
         {
@@ -113,7 +113,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    public Neighborly.Vector Get(int index)
+    public Vector Get(int index)
     {
         lock (_lock)
         {
@@ -151,11 +151,11 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         return _vectorList.ToList();
     }
 
-    public void Insert(int index, Neighborly.Vector item)
+    public void Insert(int index, Vector item)
     {
         if (index < 0 || index > Count)
         {
-            throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
+            throw new ArgumentOutOfRangeException(nameof(index), index, "Index is out of range");
         }
 
         lock (_lock)
@@ -180,15 +180,15 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
                 _guids.Insert(index, item.Id);
 
                 SaveToDisk(item, path);
- 
+
             }
-         
+
         }
         Modified?.Invoke(this, EventArgs.Empty);
 
     }
 
-    public int IndexOf(Neighborly.Vector item)
+    public int IndexOf(Vector item)
     {
         lock (_lock)
         {
@@ -203,7 +203,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
             {
                 var path = _onDiskFilePaths[i];
                 var vectorFromDisk = ReadFromDisk(path);
-                if (EqualityComparer<Neighborly.Vector>.Default.Equals(vectorFromDisk, item))
+                if (EqualityComparer<Vector>.Default.Equals(vectorFromDisk, item))
                 {
                     return _vectorList.Count + i;
                 }
@@ -216,7 +216,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
     {
         get { return false; } // This list is not read-only
     }
-    public List<Neighborly.Vector> FindAll(Predicate<Neighborly.Vector> match)
+    public List<Vector> FindAll(Predicate<Vector> match)
     {
         lock (_lock)
         {
@@ -225,7 +225,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
                 throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
             }
 
-            var foundItems = new List<Neighborly.Vector>();
+            var foundItems = new List<Vector>();
 
             for (int i = 0; i < _vectorList.Count; i++)
             {
@@ -247,7 +247,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
 
             foreach (var path in _onDiskFilePaths)
             {
-                Neighborly.Vector diskItem = ReadFromDisk(path);
+                Vector diskItem = ReadFromDisk(path);
                 if (path != string.Empty && match(diskItem))
                 {
                     foundItems.Add(diskItem);
@@ -258,7 +258,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    public Neighborly.Vector? Find(Predicate<Neighborly.Vector> match)
+    public Vector Find(Predicate<Vector> match)
     {
         lock (_lock)
         {
@@ -277,18 +277,18 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
 
             foreach (var path in _onDiskFilePaths)
             {
-                Neighborly.Vector diskItem = ReadFromDisk(path);
-                if (path != string.Empty && match(diskItem))
+                Vector diskItem = ReadFromDisk(path);
+                if (diskItem != null && match(diskItem))
                 {
                     return diskItem;
                 }
             }
 
-            return default;
+            return default(Vector);
         }
     }
 
-    public void CopyTo(Neighborly.Vector[] array, int arrayIndex)
+    public void CopyTo(Vector[] array, int arrayIndex)
     {
         lock (_lock)
         {
@@ -315,13 +315,13 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
             for (int i = 0; i < _onDiskFilePaths.Count; i++)
             {
                 var path = _onDiskFilePaths[i];
-                Neighborly.Vector item = ReadFromDisk(path);
+                Vector item = ReadFromDisk(path);
                 array[arrayIndex++] = item;
             }
         }
     }
 
-    public Neighborly.Vector this[int index]
+    public Vector this[int index]
     {
         get
         {
@@ -360,7 +360,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
     }
 
 
-    public bool Contains(Neighborly.Vector item)
+    public bool Contains(Vector item)
     {
         lock (_lock)
         {
@@ -374,7 +374,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
                 if (path == string.Empty) continue;
 
                 var diskItem = ReadFromDisk(path);
-                if (EqualityComparer<Neighborly.Vector>.Default.Equals(diskItem, item))
+                if (EqualityComparer<Vector>.Default.Equals(diskItem, item))
                 {
                     return true;
                 }
@@ -383,7 +383,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    public IEnumerator<Neighborly.Vector> GetEnumerator()
+    public IEnumerator<Vector> GetEnumerator()
     {
         lock (_lock)
         {
@@ -421,17 +421,19 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
 
     }
 
-
-
-    public bool Remove(Neighborly.Vector item)
+    public bool Remove(Vector item)
     {
-        var index = _vectorList.FindIndex(x => x == item);
+        var index = _vectorList.FindIndex(x => x != null && x.Equals(item));
+        if (index == -1)
+        {
+            index = _onDiskFilePaths.FindIndex(x => x != string.Empty && item != null && item.Equals(ReadFromDisk(x)));
+        }
+
         RemoveAt(index);
         return true;
     }
 
-    public int Count => _vectorList.Count + _onDiskFilePaths.Count;
-
+    public int Count => _vectorList.Count(v => v != null) + _onDiskFilePaths.Count;
 
     public void Clear()
     {
@@ -454,7 +456,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         return GetEnumerator();
     }
 
-    private void SaveToDisk(Neighborly.Vector v, string path)
+    private void SaveToDisk(Vector v, string path)
     {
         using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write))
         using (var writer = new BinaryWriter(stream))
@@ -463,12 +465,12 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    private Neighborly.Vector ReadFromDisk(string path)
+    private Vector ReadFromDisk(string path)
     {
         using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read))
         using (var reader = new BinaryReader(stream))
         {
-            return new Neighborly.Vector(reader);
+            return new Vector(reader);
         }
     }
 
@@ -490,15 +492,12 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
             if (_vectorList[index] == null)
             {
                 return;
-            }
-            else
-            {
-                Neighborly.Vector v = _vectorList[index];
-                var path = Path.GetTempFileName();
-                SaveToDisk(v, path);
-                _onDiskFilePaths[index] = path;
-                _vectorList[index] = null;
-            }
+
+            Vector v = _vectorList[index];
+            var path = Path.GetTempFileName();
+            SaveToDisk(v, path);
+            _onDiskFilePaths[index] = path;
+            _vectorList[index] = null;
         }
     }
 
@@ -526,7 +525,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
     {
         return _guids.FindIndex(x => x == id);
     }
-    public int FindIndex(Predicate<Neighborly.Vector> match)
+    public int FindIndex(Predicate<Vector> match)
     {
         lock (_lock)
         {
@@ -553,7 +552,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    public void RemoveRange(IEnumerable<Neighborly.Vector> items)
+    public void RemoveRange(IEnumerable<Vector> items)
     {
         lock (_lock)
         {
@@ -564,7 +563,7 @@ public class VectorList : IList<Neighborly.Vector>, IDisposable
         }
     }
 
-    public bool Update(Neighborly.Vector vector)
+    public bool Update(Vector vector)
     {
         lock (_lock)
         {

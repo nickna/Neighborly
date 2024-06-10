@@ -17,24 +17,30 @@ Neighborly is a versatile open-source vector database built with C#, designed to
 # Getting Started
 
 ## Web Server (Docker Image)
-To use Neighborly as a web server, you can pull the Docker image from [DockerHub](https://hub.docker.com/repository/docker/nick206/neighborly/general):
+To use Neighborly as a web server, you can pull the Docker image from [DockerHub](https://hub.docker.com/r/nick206/neighborly):
 
-`docker pull nick206/neighborly:latest`
+```shell
+docker pull nick206/neighborly:latest
+```
 
 Once the image is pulled, you can run the container using the following command:
 
-`docker run -p 50051:50051 neighborly/server`
+```shell
+docker run -p 8080:8080 -e PROTO_GRPC=true -e PROTO_REST=true nick206/neighborly:latest
+```
 
-This will start the Neighborly server, and you can access the gRPC API at localhost:50051.
+This will start the Neighborly server, and you can access the gRPC API at localhost:8080.
 
 ## Client Library (NuGet Package)
 To use Neighborly as a client library in your .NET projects, you can install the [NuGet](https://www.nuget.org/packages/Neighborly) package using the following command:
 
-`PM> NuGet\Install-Package Neighborly`
+```powershell
+PM> NuGet\Install-Package Neighborly
+```
 
 After installing the package, you can use the Neighborly client library in your code by importing the necessary namespaces:
 
-```
+```csharp
 using Neighborly;
 
 using Neighborly.Databases;
@@ -62,5 +68,4 @@ We welcome contributions! If you have ideas for new features or have found bugs,
 This project is licensed under the MIT License. See the LICENSE file for details.
 
 # Contact
-For any questions or further assistance, feel free to contact [![GitHub](https://img.shields.io/badge/GitHub-nickna-blue)](https://github.com/nickna)
-.
+For any questions or further assistance, feel free to contact [![GitHub](https://img.shields.io/badge/GitHub-nickna-blue)](https://github.com/nickna).

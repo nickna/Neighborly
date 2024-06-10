@@ -17,10 +17,8 @@ public class VectorDatabaseTests
     [Test]
     public void TestAdd()
     {
-        float[] floatArray = new float[] { 1, 2, 3 };
-        byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
-        var vector = new Vector(byteArray);
+        float[] floatArray = [1, 2, 3];
+        var vector = new Vector(floatArray);
 
         _db.Vectors.Add(vector);
 
@@ -32,10 +30,8 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemove()
     {
-        float[] floatArray = new float[] { 1, 2, 3 };
-        byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
-        var vector = new Vector(byteArray);
+        float[] floatArray = [1, 2, 3];
+        var vector = new Vector(floatArray);
 
         _db.Vectors.Add(vector);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
@@ -48,15 +44,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestUpdate()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
@@ -71,15 +63,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestAddRange()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         List<Vector> vectors = new List<Vector> { vector1, vector2 };
 
@@ -94,15 +82,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemoveRange()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         List<Vector> vectors = new List<Vector> { vector1, vector2 };
 
@@ -118,15 +102,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestContains()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
 
@@ -139,18 +119,14 @@ public class VectorDatabaseTests
     {
         Assert.That(_db.Count, Is.EqualTo(0), "Count should be 0 for an empty database.");
 
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
         _db.Vectors.Add(vector1);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector2);
         Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after adding a second vector.");
@@ -162,15 +138,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestClear()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
@@ -185,15 +157,11 @@ public class VectorDatabaseTests
     [Test]
     public void TestFind()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
@@ -201,22 +169,18 @@ public class VectorDatabaseTests
         var foundVector = _db.Vectors.Find(v => v.Equals(vector1));
         Assert.That(foundVector, Is.EqualTo(vector1), "Find should return the correct vector.");
 
-        var notFoundVector = _db.Vectors.Find(v => v.Equals(new Vector(new byte[] { 7, 8, 9 })));
+        var notFoundVector = _db.Vectors.Find(v => v.Equals(new Vector([7f, 8, 9])));
         Assert.That(notFoundVector, Is.Null, "Find should return null if no vector matches the condition.");
     }
 
     [Test]
     public void TestFindAll()
     {
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
@@ -226,7 +190,7 @@ public class VectorDatabaseTests
         Assert.That(foundVectors, Does.Contain(vector1), "FindAll should include the first matching vector.");
         Assert.That(foundVectors, Does.Contain(vector2), "FindAll should include the second matching vector.");
 
-        var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector(new byte[] { 7, 8, 9 })));
+         var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector([7f, 8, 9])));
         Assert.That(notFoundVectors.Count, Is.EqualTo(0), "FindAll should return an empty list if no vectors match the condition.");
     }
 
@@ -247,7 +211,7 @@ public class VectorDatabaseTests
     [TestCase(new float[] { 4, 5, 6 })]
     public void Add_WhenItemIsValid_IncreasesCountByOne(float[] floatArray)
     {
-        var vector = CreateVector(floatArray);
+        var vector = new Vector(floatArray);
         var initialCount = _db.Count;
 
         _db.Vectors.Add(vector);
@@ -259,21 +223,17 @@ public class VectorDatabaseTests
     public void TestSearch()
     {
         // Arrange
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
         // Act
-        var query = CreateVector(new float[] { 2, 3, 4 });
+        var query = new Vector([2f, 3f, 4f]);
         var result = _db.Search(query, 1);
 
         // Assert
@@ -281,18 +241,14 @@ public class VectorDatabaseTests
         Assert.Contains(vector1, result.ToList(), "Search should return the nearest vector.");
     }
     [Test]
-    public void TestSaveAndLoad()
+    public async Task TestSaveAndLoad()
     {
         // Arrange
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
@@ -300,9 +256,9 @@ public class VectorDatabaseTests
         var path = Path.GetTempPath();
 
         // Act
-        _db.SaveAsync(path).RunSynchronously();
+        await _db.SaveAsync(path).ConfigureAwait(true);
         _db.Vectors.Clear();
-        _db.LoadAsync(path).RunSynchronously();
+        await _db.LoadAsync(path).ConfigureAwait(true);
 
         // Assert
         Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after loading the saved database.");
@@ -316,21 +272,17 @@ public class VectorDatabaseTests
     public void TestUpdateNonExistentItem()
     {
         // Arrange
-        float[] floatArray1 = new float[] { 1, 2, 3 };
-        byte[] byteArray1 = new byte[floatArray1.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray1, 0, byteArray1, 0, byteArray1.Length);
-        var vector1 = new Vector(byteArray1);
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
 
-        float[] floatArray2 = new float[] { 4, 5, 6 };
-        byte[] byteArray2 = new byte[floatArray2.Length * sizeof(float)];
-        Buffer.BlockCopy(floatArray2, 0, byteArray2, 0, byteArray2.Length);
-        var vector2 = new Vector(byteArray2);
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
 
         // Act
         bool result = _db.Vectors.Update(vector2);
 
         // Assert
-        Assert.IsFalse(result, "Update should return false when the old item does not exist.");
+        Assert.That(result, Is.False, "Update should return false when the old item does not exist.");
     }
     [Test]
     public void TestConcurrency()
@@ -347,10 +299,8 @@ public class VectorDatabaseTests
             {
                 for (int j = 0; j < vectorsPerThread; j++)
                 {
-                    float[] floatArray = new float[] { j, j + 1, j + 2 };
-                    byte[] byteArray = new byte[floatArray.Length * sizeof(float)];
-                    Buffer.BlockCopy(floatArray, 0, byteArray, 0, byteArray.Length);
-                    var vector = new Vector(byteArray);
+                    float[] floatArray = [j, j + 1, j + 2];
+                    var vector = new Vector(floatArray);
                     _db.Vectors.Add(vector);
                 }
             });
@@ -374,7 +324,7 @@ public class VectorDatabaseTests
         //var db = new VectorDatabase(logger){ Search.SearchAlgorithm = new MockSearchService() };
         var db = new VectorDatabase(logger) {  };
 
-        var query = new Vector([  1f, 2f, 3f ]);
+        var query = new Vector([1f, 2f, 3f]);
         var k = 1;
 
         // Act
@@ -399,5 +349,5 @@ public class VectorDatabaseTests
     {
         Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!));
     }
-    
+
 }

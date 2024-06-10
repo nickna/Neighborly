@@ -29,11 +29,26 @@ public partial class VectorDatabase
     /// Last time the database was modified. This is updated when a vector is added or removed.
     /// </summary>
     private DateTime lastModification = DateTime.Now;
+    public VectorDatabase()
+        : this(NullLogger<VectorDatabase>.Instance)
+    {
+    }
 
     /// <summary>
     /// The time threshold in seconds for rebuilding the search indexes and VectorTags after a database change was detected.
     /// </summary>
     private const int timeThresholdSeconds = 5; 
+    /// <param name="logger">The logger to be used for logging.</param>
+    /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
+    public VectorDatabase(ILogger<VectorDatabase> logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+
+        // Wire up the event handler for the VectorList.Modified event
+        _vectors.Modified += VectorList_Modified;
+        StartIndexService();
+    }
 
     /// <summary>
     /// Gets the number of vectors in the database.
@@ -60,7 +75,7 @@ public partial class VectorDatabase
     /// </summary>
     public bool HasUnsavedChanges { get { return _hasUnsavedChanges; } }
 
-    private void VectorList_Modified(object sender, EventArgs e)
+    private void VectorList_Modified(object? sender, EventArgs e)
     {
         lastModification = DateTime.Now;
         _hasUnsavedChanges = true;
