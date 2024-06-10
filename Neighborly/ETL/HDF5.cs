@@ -4,25 +4,25 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Neighborly.ETL
+namespace Neighborly.ETL;
+
+/// <summary>
+/// ETL operation for importing and exporting Hierarchical Data Format version 5 (HDF5).
+/// </summary>
+public sealed class HDF5 : EtlBase
 {
-    /// <summary>
-    /// ETL operation for importing and exporting Hierarchical Data Format version 5 (HDF5).
-    /// </summary>
-    public class HDF5 : IETL
+    /// <inheritdoc />
+    public override string FileExtension => ".h5";
+
+    /// <inheritdoc />
+    public override Task ExportDataAsync(IEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
     {
-        public bool isDirectory { get; set; }
-        public string fileExtension => ".h5";
-        public VectorDatabase vectorDatabase { get; set; }
+        throw new NotImplementedException();
+    }
 
-        public Task ExportDataAsync(string path)
-        {
-            throw new NotImplementedException();
-        }
-
-        public Task ImportDataAsync(string path)
-        {
-            throw new NotImplementedException();
-        }
+    /// <inheritdoc />
+    protected override Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken= default)
+    {
+        throw new NotImplementedException();
     }
 }

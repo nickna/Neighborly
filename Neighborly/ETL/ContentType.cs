@@ -1,15 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿namespace Neighborly.ETL;
 
-namespace Neighborly.ETL
+public enum ContentType
 {
-    public enum ContentType
-    {
-        HDF5,       // Hierarchical Data Format version 5
-        CSV,        // Comma Separated Values
-        Parquet     // Apache Parquet
-    }
+    HDF5,       // Hierarchical Data Format version 5
+    CSV,        // Comma Separated Values
+    Parquet,    // Apache Parquet
+    JSON,        // JSON encoded vectors
+    JSONZ       // JSON encoded vectors with GZip compression
 }

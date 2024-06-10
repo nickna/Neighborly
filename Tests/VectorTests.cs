@@ -43,6 +43,7 @@ public class VectorTests
         Assert.That(newVector.Values, Is.EqualTo(originalVector.Values));
         Assert.That(newVector.Tags, Is.EqualTo(originalVector.Tags));
         Assert.That(newBinary, Is.EqualTo(binary));
+    }
 
     public void InPlaceAdd()
     {

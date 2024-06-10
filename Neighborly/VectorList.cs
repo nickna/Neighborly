@@ -42,6 +42,8 @@ public class VectorList : IList<Vector>, IDisposable
         {
             if (disposing)
             {
+                IsReadOnly = true;
+
                 // Dispose managed resources.
                 _vectorList.Clear();
             }
@@ -73,7 +75,7 @@ public class VectorList : IList<Vector>, IDisposable
     /// Creates a new instance and Sets the maximum in-memory count.
     /// </summary>
     /// <param name="maxInMemoryCount"></param>
-    public VectorList(int maxInMemoryCount)
+    public VectorList(int maxInMemoryCount) : this()
     {
         _maxInMemoryCount = maxInMemoryCount;
     }
@@ -206,10 +208,7 @@ public class VectorList : IList<Vector>, IDisposable
             return -1;
         }
     }
-    public bool IsReadOnly
-    {
-        get { return false; } // This list is not read-only
-    }
+    public bool IsReadOnly { get; private set; }
     public List<Vector> FindAll(Predicate<Vector> match)
     {
         lock (_lock)
@@ -382,8 +381,8 @@ public class VectorList : IList<Vector>, IDisposable
                     throw new FileNotFoundException();
             }
         }
-
     }
+
     public void RemoveAt(int index)
     {
         lock (_lock)
@@ -589,5 +588,4 @@ public class VectorList : IList<Vector>, IDisposable
         }
 
     }
-
 }
