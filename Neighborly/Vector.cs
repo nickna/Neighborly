@@ -6,7 +6,7 @@ namespace Neighborly;
 /// Core data structure for representing a vector of floats.
 /// </summary>
 [Serializable]
-public partial class Vector
+public partial class Vector : IEquatable<Vector>
 {
     /// <summary>
     /// Gets the unique identifier of the vector.
@@ -347,6 +347,53 @@ public partial class Vector
             Array.Copy(bytes, 0, tagsBytes, i * sizeof(short), sizeof(short));
         }
         return idBytes.Concat(valuesLengthBytes).Concat(originalTextLengthBytes).Concat(originalTextBytes).Concat(valuesBytes).Concat(tagsLengthBytes).Concat(tagsBytes).ToArray();
+    }
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj)
+    {
+        if (obj is not Vector other)
+        {
+            return false;
+        }
+
+        return Equals(this, other);
+    }
+
+    /// <inheritdoc/>
+    bool IEquatable<Vector>.Equals(Vector? other)
+    {
+        if (other == null)
+        {
+            return false;
+        }
+
+        return Equals(this, other);
+    }
+
+    private static bool Equals(Vector a, Vector b)
+    {
+        if (a.Dimension != b.Dimension)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < a.Dimension; i++)
+        {
+            if (a[i] != b[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public override int GetHashCode()
+    {
+        // TODO: Define if Guid, OriginalText, or Tags should be included in the hash code
+        return HashCode.Combine(Values);
     }
 
     /// <summary>
