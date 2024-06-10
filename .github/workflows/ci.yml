@@ -21,19 +21,13 @@ jobs:
     - name: Setup .NET Core
       uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: '8.0.300'  # Specify the exact .NET SDK version
+        dotnet-version: '8.0.x'  
 
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
       run: dotnet build --configuration Release --no-restore
-
-    - name: List files after build
-      run: find . -type f -name '*.dll'
-
-    - name: List contents of test project bin directory
-      run: ls -la ./Tests/bin/Release/net8.0/
 
     - name: Run tests
       run: dotnet test --configuration Release --no-build --verbosity normal
