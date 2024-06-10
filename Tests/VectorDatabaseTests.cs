@@ -10,6 +10,8 @@ public class VectorDatabaseTests
     [SetUp]
     public void Setup()
     {
+        _db?.Vectors?.Dispose();
+
         _db = new VectorDatabase();
     }
 
