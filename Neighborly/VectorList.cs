@@ -8,16 +8,10 @@ namespace Neighborly;
 public class VectorList : IList<Vector>, IDisposable
 {
     private List<Vector?> _vectorList = new();
-    private List<Guid> _guids = new();
-    public readonly List<Guid> Guids
-    {
-        get { return _guids; }
-    }
-    private List<string> _onDiskFilePaths = new();
-    private VectorTags _tags;
+    private readonly List<Guid> _guids = new();
     public List<Guid> Guids => _guids;
     private readonly List<string> _onDiskFilePaths = new();
-    private readonly VectorTags _tags = new();
+    private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
     private readonly int _maxInMemoryCount;
     private readonly object _lock = new();
@@ -489,14 +483,13 @@ public class VectorList : IList<Vector>, IDisposable
 
             // Check if the item is already on disk. This is evident if the item is null.
             if (_vectorList[index] == null)
-            {
                 return;
 
             Vector v = _vectorList[index];
             var path = Path.GetTempFileName();
             SaveToDisk(v, path);
             _onDiskFilePaths[index] = path;
-            _vectorList[index] = null;
+            _vectorList[index] = null;           
         }
     }
 
