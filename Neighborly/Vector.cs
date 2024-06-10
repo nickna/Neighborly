@@ -211,8 +211,7 @@ public partial class Vector
     /// <exception cref="ArgumentException">Thrown when the dimensions of the vectors do not match.</exception>
     public static Vector operator +(Vector a, Vector b)
     {
-        if (a.Dimension != b.Dimension)
-            throw new ArgumentException("Dimensions must match");
+        GuardDimensionsMatch(a, b);
 
         float[] result = new float[a.Dimension];
         for (int i = 0; i < a.Dimension; i++)
@@ -247,8 +246,7 @@ public partial class Vector
     /// <exception cref="ArgumentException">Thrown when the dimensions of the vectors do not match.</exception>
     public static Vector operator -(Vector a, Vector b)
     {
-        if (a.Dimension != b.Dimension)
-            throw new ArgumentException("Dimensions must match");
+        GuardDimensionsMatch(a, b);
 
         float[] result = new float[a.Dimension];
         for (int i = 0; i < a.Dimension; i++)
@@ -275,6 +273,52 @@ public partial class Vector
     public float Magnitude
     {
         get { return (float)Math.Sqrt(Values.Sum(x => x * x)); }
+    }
+
+    /// <summary>
+    /// Adds the <paramref name="addend"/> vector to this vector element-wise.
+    /// </summary>
+    /// <param name="addend">The vector to add.</param>
+    /// <exception cref="ArgumentException">Thrown when the dimensions of the vectors do not match.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when the <paramref name="addend"/> is null.</exception>
+    public void InPlaceAdd(Vector addend)
+    {
+        ArgumentNullException.ThrowIfNull(addend);
+        GuardDimensionsMatch(addend);
+
+        for (int i = 0; i < Dimension; i++)
+        {
+            Values[i] = Values[i] + addend[i];
+        }
+    }
+
+    /// <summary>
+    /// Subtracts the <paramref name="subtrahend"/> vector from this vector element-wise.
+    /// </summary>
+    /// <param name="subtrahend">The vector to subtract.</param>
+    /// <exception cref="ArgumentException">Thrown when the dimensions of the vectors do not match.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when the <paramref name="subtrahend"/> is null.</exception>
+    public void InPlaceSubtract(Vector subtrahend)
+    {
+        ArgumentNullException.ThrowIfNull(subtrahend);
+        GuardDimensionsMatch(subtrahend);
+
+        for (int i = 0; i < Dimension; i++)
+        {
+            Values[i] = Values[i] - subtrahend[i];
+        }
+    }
+
+    /// <summary>
+    /// Divides each element of this vector by a scalar value.
+    /// </summary>
+    /// <param name="n">The scalar value to divide by.</param>
+    public void InPlaceDivide(int n)
+    {
+        for (int i = 0; i < Dimension; i++)
+        {
+            Values[i] = Values[i] / n;
+        }
     }
 
     /// <summary>
@@ -309,4 +353,14 @@ public partial class Vector
     /// Gets the number of dimensions in the vector.
     /// </summary>
     public int Dimensions => Values.Length / sizeof(float);
+
+    private void GuardDimensionsMatch(Vector other) => GuardDimensionsMatch(this, other);
+
+    private static void GuardDimensionsMatch(Vector a, Vector b)
+    {
+        if (a.Dimensions != b.Dimensions)
+        {
+            throw new ArgumentException("Dimensions must match");
+        }
+    }
 }
