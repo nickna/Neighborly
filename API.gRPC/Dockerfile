@@ -31,5 +31,7 @@ WORKDIR /app
 # Copy the build output from the build environment
 COPY --from=build-env /app/API.gRPC/out .
 
+USER $APP_UID
+
 # Set the entry point of the application
-ENTRYPOINT ["dotnet", "API.gRPC.dll"]
+ENTRYPOINT ["./API"]
