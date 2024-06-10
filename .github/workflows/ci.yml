@@ -33,7 +33,7 @@ jobs:
       run: find . -type f -name '*.dll'
 
     - name: List contents of test project bin directory
-      run: ls -la ./Tests/bin/Debug/net8.0/
+      run: ls -la ./Tests/bin/Release/net8.0/
 
     - name: Run tests
-      run: dotnet test --no-build --verbosity normal
+      run: dotnet test --configuration Release --no-build --verbosity normal
