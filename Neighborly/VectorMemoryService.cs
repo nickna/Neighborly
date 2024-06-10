@@ -84,7 +84,7 @@ namespace Neighborly
             }
         }
 
-        public VectorDatabase VectorDatabase { get; set; }
+        public VectorDatabase? VectorDatabase { get; set; }
         private TimeSpan _Frequency = TimeSpan.FromSeconds(10);
         private bool _IsRunning = false;
 

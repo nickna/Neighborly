@@ -7,45 +7,33 @@ using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Reflection.PortableExecutable;
+using Neighborly.Search;
+using System.Runtime.InteropServices;
+using System.ComponentModel.DataAnnotations;
 
 namespace Neighborly;
 
 /// <summary>
 /// Represents a database for storing and searching vectors.
 /// </summary>
-public partial class VectorDatabase // : ICollection<Vector>
+public partial class VectorDatabase
 {
     private readonly ILogger<VectorDatabase> _logger;
     private VectorList _vectors = new();
     public VectorList Vectors => _vectors;
-    private KDTree _kdTree = new();
-    private ISearchMethod _searchStrategy = new LinearSearch();
+    private Search.SearchService _searchService;
     private ReaderWriterLockSlim _rwLock = new();
     private StorageOptionEnum _storageOption = StorageOptionEnum.Auto;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// Last time the database was modified. This is updated when a vector is added or removed.
     /// </summary>
-    public VectorDatabase()
-        : this(NullLogger<VectorDatabase>.Instance)
-    {
-        // Wire up the event handler for the VectorList.Modified event
-        _vectors.Modified += VectorList_Modified;
-        StartIndexService();
-    }
+    private DateTime lastModification = DateTime.Now;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// The time threshold in seconds for rebuilding the search indexes and VectorTags after a database change was detected.
     /// </summary>
-    /// <param name="logger">The logger to be used for logging.</param>
-    /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
-    public VectorDatabase(ILogger<VectorDatabase> logger)
-    {
-        ArgumentNullException.ThrowIfNull(logger);
-        _logger = logger;
-        _vectors.Modified += VectorList_Modified;
-        StartIndexService();
-    }
+    private const int timeThresholdSeconds = 5; 
 
     /// <summary>
     /// Gets the number of vectors in the database.
@@ -57,16 +45,24 @@ public partial class VectorDatabase // : ICollection<Vector>
     /// </summary>
     public bool IsReadOnly => false;
 
+    /// <summary>
+    /// Indicates whether the database has been modified since the last save.
+    /// </summary>
     private bool _hasUnsavedChanges = false;
+
+    /// <summary>
+    /// Indicates whether the database has changed since the last indexing, and it needs to be rebuilt.
+    /// </summary>
     private bool _hasOutdatedIndex = false;
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
     /// </summary>
-    public bool IsDirty { get { return _hasUnsavedChanges; } }
+    public bool HasUnsavedChanges { get { return _hasUnsavedChanges; } }
 
     private void VectorList_Modified(object sender, EventArgs e)
     {
+        lastModification = DateTime.Now;
         _hasUnsavedChanges = true;
         _hasOutdatedIndex = true;
     }
@@ -80,38 +76,46 @@ public partial class VectorDatabase // : ICollection<Vector>
         get { return _storageOption; }
     }
 
-    /// <summary>
-    /// Gets or sets the search method used by the database.
-    /// This can be changed at runtime to switch between search methods.
-    /// </summary>
-    public ISearchMethod SearchMethod
+    public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
-        get { return _searchStrategy; }
-        set { _searchStrategy = value; }
+        return _searchService.Search(query, k);
+    }
+
+    [LoggerMessage(
+    EventId = 0,
+    Level = LogLevel.Error,
+    Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
+    public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
+
+    #region Constructors
+    /// <summary>
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
+    /// </summary>
+    public VectorDatabase()
+        : this(NullLogger<VectorDatabase>.Instance)
+    {
+        // Wire up the event handler for the VectorList.Modified event
+        _vectors.Modified += VectorList_Modified;
+        _searchService = new Search.SearchService(_vectors);
+        DatabaseService();
     }
 
     /// <summary>
-    /// Searches for the k nearest neighbors to a given query vector.
+    /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
     /// </summary>
-    /// <param name="query">The query vector.</param>
-    /// <param name="k">The number of nearest neighbors to retrieve.</param>
-    /// <returns>A list of the k nearest neighbors to the query vector.</returns>
-    /// TODO -- Search should move out of VectorDatabase 
-    public IList<Vector> Search(Vector query, int k)
+    /// <param name="logger">The logger to be used for logging.</param>
+    /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
+    public VectorDatabase(ILogger<VectorDatabase> logger)
     {
-        try
-        {
-            return _searchStrategy.Search(_vectors, query, k);
-        }
-        catch (Exception ex)
-        {
-            // Log the exception, if you have a logging system
-            CouldNotFindVectorInDb(query, k, ex);
-
-            // return an empty list if an exception occurs
-            return new List<Vector>();
-        }
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+        _vectors.Modified += VectorList_Modified;
+        _searchService = new Search.SearchService(_vectors);
+        DatabaseService();
     }
+
+    #endregion
+
     #region Load/Save
     /// <summary>
     /// Loads vectors from a specified file path.
@@ -128,7 +132,7 @@ public partial class VectorDatabase // : ICollection<Vector>
         }
         else if (createOnNew && !fileExists) 
         {
-            // We'll create the file when SaveAsync() is called
+            // Do nothing here. We'll create the file when SaveAsync() is called
             return;
         }
         else
@@ -154,10 +158,10 @@ public partial class VectorDatabase // : ICollection<Vector>
                     }
                 }
 
-                _kdTree.Build(_vectors); // Rebuild the KDTree with the new vectors
-                _vectors.Tags.BuildMap(); // Rebuild the tag map
+                await RebuildSearchIndexesAsync();     // Rebuild both k-d tree and Ball Tree search index  
+                _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
-                _hasOutdatedIndex = false; // Set the flag to indicate the index is up-to-date
+                _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
             }
             finally
             {
@@ -167,16 +171,28 @@ public partial class VectorDatabase // : ICollection<Vector>
 
     }
 
-    private void StartIndexService() 
+    /// <summary>
+    /// Provides a service that rebuilds the search indexes (k-d tree and LSH) and VectorTags when the database is modified.
+    /// </summary>
+    /// <seealso cref="timeThresholdSeconds"/>
+    private void DatabaseService() 
     {
+        // The index service is not supported on mobile platforms
+        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
+            return;
+
         // Create a new thread that will react when _hasOutdatedIndex is set to true
-        var indexService = new Thread(() => 
+        var indexService = new Thread(async () => 
         {
             while (!_vectors.IsReadOnly)
             {
-                if (_hasOutdatedIndex && _vectors.Count > 0)
+                // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
+                if (_hasOutdatedIndex && 
+                    _vectors.Count > 0 && 
+                    DateTime.Now.Subtract(lastModification).TotalSeconds > timeThresholdSeconds)
                 {
-                    RebuildIndex();
+                    await RebuildTagsAsync();
+                    await RebuildSearchIndexesAsync();
                 }
                 Thread.Sleep(5000);
             }
@@ -188,18 +204,24 @@ public partial class VectorDatabase // : ICollection<Vector>
     /// Creates a new kd-tree index for the vectors and a map of tags to vector IDs.
     /// (This method is eventually calls when the database is modified.)
     /// </summary>
-    public void RebuildIndex()
+    public async Task RebuildTagsAsync()
     {
         if (!_hasOutdatedIndex || _vectors == null || _vectors.Count == 0)
         {
             return;
         }
-        lock (_kdTree)
-        {
-            _kdTree.Build(_vectors);
-        }
-        _vectors.Tags.BuildMap();
+        await Task.Run (() => _vectors.Tags.BuildMap());
         _hasOutdatedIndex = false;
+    }
+
+    // This is an async function
+    public async Task RebuildSearchIndexesAsync()
+    {
+        await Task.Run(() => _searchService.BuildAllIndexes());
+    }
+    public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
+    {
+        await Task.Run(() => _searchService.BuildIndex(searchMethod));
     }
 
     /// <summary>
@@ -216,7 +238,7 @@ public partial class VectorDatabase // : ICollection<Vector>
 
     /// <summary>
     /// Saves the vectors to a specified file path.
-    /// (In the gRPC server, this method will be called when the host OS sends a shutdown signal.)
+    /// (In the API server, this method will be called when the host OS sends a shutdown signal.)
     /// </summary>
     /// <param name="path">The file path to save the vectors to.</param>
     public async Task SaveAsync(string path)
@@ -256,12 +278,6 @@ public partial class VectorDatabase // : ICollection<Vector>
         _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
     }
     #endregion
-
-    [LoggerMessage(
-        EventId = 0,
-        Level = LogLevel.Error,
-        Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
-    public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
     #region Import/Export
     public async Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)

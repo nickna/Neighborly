@@ -87,7 +87,7 @@ public partial class Vector
             tags[i] = stream.ReadInt16();
         }
 
-        // Assign the read values to the properties
+        Tags = tags;
         Id = id;
         Values = values;
         OriginalText = originalText;

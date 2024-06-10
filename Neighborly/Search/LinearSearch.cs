@@ -1,11 +1,11 @@
-namespace Neighborly;
+namespace Neighborly.Search;
 
 /// <summary>
 /// Linear search method.
 /// </summary>
-public class LinearSearch : ISearchMethod
+public class LinearSearch
 {
-    public IList<Vector> Search(IList<Vector> vectors, Vector query, int k)
+    public static IList<Vector> Search(VectorList vectors, Vector query, int k)
     {
         List<Vector> results = new List<Vector>();
 

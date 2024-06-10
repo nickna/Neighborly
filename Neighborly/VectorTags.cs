@@ -15,9 +15,13 @@ namespace Neighborly
     {
         private Dictionary<short, string> _tags = new();
         private Dictionary<short, List<Guid>> _tagMap = new();
-        public VectorList VectorList { get; set; }
+        private VectorList _vectorList;
+        public event EventHandler? Modified;
 
-        public event EventHandler Modified;
+        public VectorTags(VectorList vectorList)
+        {
+            this._vectorList = vectorList;
+        }
 
         public short GetId(string tag)
         {
@@ -163,20 +167,19 @@ namespace Neighborly
         /// <summary>
         /// Creates a tag map for the vectors
         /// </summary>
-        /// <seealso cref="VectorList"/>
         /// <exception cref="ArgumentNullException"></exception>
         public void BuildMap()
         {
-            if (VectorList == null || VectorList.Count == 0)
+            if (_vectorList == null || _vectorList.Count == 0)
             {
                 throw new ArgumentNullException(nameof(VectorList));
             }
             lock (_tagMap)
             {
                 _tagMap.Clear();
-                for (int i = 0; i < VectorList.Count; i++)
+                for (int i = 0; i < _vectorList.Count; i++)
                 {
-                    var vector = VectorList[i];
+                    var vector = _vectorList[i];
                     foreach (var tagId in vector.Tags)
                     {
                         if (!_tagMap.ContainsKey(tagId))

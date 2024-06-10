@@ -40,11 +40,19 @@ namespace Neighborly.API
         public override Task<GetVectorResponse> GetVectorById(GetVectorByIdRequest request, ServerCallContext context)
         {
             var vector = _db.Vectors.Find(v => v.Id == Guid.Parse(request.Id));
-            var response = new GetVectorResponse
+            if (vector != null)
             {
-                Vector = Utility.ConvertToVectorMessage(vector)
-            };
-            return Task.FromResult(response);
+                var response = new GetVectorResponse
+                {
+                    Vector = Utility.ConvertToVectorMessage(vector)
+                };
+                return Task.FromResult(response);
+            }
+            else
+            {
+                return Task.FromResult(new GetVectorResponse());
+            }
+            
         }
 
         public override Task<Response> UpdateVector(UpdateVectorRequest request, ServerCallContext context)

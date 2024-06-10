@@ -1,14 +1,17 @@
-﻿namespace Neighborly;
+﻿namespace Neighborly.Search;
 public class BallTree
 {
-    private Node root;
+    private BallTreeNode root;
 
-    public BallTree(IList<Vector> vectors)
+    public void Build(VectorList vectors)
     {
-        root = Build(vectors);
+        if (vectors.Count == 0)
+            return;
+        
+        root = BuildNodes(vectors);
     }
 
-    private Node Build(IList<Vector> vectors)
+    private BallTreeNode BuildNodes(IList<Vector> vectors)
     {
         if (!vectors.Any())
             return null;
@@ -16,12 +19,12 @@ public class BallTree
         var center = vectors.Aggregate((a, b) => a + b) / vectors.Count;
         var radius = vectors.Max(v => v.Distance(center));
 
-        return new Node
+        return new BallTreeNode
         {
             Center = center,
             Radius = radius,
-            Left = Build(vectors.Take(vectors.Count / 2).ToList()),
-            Right = Build(vectors.Skip(vectors.Count / 2).ToList())
+            Left = BuildNodes(vectors.Take(vectors.Count / 2).ToList()),
+            Right = BuildNodes(vectors.Skip(vectors.Count / 2).ToList())
         };
     }
 
@@ -30,7 +33,7 @@ public class BallTree
         return Search(root, query, k);
     }
 
-    private IList<Vector> Search(Node node, Vector query, int k)
+    private IList<Vector> Search(BallTreeNode node, Vector query, int k)
     {
         if (node == null)
             return new List<Vector>();
@@ -46,11 +49,5 @@ public class BallTree
             .ToList();
     }
 
-    private class Node
-    {
-        public Vector Center { get; set; }
-        public double Radius { get; set; }
-        public Node Left { get; set; }
-        public Node Right { get; set; }
-    }
+    
 }
