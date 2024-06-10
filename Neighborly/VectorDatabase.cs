@@ -1,12 +1,7 @@
-﻿using Neighborly;
-using Neighborly.ETL;
-using System.Collections;
-using System.Collections.Generic;
+﻿using Neighborly.ETL;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
-using System.Security.Cryptography;
-using System.Reflection.PortableExecutable;
 
 namespace Neighborly;
 
@@ -16,7 +11,7 @@ namespace Neighborly;
 public partial class VectorDatabase // : ICollection<Vector>
 {
     private readonly ILogger<VectorDatabase> _logger;
-    private VectorList _vectors = new();
+    private readonly VectorList _vectors = new();
     public VectorList Vectors => _vectors;
     private KDTree _kdTree = new();
     private ISearchMethod _searchStrategy = new LinearSearch();
@@ -125,7 +120,7 @@ public partial class VectorDatabase // : ICollection<Vector>
         {
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
-        else if (createOnNew && !fileExists) 
+        else if (createOnNew && !fileExists)
         {
             // We'll create the file when SaveAsync() is called
             return;
@@ -166,10 +161,10 @@ public partial class VectorDatabase // : ICollection<Vector>
 
     }
 
-    private void StartIndexService() 
+    private void StartIndexService()
     {
         // Create a new thread that will react when _hasOutdatedIndex is set to true
-        var indexService = new Thread(() => 
+        var indexService = new Thread(() =>
         {
             while (!_vectors.IsReadOnly)
             {
@@ -232,7 +227,7 @@ public partial class VectorDatabase // : ICollection<Vector>
         }
 
         _rwLock.EnterWriteLock();
-        
+
         // Save the vectors to a binary file
         string filePath = Path.Combine(path, "vectors.bin");
         var outputStream = new FileStream(filePath, FileMode.Create);
@@ -260,36 +255,20 @@ public partial class VectorDatabase // : ICollection<Vector>
         EventId = 0,
         Level = LogLevel.Error,
         Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
-    public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
+    private partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
     #region Import/Export
-    public async Task ImportDataAsync(string path, bool isDirectory, ETL.ContentType contentType)
+    public Task ImportDataAsync(string path, bool isDirectory, ContentType contentType, CancellationToken cancellationToken = default)
     {
-        ETL.IETL etl;
-
-        switch (contentType)
-        {
-            case ETL.ContentType.Parquet:
-                etl = new ETL.Parquet();
-                break;
-            case ETL.ContentType.CSV:
-                etl = new ETL.Csv();
-                break;
-            case ETL.ContentType.HDF5:
-                etl = new ETL.HDF5();
-                break;
-            default:
-                throw new NotSupportedException($"Content type {contentType} is not supported.");
-        }
-
-        etl.isDirectory = isDirectory;
-        etl.vectorDatabase = this;
-        await etl.ImportDataAsync(path);
+        IETL etl = EtlFactory.CreateEtl(contentType);
+        etl.IsDirectory = isDirectory;
+        return etl.ImportDataAsync(path, Vectors, cancellationToken);
     }
 
-    Task ExportDataAsync(string path, ETL.ContentType contentType)
+    public Task ExportDataAsync(string path, ContentType contentType, CancellationToken cancellationToken = default)
     {
-        throw new NotImplementedException();
+        IETL etl = EtlFactory.CreateEtl(contentType);
+        return etl.ExportDataAsync(Vectors, path, cancellationToken);
     }
     #endregion
 

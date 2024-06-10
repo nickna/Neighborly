@@ -1,97 +1,61 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.AccessControl;
-using System.Text;
-using System.Threading.Tasks;
-using Parquet;
-using Parquet.Data;
-using Parquet.Meta;
-using Parquet.Rows;
+﻿using Parquet;
 using Parquet.Schema;
-using Parquet.Meta;
-using System.Security.Cryptography;
+using Parquet.Serialization;
 
-namespace Neighborly.ETL
+namespace Neighborly.ETL;
+
+/// <summary>
+/// ETL operation for importing and exporting Parquet files.
+/// </summary>
+public sealed class Parquet : EtlBase
 {
-    /// <summary>
-    /// ETL operation for importing and exporting Parquet files.
-    /// </summary>
-    public class Parquet : IETL
+    /// <inheritdoc />
+    public override string FileExtension => ".parquet";
+
+    /// <inheritdoc />
+    public override async Task ExportDataAsync(IEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
     {
-        public bool isDirectory { get; set; }
-        public string fileExtension => ".parquet";
-        public VectorDatabase vectorDatabase { get; set; }
+        ArgumentNullException.ThrowIfNull(vectors);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        public Task ExportDataAsync(string path)
+        using var fs = CreateWriteStream(path);
+        await ParquetSerializer.SerializeAsync(vectors.Select(ConvertToRecord), fs, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    protected override async Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken)
+    {
+        using var fs = CreateReadStream(path);
+        using ParquetReader reader = await ParquetReader.CreateAsync(fs, cancellationToken: cancellationToken).ConfigureAwait(false);
+        // Iterate through the row groups in the file
+        for (int i = 0; i < reader.RowGroupCount; i++)
         {
-            if (isDirectory)
+            using ParquetRowGroupReader groupReader = reader.OpenRowGroupReader(i);
+            // Iterate through the columns in the row group
+            foreach (DataField field in reader.Schema.GetDataFields())
             {
-                var files = System.IO.Directory.GetFiles(path, "*" + fileExtension);
-                foreach (var file in files)
+                // Check if the column is a float array (i.e. a Vector)
+                if (field.ClrType == typeof(float))
                 {
-                    // Export the data
-                }
-            }
-            throw new NotImplementedException();
-        }
-
-        /// <summary>
-        /// Attempts to find columns with byte array data and imports it into the VectorDatabase.
-        /// </summary>
-        /// <param name="path">Folder path containing the parquet file(s)</param>
-        /// <returns></returns>
-        public async Task ImportDataAsync(string path)
-        {
-            string[] files;
-            if (this.isDirectory)
-                files = System.IO.Directory.GetFiles(path, "*" + fileExtension);
-            else
-                files = new string[] { path };
-
-            foreach (var file in files)
-            {
-                // Load the Parquet file
-                if (File.Exists(file))
-                {
-                    using (Stream fs = System.IO.File.OpenRead(file))
+                    // Read float array
+                    var data = await groupReader.ReadColumnAsync(field, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    var numValues = data.NumValues;
+                    if (numValues > 0)
                     {
-                        using (ParquetReader reader = await ParquetReader.CreateAsync(fs))
+                        // Convert float array to Vector
+                        if (data.Data is float[] d)
                         {
-                            // Iterate through the row groups in the file
-                            for (int i = 0; i < reader.RowGroupCount; i++)
-                            {
-                                using (ParquetRowGroupReader groupReader = reader.OpenRowGroupReader(i))
-                                {
-                                    // Iterate through the columns in the row group
-                                    foreach (DataField field in reader.Schema.GetDataFields())
-                                    {
-                                        // Check if the column is a float array (i.e. a Vector)
-                                        if (field.ClrType == typeof(float[]))
-                                        {
-                                            // Read float array
-                                            var data = await groupReader.ReadColumnAsync(field);
-                                            var numValues = data.NumValues;
-                                            if (numValues > 0)
-                                            {
-                                                // Convert float array to Vector
-                                                float[] d = data.Data as float[];
-                                                if (d != null)
-                                                {
-                                                    // Convert float array to Vector
-                                                    var vector = new Vector(d);
-                                                    vectorDatabase.Vectors.Add(vector);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            // Convert float array to Vector
+                            var vector = new Vector(d);
+                            vectors.Add(vector);
                         }
                     }
                 }
             }
         }
-
     }
+
+    private static VectorRecord ConvertToRecord(Vector vector) => new(vector.Id, vector.Values, vector.Tags, vector.OriginalText);
+
+    private record class VectorRecord(Guid Id, float[] Values, short[] Tags, string? OriginalText);
 }

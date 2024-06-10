@@ -142,6 +142,17 @@ public partial class Vector : IEquatable<Vector>
         Tags = tags;
     }
 
+    internal Vector(Guid id, float[] values, short[] tags, string? originalText)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(tags);
+
+        Id = id;
+        Values = values;
+        Tags = tags;
+        OriginalText = originalText ?? string.Empty;
+    }
+
     /// <summary>
     /// Gets the dimension of the vector.
     /// </summary>
