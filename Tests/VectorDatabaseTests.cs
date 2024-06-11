@@ -321,11 +321,10 @@ public class VectorDatabaseTests
     {
         // Arrange
         var logger = new MockLogger<VectorDatabase>();
-        //var db = new VectorDatabase(logger){ Search.SearchAlgorithm = new MockSearchService() };
         var db = new VectorDatabase(logger) {  };
 
         var query = new Vector([1f, 2f, 3f]);
-        var k = 1;
+        var k = -1;
 
         // Act
         db.Search(query, k);
@@ -340,8 +339,8 @@ public class VectorDatabaseTests
             Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("{OriginalFormat}", "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")), "The message template should be logged.");
         }
 
-        Assert.That(logger.LastException, Is.InstanceOf<MockException>(), "The exception should be logged.");
-        Assert.That(logger.LastMessage, Is.EqualTo("Could not find vector `Neighborly.Vector` in the database searching the 1 nearest neighbor(s)."), "The message should be correct.");
+        Assert.That(logger.LastException, Is.InstanceOf<System.ArgumentOutOfRangeException>(), "The exception should be logged.");
+        Assert.That(logger.LastMessage, Is.EqualTo("Could not find vector `Neighborly.Vector` in the database searching the -1 nearest neighbor(s)."), "The message should be correct.");
     }
 
     [Test]

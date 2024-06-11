@@ -71,7 +71,16 @@ public partial class VectorDatabase
 
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
-        return _searchService.Search(query, k);
+        try
+        {
+            return _searchService.Search(query, k);
+        }
+        catch (Exception ex)
+        {
+            CouldNotFindVectorInDb(query, k, ex);
+            return new List<Vector>();
+        }
+            
     }
 
     [LoggerMessage(
@@ -244,28 +253,48 @@ public partial class VectorDatabase
             Directory.CreateDirectory(path);
         }
 
-        _rwLock.EnterWriteLock();
-
-        // Save the vectors to a binary file
-        string filePath = Path.Combine(path, "vectors.bin");
-        var outputStream = new FileStream(filePath, FileMode.Create);
-        // TODO -- Experiment with other compression types. For now, GZip works.
-        using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
-        using (var writer = new BinaryWriter(compressionStream))
+        try
         {
-            // TODO -- This should be async and potentially parallelized
-            writer.Write(_vectors.Count);
-            foreach (Vector v in _vectors)
+            _rwLock.EnterWriteLock();
+            // Save the vectors to a binary file
+            string filePath = Path.Combine(path, "vectors.bin");
+            var outputStream = new FileStream(filePath, FileMode.Create);
+            // TODO -- Experiment with other compression types. For now, GZip works.
+            using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
+            using (var writer = new BinaryWriter(compressionStream))
             {
-                byte[] bytes = v.ToBinary();
-                writer.Write(bytes.Length);    // File offset of the next Vector
-                writer.Write(bytes);           // The Vector itself
+                // TODO -- This should be async and potentially parallelized
+                writer.Write(_vectors.Count);
+                foreach (Vector v in _vectors)
+                {
+                    byte[] bytes = v.ToBinary();
+                    writer.Write(bytes.Length);    // File offset of the next Vector
+                    writer.Write(bytes);           // The Vector itself
+                }
+                writer.Close();
+                outputStream.Close();
             }
-            writer.Close();
-            outputStream.Close();
+
+            _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
         }
-        _rwLock.ExitWriteLock();
-        _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogError(ex, "An error occurred while saving the database. Access to the path is denied.");
+        }
+        catch (IOException ex)
+        {
+            _logger.LogError(ex, "An error occurred while saving the database.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "An error occurred while saving the database.");
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+
+        
     }
     #endregion
 
