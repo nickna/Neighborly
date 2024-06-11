@@ -13,7 +13,7 @@ public class LoggingTests
     public void Setup()
     {
         _logger = new MockLogger<VectorDatabase>();
-        _db = new VectorDatabase(_logger);
+        _db = new VectorDatabase(_logger, null);
     }
 
     [Test]

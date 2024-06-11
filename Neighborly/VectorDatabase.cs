@@ -1,8 +1,8 @@
 ﻿using Neighborly.ETL;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using Neighborly.Search;
+using System.Diagnostics;
 using CsvHelper;
 
 namespace Neighborly;
@@ -13,7 +13,13 @@ namespace Neighborly;
 public partial class VectorDatabase
 {
     private readonly ILogger<VectorDatabase> _logger = Logging.LoggerFactory.CreateLogger<VectorDatabase>();
+    private readonly Instrumentation _instrumentation;
+    /// <summary>
+    /// The unique identifier of the database for telemetry purposes.
+    /// </summary>
+    private readonly Guid _id = Guid.NewGuid();
     private readonly VectorList _vectors = new();
+    private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
     private ReaderWriterLockSlim _rwLock = new();
@@ -27,7 +33,7 @@ public partial class VectorDatabase
     /// <summary>
     /// The time threshold in seconds for rebuilding the search indexes and VectorTags after a database change was detected.
     /// </summary>
-    private const int timeThresholdSeconds = 5; 
+    private const int timeThresholdSeconds = 5;
 
     /// <summary>
     /// Gets the number of vectors in the database.
@@ -88,14 +94,14 @@ public partial class VectorDatabase
     EventId = 0,
     Level = LogLevel.Error,
     Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
-    public partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
+    private partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
     #region Constructors
     /// <summary>
     /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
     /// </summary>
     public VectorDatabase()
-        : this(Logging.LoggerFactory.CreateLogger<VectorDatabase>())
+        : this(Logging.LoggerFactory.CreateLogger<VectorDatabase>(), null)
     {
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
@@ -107,11 +113,28 @@ public partial class VectorDatabase
     /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
     /// </summary>
     /// <param name="logger">The logger to be used for logging.</param>
+    /// <param name="instrumentation">The instrumentation to be used for metrics and tracing.</param>
     /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
-    public VectorDatabase(ILogger<VectorDatabase> logger)
+    public VectorDatabase(ILogger<VectorDatabase> logger, Instrumentation? instrumentation)
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
+        _instrumentation = instrumentation ?? Instrumentation.Instance;
+
+        _instrumentation.Meter.CreateObservableGauge(
+            name: "neighborly.db.vectors.count",
+            unit: "{vectors}",
+            description: "The number of vectors in the database.",
+            observeValue: () => Count,
+            tags: [new("db.namespace", _id)]
+        );
+        _indexRebuildCounter = _instrumentation.Meter.CreateCounter<long>(
+            name: "neighborly.db.index.rebuild",
+            unit: "{rebuilds}",
+            description: "The number of times the search index was rebuilt.",
+            tags: [new("db.namespace", _id)]
+        );
+
         _vectors.Modified += VectorList_Modified;
         _searchService = new Search.SearchService(_vectors);
         StartIndexService();
@@ -186,20 +209,25 @@ public partial class VectorDatabase
             return;
 
         // Create a new thread that will react when _hasOutdatedIndex is set to true
-        var indexService = new Thread(async () => 
+        var indexService = new Thread(async () =>
         {
+            _logger.LogInformation("Indexing thread started.");
+
             while (!_vectors.IsReadOnly)
             {
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
-                if (_hasOutdatedIndex && 
-                    _vectors.Count > 0 && 
+                if (_hasOutdatedIndex &&
+                    _vectors.Count > 0 &&
                     DateTime.Now.Subtract(lastModification).TotalSeconds > timeThresholdSeconds)
                 {
                     await RebuildTagsAsync();
                     await RebuildSearchIndexesAsync();
+                    _indexRebuildCounter.Add(1);
                 }
                 Thread.Sleep(5000);
             }
+
+            _logger.LogInformation("Indexing thread stopping.");
         });
         indexService.Priority = ThreadPriority.Lowest;
     }
@@ -214,18 +242,36 @@ public partial class VectorDatabase
         {
             return;
         }
-        await Task.Run (() => _vectors.Tags.BuildMap());
+        await Task.Run(() =>
+        {
+            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "RebuildTags", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            _vectors.Tags.BuildMap();
+            activity?.Stop();
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        });
         _hasOutdatedIndex = false;
     }
 
     // This is an async function
     public async Task RebuildSearchIndexesAsync()
     {
-        await Task.Run(() => _searchService.BuildAllIndexes());
+        await Task.Run(() =>
+        {
+            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "BuildAllSearchIndexes", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            _searchService.BuildAllIndexes();
+            activity?.Stop();
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        });
     }
     public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
-        await Task.Run(() => _searchService.BuildIndex(searchMethod));
+        await Task.Run(() =>
+        {
+            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "BuildSearchIndex", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            _searchService.BuildIndex(searchMethod);
+            activity?.Stop();
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        });
     }
 
     /// <summary>
