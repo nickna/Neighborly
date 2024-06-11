@@ -11,7 +11,7 @@ namespace Neighborly;
 /// </summary>
 public partial class VectorDatabase
 {
-    private readonly ILogger<VectorDatabase> _logger;
+    private readonly ILogger<VectorDatabase> _logger = Logging.LoggerFactory.CreateLogger<VectorDatabase>();
     private readonly VectorList _vectors = new();
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
@@ -85,7 +85,7 @@ public partial class VectorDatabase
     /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
     /// </summary>
     public VectorDatabase()
-        : this(NullLogger<VectorDatabase>.Instance)
+        : this(Logging.LoggerFactory.CreateLogger<VectorDatabase>())
     {
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
@@ -121,6 +121,7 @@ public partial class VectorDatabase
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
         {
+            _logger.LogError($"The file {filePath} does not exist.");
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
         else if (createOnNew && !fileExists)
