@@ -74,7 +74,7 @@ public partial class VectorDatabase
     {
         try
         {
-            return _searchService.Search(query, k);
+            return _searchService.Search(query, k, searchMethod);
         }
         catch (Exception ex)
         {
