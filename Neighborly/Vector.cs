@@ -21,7 +21,7 @@ public partial class Vector : IEquatable<Vector>
     /// Gets the unique identifier of the vector.
     /// This is automatically created when the vector is initialized.
     /// </summary>
-    public Guid Id { get; }
+    public Guid Id { get; internal set; }
 
     /// <summary>
     /// Tags that associate the vector with a specific category or group.

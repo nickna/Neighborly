@@ -29,9 +29,9 @@ namespace API.Services
                 }
             });
 
-            app.MapPut("/vector/{id}", (VectorDatabase db, Vector vector) =>
+            app.MapPut("/vector/{id}", (VectorDatabase db, Guid Id, Vector vector) =>
             {
-                if (db.Vectors.Update(vector))
+                if (db.Vectors.Update(Id, vector))
                 {
                     return Results.Ok(vector);
                 }

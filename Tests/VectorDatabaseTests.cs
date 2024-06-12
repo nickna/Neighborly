@@ -54,7 +54,7 @@ public class VectorDatabaseTests
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
         Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
 
-        _db.Vectors.Update(vector2);
+        _db.Vectors.Update(vector1.Id, vector2);
         Assert.That(_db.Count, Is.EqualTo(1), "Count should still be 1 after updating a vector.");
         Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the old vector.");
         Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the new vector.");
@@ -281,7 +281,7 @@ public class VectorDatabaseTests
         var vector2 = new Vector(floatArray2);
 
         // Act
-        bool result = _db.Vectors.Update(vector2);
+        bool result = _db.Vectors.Update(vector2.Id, vector2);
 
         // Assert
         Assert.That(result, Is.False, "Update should return false when the old item does not exist.");

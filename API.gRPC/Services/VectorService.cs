@@ -61,7 +61,7 @@ namespace Neighborly.API
             var newVector = Utility.ConvertToVector(request.Vector);
 
             // Update the vector in the database
-            var success = _db.Vectors.Update(newVector);
+            var success = _db.Vectors.Update(Guid.Parse(request.Id), newVector);
 
             // Create the response
             var response = new Response { Success = success };

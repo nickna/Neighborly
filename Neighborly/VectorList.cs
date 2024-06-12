@@ -546,11 +546,13 @@ public class VectorList : IList<Vector>, IDisposable
         }
     }
 
-    public bool Update(Vector vector)
+    public bool Update(Guid Id, Vector vector)
     {
+        vector.Id = Id; // Change the Id of the incoming vector to match the Id of the existing vector
+
         lock (_lock)
         {
-            int index = IndexOf(vector);
+            int index = FindIndexById(Id);
             if (index != -1)
             {
                 if (_vectorList[index] != null)
