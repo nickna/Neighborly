@@ -238,15 +238,6 @@ public class VectorList : IList<Vector>, IDisposable
                 }
             }
 
-            foreach (var path in _onDiskFilePaths)
-            {
-                Vector diskItem = ReadFromDisk(path);
-                if (path != string.Empty && match(diskItem))
-                {
-                    foundItems.Add(diskItem);
-                }
-            }
-
             return foundItems;
         }
     }
