@@ -569,7 +569,7 @@ public class VectorList : IList<Vector>, IDisposable
             }
             else
             {
-                throw new ArgumentException("Item not found in list");
+                return false;
             }
             Modified?.Invoke(this, EventArgs.Empty);
             return true;

@@ -234,7 +234,7 @@ public class VectorDatabaseTests
 
         // Act
         var query = new Vector([2f, 3f, 4f]);
-        var result = _db.Search(query, 1);
+        var result = _db.Search(query, 1, Neighborly.Search.SearchAlgorithm.Linear);
 
         // Assert
         Assert.That(result.Count, Is.EqualTo(1), "Search should return the correct number of vectors.");
