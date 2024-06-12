@@ -265,8 +265,10 @@ public class VectorDatabaseTests
         Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first vector after loading.");
         Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second vector after loading.");
 
+
         // Clean up
-        Directory.Delete(path, true);
+        string filePath = Path.Combine(path, "vectors.bin");
+        File.Delete(filePath);
     }
     [Test]
     public void TestUpdateNonExistentItem()

@@ -15,6 +15,13 @@ public class BallTree
     {
         if (!vectors.Any())
             return null;
+        
+        if (vectors.Count == 1)
+            return new BallTreeNode
+            {
+                Center = vectors[0],
+                Radius = 0
+            };
 
         var center = vectors.Aggregate((a, b) => a + b) / vectors.Count;
         var radius = vectors.Max(v => v.Distance(center));

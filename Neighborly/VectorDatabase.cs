@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.IO.Compression;
 using Neighborly.Search;
+using CsvHelper;
 
 namespace Neighborly;
 
@@ -148,27 +149,31 @@ public partial class VectorDatabase
                 using (var reader = new BinaryReader(decompressionStream))
                 {
                     _vectors.Clear();
-                    while (reader.BaseStream.Position != reader.BaseStream.Length)
-                    {
-                        var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
+                    var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
 
-                        for (int i = 0; i < vectorCount; i++)
-                        {
-                            var nextVector = reader.ReadInt32();    // File offset of the next Vector
-                            var vector = new Vector(reader.ReadBytes(nextVector));
-                            _vectors.Add(vector);
-                        }
+                    for (int i = 0; i < vectorCount; i++)
+                    {
+                        var nextVector = reader.ReadInt32();    // File offset of the next Vector
+                        var vector = new Vector(reader.ReadBytes(nextVector));
+                        _vectors.Add(vector);
                     }
+                    Console.WriteLine(inputStream.Name);
+                    reader.Close();
+                    inputStream.Close();
                 }
 
                 await RebuildSearchIndexesAsync();     // Rebuild both k-d tree and Ball Tree search index  
+                
                 _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
                 _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
             }
             finally
             {
-                _rwLock.ExitWriteLock();
+                if (_rwLock.IsWriteLockHeld)
+                {
+                    _rwLock.ExitWriteLock();
+                }
             }
         }
 

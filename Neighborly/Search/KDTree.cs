@@ -27,7 +27,7 @@ namespace Neighborly.Search
 
         private KDTreeNode? Build(IList<Vector> vectors, int depth)
         {
-            if (!vectors.Any())
+            if (!vectors.Any() || vectors[0].Dimensions == 0)
                 return null;
 
             var axis = depth % vectors[0].Dimensions;
