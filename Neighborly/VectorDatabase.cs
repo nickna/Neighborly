@@ -23,7 +23,6 @@ public partial class VectorDatabase
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
     private ReaderWriterLockSlim _rwLock = new();
-    private StorageOptionEnum _storageOption = StorageOptionEnum.Auto;
 
     /// <summary>
     /// Last time the database was modified. This is updated when a vector is added or removed.
@@ -65,15 +64,6 @@ public partial class VectorDatabase
         lastModification = DateTime.Now;
         _hasUnsavedChanges = true;
         _hasOutdatedIndex = true;
-    }
-
-    /// <summary>
-    /// Gets the storage option used by the database.
-    /// </summary>
-    public StorageOptionEnum StorageOption
-    {
-        // TODO: Implement the ability to move the storage from memory to disk while in operation
-        get { return _storageOption; }
     }
 
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
