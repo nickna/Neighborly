@@ -12,6 +12,7 @@ COPY LICENSE.txt ./
 # COPY ../README.md ./
 
 WORKDIR /app/API.gRPC
+RUN dotnet workload restore
 RUN dotnet restore
 
 # Copy the rest of the project files
