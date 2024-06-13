@@ -1,6 +1,9 @@
-using Microsoft.Extensions.Hosting;
 using Neighborly;
 using Neighborly.API;
+using OpenTelemetry;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using OpenTelemetry.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,6 +11,23 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddLogging();
 builder.Services.AddGrpc();
 builder.Services.AddSingleton<VectorDatabase>();
+
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(resource => resource.AddService(serviceName: "Neighborly"))
+    .WithTracing(builder => 
+    {
+        builder.AddAspNetCoreInstrumentation()
+            .AddInstrumentation<Instrumentation>()
+            .AddSource(Instrumentation.Instance.ActivitySource.Name);
+    })
+    .WithMetrics(builder =>
+    {
+        builder.AddRuntimeInstrumentation()
+            .AddAspNetCoreInstrumentation()
+            .AddInstrumentation<Instrumentation>()
+            .AddMeter(Instrumentation.Instance.Meter.Name);
+    })
+    .UseOtlpExporter();
 
 var app = builder.Build();
 
