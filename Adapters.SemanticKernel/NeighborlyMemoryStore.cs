@@ -71,7 +71,7 @@ namespace NeighborlyMemory
 
         public Task<List<string>> GetKeysAsync()
         {
-            var keys = _vectorDatabase.Vectors.Guids.Select(id => id.ToString()).ToList();
+            var keys = _vectorDatabase.Vectors.Select(id => id.Id.ToString()).ToList();
             return Task.FromResult(keys);
         }
 

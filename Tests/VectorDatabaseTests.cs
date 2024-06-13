@@ -10,6 +10,8 @@ public class VectorDatabaseTests
     [SetUp]
     public void Setup()
     {
+        _db?.Vectors?.Dispose();
+
         _db = new VectorDatabase();
     }
 
@@ -323,7 +325,7 @@ public class VectorDatabaseTests
     {
         // Arrange
         var logger = new MockLogger<VectorDatabase>();
-        var db = new VectorDatabase(logger) {  };
+        var db = new VectorDatabase(logger, null) {  };
 
         var query = new Vector([1f, 2f, 3f]);
         var k = -1;
@@ -348,7 +350,7 @@ public class VectorDatabaseTests
     [Test]
     public void Ctor_WhenLoggerIsNull_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!));
+        Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!, null));
     }
 
 }

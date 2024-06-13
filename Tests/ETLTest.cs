@@ -7,7 +7,7 @@ public class ETLTest
 {
     public static IReadOnlyList<IETL> EtlImplementations =
     [
-        new Csv(), new JSON(), new JSONZ()  // HDF5 and Parquet are not implemented yet
+        new Csv(), new JSON(), new JSONZ(), new Neighborly.ETL.Parquet()  // HDF5 is not implemented yet
     ];
 
     [TestCaseSource(nameof(EtlImplementations))]
