@@ -22,7 +22,7 @@ namespace Neighborly.API
             var response = new GetVectorsResponse();
 
             // Get the vectors from the database
-            var vectors = _db.Vectors.GetAllVectors();
+            var vectors = _db.Vectors;
 
             // Convert each Vector to a VectorMessage and add it to the response
             foreach (var vector in vectors)

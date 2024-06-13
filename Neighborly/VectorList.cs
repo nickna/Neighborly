@@ -113,17 +113,6 @@ public class VectorList : IList<Vector>, IDisposable
         }
     }
 
-    /// <summary>
-    /// Gets all vectors.
-    /// WARNING: This method is memory and CPU intensive and should not be used in production.
-    /// </summary>
-    /// <returns>All Vector objects in a List</returns>
-    public List<Vector> GetAllVectors()
-    {
-        // Added for support in Semantic Kernel's Memory Store.
-        // It's a bad idea to call this on a production server.
-        return _vectorList.ToList();
-    }
 
     public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a speficic index is not supported");
 

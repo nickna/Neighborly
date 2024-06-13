@@ -77,7 +77,7 @@ namespace NeighborlyMemory
 
         public Task<List<MemoryRecord>> GetVectorsAsync()
         {
-            var vectors = _vectorDatabase.Vectors.GetAllVectors();
+            var vectors = _vectorDatabase.Vectors;
             var records = new List<MemoryRecord>();
             foreach (var vector in vectors)
             {
