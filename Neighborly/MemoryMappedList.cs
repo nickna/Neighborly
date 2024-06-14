@@ -388,9 +388,22 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             DisposeStreams();
 
             _fileName= Path.GetTempFileName();
-            Logging.Logger.Information("Creating temporary file: {FileName}", _fileName);
-            _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
-            _stream = _file.CreateViewStream();
+            Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} GiB", _fileName, _capacity/1024/1024);
+            try
+            {
+                _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
+                _stream = _file.CreateViewStream();
+            }
+            catch (System.IO.IOException ex)
+            {
+                Logging.Logger.Error(ex, "Failed to create memory-mapped file");
+                if (File.Exists(_fileName))
+                {
+                    File.Delete(_fileName);
+                    Logging.Logger.Information($"File deleted ({_fileName}) due to error: {ex.Message}");
+                }
+                throw;
+            }
         }
 
         protected virtual void Dispose(bool disposing)
