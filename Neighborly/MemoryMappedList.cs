@@ -1,5 +1,8 @@
+using Microsoft.Win32.SafeHandles;
+using Serilog.Core;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 
 namespace Neighborly;
 
@@ -16,6 +19,29 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly object _mutex = new();
     private long _count;
     private bool _disposedValue;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern SafeFileHandle CreateFile(
+      string lpFileName,
+      [MarshalAs(UnmanagedType.U4)] FileAccess dwDesiredAccess,
+      [MarshalAs(UnmanagedType.U4)] FileShare dwShareMode,
+      IntPtr lpSecurityAttributes,
+      [MarshalAs(UnmanagedType.U4)] FileMode dwCreationDisposition,
+      [MarshalAs(UnmanagedType.U4)] FileAttributes dwFlagsAndAttributes,
+      IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        IntPtr lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+
+    const uint FSCTL_SET_SPARSE = 0x900C4;
 
     static MemoryMappedList()
     {
@@ -37,6 +63,47 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _dataFile = new(4096L * capacity);
     }
 
+    private static void _WinFileAlloc(string path)
+    {
+        // Only run this function on Windows
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
+        {
+            return; 
+        }
+        // Create a sparse file
+        SafeFileHandle fileHandle = CreateFile(
+            path,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            IntPtr.Zero,
+            FileMode.Create,
+            FileAttributes.Normal | (FileAttributes)0x200, // FILE_ATTRIBUTE_SPARSE_FILE
+            IntPtr.Zero);
+
+        if (fileHandle.IsInvalid)
+        {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        uint bytesReturned;
+        bool result = DeviceIoControl(
+            fileHandle,
+            FSCTL_SET_SPARSE,
+            IntPtr.Zero,
+            0,
+            IntPtr.Zero,
+            0,
+            out bytesReturned,
+            IntPtr.Zero);
+
+        if (!result)
+        {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        // Close the file handle
+        fileHandle.Close();
+    }
     public long Count
     {
         get
@@ -388,6 +455,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             DisposeStreams();
 
             _fileName= Path.GetTempFileName();
+            _WinFileAlloc(_fileName);
             Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} GiB", _fileName, _capacity/1024/1024);
             try
             {
