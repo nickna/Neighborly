@@ -367,13 +367,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private class MemoryMappedFileHolder : IDisposable
     {
         private readonly long _capacity;
-        /// <summary>
-        /// The file handle that will cause the temporary file to be deleted when the object is disposed.
-        /// </summary>
-        private FileStream _deleteHandle;
         private MemoryMappedFile _file;
         private MemoryMappedViewStream _stream;
         private bool _disposedValue;
+        private string _fileName;
 
 #pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Reset()
         public MemoryMappedFileHolder(long capacity)
@@ -390,9 +387,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             DisposeStreams();
 
-            var fileName = Path.GetRandomFileName();
-            _deleteHandle = new FileStream(fileName, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.DeleteOnClose);
-            _file = MemoryMappedFile.CreateFromFile(fileName, FileMode.OpenOrCreate, null, _capacity);
+            _fileName= Path.GetTempFileName();
+            Logging.Logger.Information("Creating temporary file: {FileName}", _fileName);
+            _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
             _stream = _file.CreateViewStream();
         }
 
@@ -403,6 +400,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 if (disposing)
                 {
                     DisposeStreams();
+                    try
+                    {
+                        if (File.Exists(_fileName))
+                        {
+                            File.Delete(_fileName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logging.Logger.Error(ex, "Failed to delete temporary file: {FileName}", _fileName);
+                    }
                 }
 
                 _disposedValue = true;
@@ -426,7 +434,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             _stream?.Dispose();
             _file?.Dispose();
-            _deleteHandle?.Dispose();
         }
     }
 }
