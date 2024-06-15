@@ -63,6 +63,12 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _dataFile = new(4096L * capacity);
     }
 
+    /// <summary>
+    /// On Windows this function sets the sparse file attribute on the file at the given path.
+    /// Call this function before opening the file with a MemoryMappedFile.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <exception cref="System.ComponentModel.Win32Exception"></exception>
     private static void _WinFileAlloc(string path)
     {
         // Only run this function on Windows
@@ -70,6 +76,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             return; 
         }
+ 
         // Create a sparse file
         SafeFileHandle fileHandle = CreateFile(
             path,
@@ -456,7 +463,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
             _fileName= Path.GetTempFileName();
             _WinFileAlloc(_fileName);
-            Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} GiB", _fileName, _capacity/1024/1024);
+            double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
+            Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} TiB", _fileName, capacityTiB);
             try
             {
                 _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
