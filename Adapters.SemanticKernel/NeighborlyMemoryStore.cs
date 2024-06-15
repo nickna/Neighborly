@@ -4,9 +4,11 @@ using System.Collections.Generic;
 using System.Diagnostics.Eventing.Reader;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using Microsoft.SemanticKernel.Memory;
 using Neighborly;
+using Neighborly.Search;
 
 namespace NeighborlyMemory
 {
@@ -15,9 +17,14 @@ namespace NeighborlyMemory
     {
         private readonly VectorDatabase _vectorDatabase;
 
-        public NeighborlyMemoryStore(VectorDatabase vectorDatabase)
+        private readonly SearchAlgorithm _searchAlgorithm;
+
+        public NeighborlyMemoryStore(VectorDatabase vectorDatabase, SearchAlgorithm searchAlgorithm = SearchAlgorithm.KDTree)
         {
+            ArgumentNullException.ThrowIfNull(vectorDatabase);
+
             _vectorDatabase = vectorDatabase;
+            _searchAlgorithm = searchAlgorithm;
         }
 
         public Task StoreAsync(string key, MemoryRecord record)
@@ -32,7 +39,6 @@ namespace NeighborlyMemory
                 {
                     _vectorDatabase.Vectors.Tags.Add(tag);
                 }
-
             }
             _vectorDatabase.Vectors.FirstOrDefault(vector);
             return Task.CompletedTask;
@@ -54,9 +60,9 @@ namespace NeighborlyMemory
 
             var m = new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty);
             var e = new ReadOnlyMemory<float>(vector.Values);
-            var record = new MemoryRecord( metadata: m, 
+            var record = new MemoryRecord(metadata: m,
                 embedding: e,
-                key:m.Id.ToString(),
+                key: m.Id.ToString(),
                 timestamp: null
                 );
 
@@ -126,12 +132,26 @@ namespace NeighborlyMemory
 
         public Task<string> UpsertAsync(string collectionName, MemoryRecord record, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var requestHadValidId = Guid.TryParse(record.Key, out var id);
+            Vector? vector = null;
+            if (!requestHadValidId)
+            {
+                vector = _vectorDatabase.Vectors.Find(v => v.Id == id);
+            }
+
+            vector ??= new Vector(record.Embedding.ToArray(), record.Metadata.Text);
+            _vectorDatabase.Vectors.Add(vector);
+            return requestHadValidId ? Task.FromResult(record.Key) : Task.FromResult(vector.Id.ToString());
         }
 
-        public IAsyncEnumerable<string> UpsertBatchAsync(string collectionName, IEnumerable<MemoryRecord> records, CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<string> UpsertBatchAsync(string collectionName, IEnumerable<MemoryRecord> records, [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            foreach (var record in records)
+            {
+                await UpsertAsync(collectionName, record, cancellationToken).ConfigureAwait(false);
+            }
+
+            yield break;
         }
 
         public Task<MemoryRecord?> GetAsync(string collectionName, string key, bool withEmbedding = false, CancellationToken cancellationToken = default)
@@ -153,13 +173,7 @@ namespace NeighborlyMemory
         {
             // Get Vectors by Ids
             var vectors = _vectorDatabase.Vectors.FindAll(v => keys.Contains(v.Id.ToString()));
-            var records = vectors.Select(vector => new MemoryRecord
-            (
-                metadata: new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty),
-                key: vector.Id.ToString(),
-                embedding: new ReadOnlyMemory<float>(vector.Values),
-                timestamp: null
-            ));
+            var records = vectors.Select(vector => ConvertVectorToMemoryRecord(vector));
             return records.ToAsyncEnumerable();
         }
 
@@ -184,13 +198,32 @@ namespace NeighborlyMemory
 
         public IAsyncEnumerable<(MemoryRecord, double)> GetNearestMatchesAsync(string collectionName, ReadOnlyMemory<float> embedding, int limit, double minRelevanceScore = 0, bool withEmbeddings = false, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var searchResults = _vectorDatabase.Search(new Vector(embedding.ToArray()), limit, _searchAlgorithm);
+            return searchResults.Select(vector => (ConvertVectorToMemoryRecord(vector), double.NegativeInfinity)).ToAsyncEnumerable();
         }
 
         public Task<(MemoryRecord, double)?> GetNearestMatchAsync(string collectionName, ReadOnlyMemory<float> embedding, double minRelevanceScore = 0, bool withEmbedding = false, CancellationToken cancellationToken = default)
         {
-            throw new NotImplementedException();
+            var searchResults = _vectorDatabase.Search(new Vector(embedding.ToArray()), 1, _searchAlgorithm);
+            if (searchResults.Count == 0)
+            {
+                return Task.FromResult<(MemoryRecord, double)?>(null);
+            }
 
+            var vector = searchResults[0];
+            var record = ConvertVectorToMemoryRecord(vector);
+            return Task.FromResult<(MemoryRecord, double)?>((record, double.NegativeInfinity));
+        }
+
+        private static MemoryRecord ConvertVectorToMemoryRecord(Vector vector)
+        {
+            return new MemoryRecord
+            (
+                metadata: new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty),
+                key: vector.Id.ToString(),
+                embedding: new ReadOnlyMemory<float>(vector.Values),
+                timestamp: null
+            );
         }
     }
 #pragma warning restore SKEXP0001 
