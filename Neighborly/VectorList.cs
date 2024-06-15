@@ -11,7 +11,7 @@ public class VectorList : IList<Vector>, IDisposable
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
     private readonly int _maxInMemoryCount;
-    private readonly MemoryMappedList _memoryMappedList = new(int.MaxValue * 2L);
+    private readonly MemoryMappedList _memoryMappedList = new(int.MaxValue);
     private readonly object _lock = new();
     private bool _disposed = false;
 

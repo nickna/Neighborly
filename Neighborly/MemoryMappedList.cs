@@ -1,5 +1,8 @@
+using Microsoft.Win32.SafeHandles;
+using Serilog.Core;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
+using System.Runtime.InteropServices;
 
 namespace Neighborly;
 
@@ -16,6 +19,29 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly object _mutex = new();
     private long _count;
     private bool _disposedValue;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern SafeFileHandle CreateFile(
+      string lpFileName,
+      [MarshalAs(UnmanagedType.U4)] FileAccess dwDesiredAccess,
+      [MarshalAs(UnmanagedType.U4)] FileShare dwShareMode,
+      IntPtr lpSecurityAttributes,
+      [MarshalAs(UnmanagedType.U4)] FileMode dwCreationDisposition,
+      [MarshalAs(UnmanagedType.U4)] FileAttributes dwFlagsAndAttributes,
+      IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(
+        SafeFileHandle hDevice,
+        uint dwIoControlCode,
+        IntPtr lpInBuffer,
+        uint nInBufferSize,
+        IntPtr lpOutBuffer,
+        uint nOutBufferSize,
+        out uint lpBytesReturned,
+        IntPtr lpOverlapped);
+
+    const uint FSCTL_SET_SPARSE = 0x900C4;
 
     static MemoryMappedList()
     {
@@ -37,6 +63,54 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _dataFile = new(4096L * capacity);
     }
 
+    /// <summary>
+    /// On Windows this function sets the sparse file attribute on the file at the given path.
+    /// Call this function before opening the file with a MemoryMappedFile.
+    /// </summary>
+    /// <param name="path"></param>
+    /// <exception cref="System.ComponentModel.Win32Exception"></exception>
+    private static void _WinFileAlloc(string path)
+    {
+        // Only run this function on Windows
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
+        {
+            return; 
+        }
+ 
+        // Create a sparse file
+        SafeFileHandle fileHandle = CreateFile(
+            path,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            IntPtr.Zero,
+            FileMode.Create,
+            FileAttributes.Normal | (FileAttributes)0x200, // FILE_ATTRIBUTE_SPARSE_FILE
+            IntPtr.Zero);
+
+        if (fileHandle.IsInvalid)
+        {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        uint bytesReturned;
+        bool result = DeviceIoControl(
+            fileHandle,
+            FSCTL_SET_SPARSE,
+            IntPtr.Zero,
+            0,
+            IntPtr.Zero,
+            0,
+            out bytesReturned,
+            IntPtr.Zero);
+
+        if (!result)
+        {
+            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        // Close the file handle
+        fileHandle.Close();
+    }
     public long Count
     {
         get
@@ -367,13 +441,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private class MemoryMappedFileHolder : IDisposable
     {
         private readonly long _capacity;
-        /// <summary>
-        /// The file handle that will cause the temporary file to be deleted when the object is disposed.
-        /// </summary>
-        private FileStream _deleteHandle;
         private MemoryMappedFile _file;
         private MemoryMappedViewStream _stream;
         private bool _disposedValue;
+        private string _fileName;
 
 #pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Reset()
         public MemoryMappedFileHolder(long capacity)
@@ -390,10 +461,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             DisposeStreams();
 
-            var fileName = Path.GetRandomFileName();
-            _deleteHandle = new FileStream(fileName, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.DeleteOnClose);
-            _file = MemoryMappedFile.CreateFromFile(fileName, FileMode.OpenOrCreate, null, _capacity);
-            _stream = _file.CreateViewStream();
+            _fileName= Path.GetTempFileName();
+            _WinFileAlloc(_fileName);
+            double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
+            Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} TiB", _fileName, capacityTiB);
+            try
+            {
+                _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
+                _stream = _file.CreateViewStream();
+            }
+            catch (System.IO.IOException ex)
+            {
+                Logging.Logger.Error(ex, "Failed to create memory-mapped file");
+                if (File.Exists(_fileName))
+                {
+                    File.Delete(_fileName);
+                    Logging.Logger.Information($"File deleted ({_fileName}) due to error: {ex.Message}");
+                }
+                throw;
+            }
         }
 
         protected virtual void Dispose(bool disposing)
@@ -403,6 +489,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 if (disposing)
                 {
                     DisposeStreams();
+                    try
+                    {
+                        if (File.Exists(_fileName))
+                        {
+                            File.Delete(_fileName);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logging.Logger.Error(ex, "Failed to delete temporary file: {FileName}", _fileName);
+                    }
                 }
 
                 _disposedValue = true;
@@ -426,7 +523,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             _stream?.Dispose();
             _file?.Dispose();
-            _deleteHandle?.Dispose();
         }
     }
 }
