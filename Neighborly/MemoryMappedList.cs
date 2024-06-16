@@ -19,6 +19,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly object _mutex = new();
     private long _count;
     private bool _disposedValue;
+    private long _defragPosition = 0; // Tracks the current position in the index file for defragmentation
+    private long _defragIndexPosition;
+    private long _newDataPosition;
+    private const int _defragBatchSize = 100; // Number of entries to defrag in one batch, adjust based on performance needs
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern SafeFileHandle CreateFile(
@@ -328,11 +332,199 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
     }
 
+    /// <summary>
+    /// Calculate the fragmentation of the data file
+    /// </summary>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    public long CalculateFragmentation()
+    {
+        lock (_mutex)
+        {
+            long expectedDataPosition = 0; // Expected start position of the next data entry
+            long totalFragmentation = 0; // Total size of gaps between data entries
+            long totalDataSize = 0; // Total size of data entries
+
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin); // Start from the beginning of the index file
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength]; // Buffer for reading index entries
+            int bytesRead;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0) // Read each index entry
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    // If the read entry is incomplete, skip it and continue to the next entry
+                    _indexFile.Stream.Seek(s_indexEntryByteLength - bytesRead, SeekOrigin.Current);
+                    continue;
+                }
+
+                Guid id = new(entry[..s_idBytesLength]); // Extract the ID from the entry
+                if (id.Equals(s_tombStone) || id.Equals(Guid.Empty))
+                {
+                    continue; // Skip tombstoned or empty entries
+                }
+
+                long actualOffset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength)); // Actual start position of the data entry
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength)); // Length of the data entry
+
+                if (actualOffset > expectedDataPosition)
+                {
+                    // If there's a gap between the expected and actual position, it's fragmentation
+                    long gapSize = actualOffset - expectedDataPosition;
+                    totalFragmentation += gapSize;
+                }
+
+                // Update the expected position for the next entry
+                expectedDataPosition = actualOffset + length;
+                totalDataSize += length;
+            }
+
+            if (totalDataSize == 0)
+            {
+                return 0;
+            }
+
+            return totalFragmentation * 100 / totalDataSize;
+        }
+    }
+
+
+
+    /// <summary>
+    /// Performs a blocking defragmentation of the data file, regardless of the fragmentation level
+    /// </summary>
+    /// <exception cref="InvalidOperationException"></exception>
     public void Defrag()
     {
-        // TODO: Implement defragmentation - remove tombstones and compact data
-        throw new NotImplementedException();
+        lock (_mutex)
+        {
+            long newIndexPosition = 0;
+            long newDataPosition = 0;
+
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+            _dataFile.Stream.Seek(0, SeekOrigin.Begin);
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id.Equals(s_tombStone))
+                {
+                    continue; // Skip tombstoned entries
+                }
+
+                if (id.Equals(Guid.Empty))
+                {
+                    break; // End of valid entries
+                }
+
+                long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+
+                // Read data associated with the entry
+                byte[] data = new byte[length];
+                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+                _dataFile.Stream.ReadExactly(data);
+
+                // Update the offset in the index entry to the new data position
+                BitConverter.TryWriteBytes(entry.Slice(s_idBytesLength, s_offsetBytesLength), newDataPosition);
+
+                // Write the updated index entry back to the index file at the new position
+                _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+                _indexFile.Stream.Write(entry);
+
+                // Write the data back to the data file at the new position
+                _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+                _dataFile.Stream.Write(data);
+
+                newIndexPosition++;
+                newDataPosition += length;
+            }
+        }
     }
+
+    /// <summary>
+    /// Defragments the data file in batches, to avoid blocking I/O for long periods
+    /// </summary>
+    /// <exception cref="InvalidOperationException"></exception>
+    public void DefragBatch()
+    {
+        lock (_mutex)
+        {
+            long newIndexPosition = _defragIndexPosition;
+            long newDataPosition = _newDataPosition; // This is updated after each batch
+
+            _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+            _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+            int batchCount = 0;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0 && batchCount < _defragBatchSize)
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id.Equals(s_tombStone))
+                {
+                    newIndexPosition++;
+                    continue; // Skip tombstoned entries
+                }
+
+                if (id.Equals(Guid.Empty))
+                {
+                    break; // End of valid entries
+                }
+
+                long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+
+                // Read data associated with the entry
+                byte[] data = new byte[length];
+                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+                _dataFile.Stream.ReadExactly(data);
+
+                // Write the entry back to the index file at the new position
+                BitConverter.TryWriteBytes(entry.Slice(s_idBytesLength, s_offsetBytesLength), newDataPosition);
+                _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+                _indexFile.Stream.Write(entry);
+
+                // Write the data back to the data file at the new position
+                _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+                _dataFile.Stream.Write(data);
+
+                newIndexPosition++;
+                newDataPosition += length;
+                batchCount++;
+            }
+
+            // Update tracking variables for the next batch
+            _defragIndexPosition = newIndexPosition;
+            _newDataPosition = newDataPosition;
+
+            // Detecting the end of defragmentation
+            if (_defragIndexPosition == _count || bytesRead == 0)
+            {
+                // Reset state variables for the next defragmentation cycle
+                _defragPosition = 0;
+                _defragIndexPosition = 0;
+                _newDataPosition = 0;
+            }
+        }
+    }
+
 
     public void Clear()
     {

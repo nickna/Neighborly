@@ -42,6 +42,15 @@ public class VectorList : IList<Vector>, IDisposable
     }
 
     /// <summary>
+    /// Defragments the MemoryMappedList if the fragmentation is greater than the threshold.
+    /// (Threshold is currently set to 0)
+    /// </summary>
+    public void Defrag()
+    {
+       _memoryMappedList.Defrag();
+    }
+
+    /// <summary>
     /// This releases the file resources allocated to each Vector object when the list is disposed.
     /// </summary>
     /// <param name="disposing"></param>
@@ -241,16 +250,21 @@ public class VectorList : IList<Vector>, IDisposable
         }
     }
 
+    /// <summary>
+    /// Checks the list for the presence of a vector by Id.
+    /// </summary>
+    /// <param name="item"></param>
+    /// <returns></returns>
     public bool Contains(Vector item)
     {
         lock (_lock)
         {
-            if (_vectorList.Contains(item))
+            if (_vectorList.Any(v => v != null && v.Id == item.Id))
             {
                 return true;
             }
 
-            return _memoryMappedList.Contains(item);
+            return _memoryMappedList.GetVector(item.Id) != null;
         }
     }
 
@@ -411,5 +425,16 @@ public class VectorList : IList<Vector>, IDisposable
                 RemoveAt(index);
             }
         }
+    }
+
+    public long CalculateFragmentation()
+    {
+        return _memoryMappedList.CalculateFragmentation();
+    }
+
+    public void DefragBatch()
+    {
+        _memoryMappedList.DefragBatch();
+        return;
     }
 }
