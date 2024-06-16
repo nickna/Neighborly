@@ -1,14 +1,27 @@
+namespace Neighborly.Tests;
+
 using Neighborly;
 
 [TestFixture]
 public class VectorTests
 {
+    private static readonly string[] s_originalTexts = [
+        "The quick brown fox jumps over the lazy dog", // English
+        "素早い茶色の狐が怠け者の犬を飛び越える", // Japanese
+        "Le vif renard brun saute par-dessus le chien paresseux", // French
+        "El rápido zorro marrón salta sobre el perro perezoso", // Spanish
+        "Быстрая коричневая лисица перепрыгивает через ленивую собаку", // Russian
+        "الثعلب البني السريع يقفز فوق الكلب الكسول", // Arabic (RTL)
+        "快速的棕色狐狸跳过了懒狗", // Chinese (Simplified)
+        "השועל החום המהיר קופץ מעל הכלב העצלן" // Hebrew (RTL)
+    ];
+
     [Test]
-    public void ToBinary_CanBeUsedAsInputFor_Ctor_As_BinaryReader()
+    public void ToBinary_CanBeUsedAsInputFor_Ctor_As_BinaryReader([ValueSource(nameof(s_originalTexts))] string originalText)
     {
         // Arrange
         float[] floatArray = [1.0f, 2.1f, 3.2f, 4.5f, 5.7f];
-        Vector originalVector = new(floatArray, "Test");
+        Vector originalVector = new(floatArray, originalText);
 
         // Act
         byte[] binary = originalVector.ToBinary();
@@ -26,11 +39,11 @@ public class VectorTests
     }
 
     [Test]
-    public void ToBinary_CanBeUsedAsInputFor_Ctor_As_Array()
+    public void ToBinary_CanBeUsedAsInputFor_Ctor_As_Array([ValueSource(nameof(s_originalTexts))] string originalText)
     {
         // Arrange
         float[] floatArray = [1.0f, 2.1f, 3.2f, 4.5f, 5.7f];
-        Vector originalVector = new(floatArray, "Test");
+        Vector originalVector = new(floatArray, originalText);
 
         // Act
         byte[] binary = originalVector.ToBinary();

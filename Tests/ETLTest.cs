@@ -1,6 +1,6 @@
 ﻿using Neighborly.ETL;
 
-namespace Neighborly.Tests.ETL;
+namespace Neighborly.Tests;
 
 [TestFixture]
 public class ETLTest
