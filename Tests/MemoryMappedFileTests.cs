@@ -226,6 +226,22 @@ namespace Tests
             Assert.That(stopwatch.Elapsed, Is.LessThan(maxAcceptableTime), $"Defragmentation should complete within {maxAcceptableTime.TotalSeconds} seconds.");
         }
 
+        [Test]
+        public void AddWhenCalledAfterAnEnumerationWorks()
+        {
+            // Arrange
+            var vector1 = new Vector(new float[] { 1, 2, 3 });
+            var vector2 = new Vector(new float[] { 4, 5, 6 });
+            _db.Vectors.Add(vector1);
+
+            // Act
+            _ = _db.Vectors.Find(v => v.Id == Guid.NewGuid());
+            _db.Vectors.Add(vector2);
+
+            // Assert
+            Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain vector1.");
+            Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain vector2.");
+        }
 
     }
 }
