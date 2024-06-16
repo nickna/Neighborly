@@ -395,9 +395,9 @@ public partial class Vector : IEquatable<Vector>
         }
 
         Span<byte> originalTextLengthBytes = result[s_originalTextLengthOffset..(s_originalTextLengthOffset + s_originalTextLengthBytesLength)];
-        if (!BitConverter.TryWriteBytes(originalTextLengthBytes, OriginalText.Length))
+        if (!BitConverter.TryWriteBytes(originalTextLengthBytes, originalTextBytesLength))
         {
-            throw new InvalidOperationException("Failed to write OriginalText.Length to bytes");
+            throw new InvalidOperationException("Failed to write originalTextBytesLength to bytes");
         }
 
         Span<byte> originalTextBytes = result[s_originalTextOffset..(s_originalTextOffset + originalTextBytesLength)];
