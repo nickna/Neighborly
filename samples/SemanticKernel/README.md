@@ -37,13 +37,14 @@ To run the Semantic Kernel program, follow these steps:
 2. Build and run the program using your preferred C# development environment or the command line.
 3. The program will build a custom Ollama container image with custom models. **This will take a while on the first start.**
 4. The program will start the Ollama instance and perform the necessary setup.
-5. It will import the text from `Ballad.txt` into the Neighborly vector database.
-6. It will then prompt you to enter a question.
-7. Enter your question and press Enter.
-8. The program will retrieve the answer from the Semantic Kernel and display it.
+5. It will import the text from `Ballad.txt` and `LOTR.txt` into the Neighborly vector database.
+6. It will then prompt the LLM two predfined questions.
+7. The program will retrieve the answer from the Semantic Kernel and display it.
 
 That's it! You have successfully run the Semantic Kernel sample and used `Neighborly.Adapters.SemanticKernel` as the `ISemanticTextMemory` for SemanticKernel with Ollama.
 
 # License
 
 This project is licensed under the MIT License. See the [LICENSE](../../LICENSE.txt) file for details. The sample was adapted from the excellent [Atc.SemanticKernel.Console.Sample](https://github.com/atc-net/atc-semantic-kernel/blob/3adb10d5f5e3c099ce999bbbd5aa4a972073e7f6/sample/Atc.SemanticKernel.Console.Sample/Program.cs) Copyright (c) 2024 [atc-net](https://atc-net.github.io/), which is also licensed under the MIT License.
+
+All ballads were made up by Bing Chat/GPT 4.
