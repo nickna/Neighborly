@@ -13,11 +13,16 @@ using Microsoft.SemanticKernel.Embeddings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel.ChatCompletion;
 using Microsoft.SemanticKernel.TextGeneration;
+using Microsoft.Extensions.Logging;
+using Neighborly;
 
 const string modelName = "phi3";
 const string embeddingModelName = "all-minilm";
 
+var loggerFactory = Logging.LoggerFactory;
+
 await using var image = new ImageFromDockerfileBuilder()
+    .WithLogger(loggerFactory.CreateLogger<ImageFromDockerfileBuilder>())
     .WithDockerfile("Dockerfile")
     .WithBuildArgument("MODEL_NAME", modelName)
     .WithBuildArgument("EMBEDDING_MODEL_NAME", embeddingModelName)
@@ -28,7 +33,7 @@ await image.CreateAsync().ConfigureAwait(false);
 
 // Start local ollama instance
 await using var ollama = new ContainerBuilder()
-    //.WithImage("ollama/ollama:latest")
+    .WithLogger(loggerFactory.CreateLogger<ContainerBuilder>())
     .WithImage(image)
     .WithPortBinding(11434, true)
     .Build();
@@ -46,8 +51,9 @@ OllamaTextEmbeddingGenerationService ollamaEmbedding = new(ollamaUri, embeddingM
 
 #pragma warning disable SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning disable SKEXP0050 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-var db = new Neighborly.VectorDatabase();
+var db = new Neighborly.VectorDatabase(loggerFactory.CreateLogger<Neighborly.VectorDatabase>(), null);
 var memory = new MemoryBuilder()
+    .WithLoggerFactory(loggerFactory)
     .WithMemoryStore(new NeighborlyMemoryStore(db)) // Use NeighborlyMemoryStore
     .WithTextEmbeddingGeneration(ollamaEmbedding)
     .Build();
@@ -56,6 +62,9 @@ var memory = new MemoryBuilder()
 
 // semantic kernel builder
 var builder = Kernel.CreateBuilder();
+builder.Services.AddSingleton(loggerFactory);
+builder.Services.AddSingleton(db);
+builder.Services.AddSingleton(memory);
 builder.Services.AddSingleton<IChatCompletionService>(ollamaChat);
 builder.Services.AddSingleton<ITextGenerationService>(ollamaText);
 #pragma warning disable SKEXP0001
@@ -102,7 +111,8 @@ Console.WriteLine("====================");
 Console.WriteLine("EMBEDDING DEMO");
 Console.WriteLine("====================");
 
-string[] texts = await File.ReadAllLinesAsync("Ballad.txt").ConfigureAwait(false);
+const string fileName = "Ballad.txt";
+string texts = await File.ReadAllTextAsync(fileName).ConfigureAwait(false);
 
 #pragma warning disable SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning disable SKEXP0050 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
@@ -110,41 +120,32 @@ await kernel.InvokeAsync(memoryPlugin["Save"], new()
 {
     [TextMemoryPlugin.InputParam] = texts,
     [TextMemoryPlugin.CollectionParam] = "ballads",
-    [TextMemoryPlugin.KeyParam] = "info5",
+    [TextMemoryPlugin.KeyParam] = fileName,
 });
 #pragma warning restore SKEXP0050 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning restore SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-
-Console.WriteLine(db.Count);
 
 // Force internal indexes rebuild. This will usually be done automatically in the background, but for the sake of this demo we do it manually.
 await db.RebuildSearchIndexesAsync().ConfigureAwait(false);
 
 const string RecallFunctionDefinition = @"
-Consider only the facts below when answering questions:
-
-BEGIN FACTS
-About me: {{recall 'live in Seattle?'}}
-About me: {{recall 'my family is from?'}}
-END FACTS
-
 Question: {{$input}}
 
 Answer:
 ";
 #pragma warning disable SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning disable SKEXP0050 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
+const string question = "What is Neighborly?";
 var result = await kernel.InvokePromptAsync(RecallFunctionDefinition, new(new OpenAIPromptExecutionSettings { MaxTokens = 1000 })
 {
-    [TextMemoryPlugin.InputParam] = "Where are my family from?",
+    [TextMemoryPlugin.InputParam] = question,
     [TextMemoryPlugin.CollectionParam] = "ballads",
-    [TextMemoryPlugin.LimitParam] = "2",
-    [TextMemoryPlugin.RelevanceParam] = "0.79",
+    [TextMemoryPlugin.LimitParam] = "2"
 });
 #pragma warning restore SKEXP0050 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 #pragma warning restore SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 
-Console.WriteLine("Ask: Where are my family from?");
-Console.WriteLine($"Answer: {result.GetValue<string>()}");
+Console.WriteLine("Ask: {0}?", question);
+Console.WriteLine("Answer: {0}", result.GetValue<string>());
 
 Console.ReadLine();

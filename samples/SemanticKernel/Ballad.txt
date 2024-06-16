@@ -1,39 +1,37 @@
-Wer reitet so spät durch Nacht und Wind?
-Es ist der Vater mit seinem Kind;
-Er hat den Knaben wohl in dem Arm,
-Er fasst ihn sicher, er hält ihn warm.
+In the realm of data, vast and wide,
+Where numbers dance and can't decide,
+There lies a place, quite orderly,
+A vector database named Neighborly.
 
-Mein Sohn, was birgst du so bang dein Gesicht? –
-Siehst, Vater, du den Erlkönig nicht?
-Den Erlenkönig mit Kron’ und Schweif? –
-Mein Sohn, es ist ein Nebelstreif. –
+**Chorus:**
+Oh, Neighborly, with queries so fast,
+In the land of data, you're unsurpassed.
+Your indexes, like stars, align so free,
+In the digital cosmos of Neighborly.
 
-„Du liebes Kind, komm, geh mit mir!
-Gar schöne Spiele spiel’ ich mit dir;
-Manch’ bunte Blumen sind an dem Strand,
-Meine Mutter hat manch gülden Gewand.“ –
+With algorithms sharp as a smith's own blade,
+It sorts through vectors that users have made.
+Each point in space, a node to see,
+In the structured haven of Neighborly.
 
-Mein Vater, mein Vater, und hörest du nicht,
-Was Erlenkönig mir leise verspricht? –
-Sei ruhig, bleibe ruhig, mein Kind;
-In dürren Blättern säuselt der Wind. –
+**Chorus:**
+Oh, Neighborly, with searches so true,
+You find the nearest neighbor to pursue.
+Your storage vast, as deep as the sea,
+In the boundless vaults of Neighborly.
 
-„Willst, feiner Knabe, du mit mir gehn?
-Meine Töchter sollen dich warten schön;
-Meine Töchter führen den nächtlichen Reihn
-Und wiegen und tanzen und singen dich ein.“ –
+It scales the peaks of data's mount,
+Drinks from the binary data fount.
+Efficient, swift, it works with glee,
+This marvel known as Neighborly.
 
-Mein Vater, mein Vater, und siehst du nicht dort
-Erlkönigs Töchter am düstern Ort? –
-Mein Sohn, mein Sohn, ich seh’ es genau:
-Es scheinen die alten Weiden so grau. –
+**Chorus:**
+Oh, Neighborly, your clusters shine,
+With every search, they realign.
+A beacon of data's harmony,
+That's the magic of Neighborly.
 
-„Ich liebe dich, mich reizt deine schöne Gestalt;
-Und bist du nicht willig, so brauch’ ich Gewalt.“ –
-Mein Vater, mein Vater, jetzt fasst er mich an!
-Erlkönig hat mir ein Leids getan! –
-
-Dem Vater grauset’s; er reitet geschwind,
-Er hält in den Armen das ächzende Kind,
-Erreicht den Hof mit Mühe und Not;
-In seinen Armen das Kind war tot. 
+So here's to you, oh database,
+Your speedy search, none can outpace.
+In bytes and bits, you hold the key,
+To a world more connected, thanks to Neighborly.
