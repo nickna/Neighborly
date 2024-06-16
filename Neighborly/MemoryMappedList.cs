@@ -1,5 +1,4 @@
 using Microsoft.Win32.SafeHandles;
-using Serilog.Core;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
@@ -18,6 +17,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly MemoryMappedFileHolder _dataFile;
     private readonly object _mutex = new();
     private long _count;
+    /// <summary>
+    /// Indicates if the index stream is at the end of the stream.
+    /// This is used to enable fast adding of multiple vectors in sequence.
+    /// </summary>
+    private bool _isAtEndOfIndexStream = true;
     private bool _disposedValue;
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -74,9 +78,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         // Only run this function on Windows
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
         {
-            return; 
+            return;
         }
- 
+
         // Create a sparse file
         SafeFileHandle fileHandle = CreateFile(
             path,
@@ -170,6 +174,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
             long offset = BitConverter.ToInt64(offsetBytes);
             int length = BitConverter.ToInt32(lengthBytes);
+            if (offset < 0L || length <= 0)
+            {
+                return null;
+            }
 
             _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
             Span<byte> bytes = stackalloc byte[length];
@@ -183,7 +191,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         lock (_mutex)
         {
             (_, long offset, int length) = SearchVectorInIndex(id);
-            if (offset < 0L || length < 0L)
+            if (offset < 0L || length <= 0)
             {
                 return null;
             }
@@ -248,6 +256,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         lock (_mutex)
         {
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            if (!_isAtEndOfIndexStream)
+            {
+                ReadToEnd();
+            }
+
             Span<byte> idBytes = entry[..s_idBytesLength];
             if (!vector.Id.TryWriteBytes(idBytes))
             {
@@ -271,6 +284,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _dataFile.Stream.Write(data);
 
             ++_count;
+            _isAtEndOfIndexStream = true;
         }
     }
 
@@ -280,6 +294,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         lock (_mutex)
         {
+            _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
@@ -295,7 +310,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 if (id == vector.Id)
                 {
                     // Seek to the beginning of the entry and remove the ID with a tombstone-ID
-                    _indexFile.Stream.Seek(-s_indexEntryByteLength, SeekOrigin.Current);
+                    ReverseIndexStreamByIdBytesLength();
                     _indexFile.Stream.Write(s_tombStoneBytes);
                     // Seek to after the entry
                     _indexFile.Stream.Seek(s_indexEntryByteLength - s_idBytesLength, SeekOrigin.Current);
@@ -304,6 +319,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 }
                 else if (id.Equals(Guid.Empty))
                 {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
                     break;
                 }
             }
@@ -364,6 +381,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         lock (_mutex)
         {
+            _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
             _dataFile.Stream.Seek(0, SeekOrigin.Begin);
 
@@ -385,6 +403,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
                 if (id.Equals(Guid.Empty))
                 {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
                     break;
                 }
 
@@ -405,6 +425,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private (long index, long offset, int length) SearchVectorInIndex(Guid id)
     {
+        _isAtEndOfIndexStream = false;
         _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
         Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
@@ -429,6 +450,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
             else if (vectorId.Equals(Guid.Empty))
             {
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
                 break;
             }
 
@@ -436,6 +459,66 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
 
         return (-1L, -1L, -1);
+    }
+
+    /// <summary>
+    /// Reads the index file and the data file to the last entry,
+    /// so that new data can be appended safely.
+    /// </summary>
+    private void ReadToEnd()
+    {
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+
+        // To keep track of the current position in the data file
+        // that we can use to append new data.
+        // Theoretically, this should always be the last records offset + length,
+        // but we can't be sure that the index file is always in sync with the data file.
+        long maxOffset = -1L;
+        int lengthAtMaxOffset = -1;
+
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        int bytesRead;
+        while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+        {
+            if (bytesRead != s_indexEntryByteLength)
+            {
+                throw new InvalidOperationException("Failed to read the index entry");
+            }
+
+            Guid vectorId = new(entry[..s_idBytesLength]);
+            if (!vectorId.Equals(Guid.Empty))
+            {
+                Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                long offset = BitConverter.ToInt64(offsetBytes);
+                int length = BitConverter.ToInt32(lengthBytes);
+
+                if (offset > maxOffset || (offset == maxOffset && length > lengthAtMaxOffset))
+                {
+                    maxOffset = offset;
+                    lengthAtMaxOffset = length;
+                }
+            }
+            else
+            {
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
+                _dataFile.Stream.Seek(maxOffset + lengthAtMaxOffset, SeekOrigin.Begin);
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// If the index stream is not at the beginning, it will be moved to the previous entry.
+    /// This is to go back one entry after searching for an entry and getting an empty entry.
+    /// </summary>
+    private void ReverseIndexStreamByIdBytesLength()
+    {
+        if (_indexFile.Stream.Position != 0L)
+        {
+            _indexFile.Stream.Seek(-s_indexEntryByteLength, SeekOrigin.Current);
+        }
     }
 
     private class MemoryMappedFileHolder : IDisposable
@@ -461,7 +544,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             DisposeStreams();
 
-            _fileName= Path.GetTempFileName();
+            _fileName = Path.GetTempFileName();
             _WinFileAlloc(_fileName);
             double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
             Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} TiB", _fileName, capacityTiB);
