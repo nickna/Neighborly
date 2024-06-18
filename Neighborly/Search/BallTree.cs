@@ -71,17 +71,17 @@ public class BallTree
 
     public IList<Vector> Search(Vector query, int k)
     {
-        return Search(root, query, k);
+        return Search(root, query, k).ToList();
     }
 
-    private IList<Vector> Search(BallTreeNode? node, Vector query, int k)
+    private IEnumerable<Vector> Search(BallTreeNode? node, Vector query, int k)
     {
         if (node == null)
-            return new List<Vector>();
+            return [];
 
         var distance = query.Distance(node.Center);
         if (distance > node.Radius + k)
-            return new List<Vector>();
+            return [];
 
         return Search(node.Left, query, k)
             .Concat(Search(node.Right, query, k))

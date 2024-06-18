@@ -477,7 +477,7 @@ public partial class Vector : IEquatable<Vector>
     /// <summary>
     /// Gets the number of dimensions in the vector.
     /// </summary>
-    public int Dimensions => Values.Length / sizeof(float);
+    public int Dimensions => Values.Length;
 
     private void GuardDimensionsMatch(Vector other) => GuardDimensionsMatch(this, other);
 
