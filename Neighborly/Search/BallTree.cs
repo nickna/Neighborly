@@ -1,38 +1,72 @@
 ﻿namespace Neighborly.Search;
+
 public class BallTree
 {
-    private BallTreeNode root;
+    private BallTreeNode? root;
 
     public void Build(VectorList vectors)
     {
         if (vectors.Count == 0)
             return;
-        
-        root = BuildNodes(vectors);
+
+        root = BuildNodes(vectors.ToArray());
     }
 
-    private BallTreeNode BuildNodes(IList<Vector> vectors)
+    private BallTreeNode? BuildNodes(Span<Vector> vectors)
     {
-        if (!vectors.Any())
+        if (vectors.IsEmpty)
             return null;
-        
-        if (vectors.Count == 1)
+
+        if (vectors.Length == 1)
             return new BallTreeNode
             {
                 Center = vectors[0],
                 Radius = 0
             };
 
-        var center = vectors.Aggregate((a, b) => a + b) / vectors.Count;
-        var radius = vectors.Max(v => v.Distance(center));
+        var center = Aggregate(vectors) / vectors.Length;
+        var radius = MaxDistance(vectors, center);
 
         return new BallTreeNode
         {
             Center = center,
             Radius = radius,
-            Left = BuildNodes(vectors.Take(vectors.Count / 2).ToList()),
-            Right = BuildNodes(vectors.Skip(vectors.Count / 2).ToList())
+            Left = BuildNodes(vectors[..(vectors.Length / 2)]),
+            Right = BuildNodes(vectors[(vectors.Length / 2)..])
         };
+    }
+
+    private static float MaxDistance(Span<Vector> vectors, Vector center)
+    {
+        var max = 0.0f;
+        foreach (var vector in vectors)
+        {
+            var distance = vector.Distance(center);
+            if (distance > max)
+            {
+                max = distance;
+            }
+        }
+
+        return max;
+    }
+
+    private static Vector Aggregate(Span<Vector> vectors)
+    {
+        Vector? sum = null;
+        foreach (var vector in vectors)
+        {
+            if (sum == null)
+            {
+                sum = vector;
+            }
+            else
+            {
+                sum += vector;
+            }
+        }
+
+        return sum!;
     }
 
     public IList<Vector> Search(Vector query, int k)
@@ -40,7 +74,7 @@ public class BallTree
         return Search(root, query, k);
     }
 
-    private IList<Vector> Search(BallTreeNode node, Vector query, int k)
+    private IList<Vector> Search(BallTreeNode? node, Vector query, int k)
     {
         if (node == null)
             return new List<Vector>();
@@ -56,5 +90,5 @@ public class BallTree
             .ToList();
     }
 
-    
+
 }

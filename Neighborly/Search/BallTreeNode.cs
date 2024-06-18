@@ -4,13 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace Neighborly.Search
+namespace Neighborly.Search;
+
+public class BallTreeNode 
 {
-    public class BallTreeNode 
-    {
-        public Vector Center { get; set; }
-        public double Radius { get; set; }
-        public BallTreeNode Left { get; set; }
-        public BallTreeNode Right { get; set; }
-    }
+    public required Vector Center { get; set; }
+    public double Radius { get; set; }
+    public BallTreeNode? Left { get; set; }
+    public BallTreeNode? Right { get; set; }
 }
