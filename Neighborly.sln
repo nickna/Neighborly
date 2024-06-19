@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IndexAPI.AppHost", "samples
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IndexAPI", "samples\OTEL\IndexAPI\IndexAPI.csproj", "{08DF9A7A-5C8F-4D1B-ADB7-A3375760A0CD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SemanticKernel", "samples\SemanticKernel\SemanticKernel.csproj", "{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -61,6 +63,10 @@ Global
 		{08DF9A7A-5C8F-4D1B-ADB7-A3375760A0CD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{08DF9A7A-5C8F-4D1B-ADB7-A3375760A0CD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{08DF9A7A-5C8F-4D1B-ADB7-A3375760A0CD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -69,6 +75,7 @@ Global
 		{D075B534-16E4-46F8-BB54-3E8F7C91D7F8} = {F504D95A-17EC-42D4-BF51-D50F32D1909F}
 		{2DA843D3-ACC2-4138-AC55-239549AFD0E1} = {D075B534-16E4-46F8-BB54-3E8F7C91D7F8}
 		{08DF9A7A-5C8F-4D1B-ADB7-A3375760A0CD} = {D075B534-16E4-46F8-BB54-3E8F7C91D7F8}
+		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA} = {F504D95A-17EC-42D4-BF51-D50F32D1909F}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {3FFE818A-6491-46CE-84D7-B6B8DFAA0352}

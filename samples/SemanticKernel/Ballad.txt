@@ -1,0 +1,37 @@
+In the realm of data, vast and wide,
+Where numbers dance and can't decide,
+There lies a place, quite orderly,
+A vector database named Neighborly.
+
+**Chorus:**
+Oh, Neighborly, with queries so fast,
+In the land of data, you're unsurpassed.
+Your indexes, like stars, align so free,
+In the digital cosmos of Neighborly.
+
+With algorithms sharp as a smith's own blade,
+It sorts through vectors that users have made.
+Each point in space, a node to see,
+In the structured haven of Neighborly.
+
+**Chorus:**
+Oh, Neighborly, with searches so true,
+You find the nearest neighbor to pursue.
+Your storage vast, as deep as the sea,
+In the boundless vaults of Neighborly.
+
+It scales the peaks of data's mount,
+Drinks from the binary data fount.
+Efficient, swift, it works with glee,
+This marvel known as Neighborly.
+
+**Chorus:**
+Oh, Neighborly, your clusters shine,
+With every search, they realign.
+A beacon of data's harmony,
+That's the magic of Neighborly.
+
+So here's to you, oh database,
+Your speedy search, none can outpace.
+In bytes and bits, you hold the key,
+To a world more connected, thanks to Neighborly.
