@@ -17,7 +17,7 @@ public class BallTree
         root = BuildNodes(vectors);
     }
 
-    public void Load(BinaryReader reader, VectorList vectors)
+    public async Task LoadAsync(BinaryReader reader, VectorList vectors, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -29,13 +29,18 @@ public class BallTree
         }
 
         root = null;
+
+        // Read internal vectors (centers of internal nodes)
+        var internalVectors = new VectorDatabase();
+        await internalVectors.ReadFromAsync(reader, false, cancellationToken).ConfigureAwait(false);
+
         var entries = reader.ReadInt32();
         // Layout of the each entry in the file:
         // - Center (Guid)
         // - Radius (double)
         // - Left (Guid of the Vector in the left node)
         // - Right (Guid of the Vector in the left node)
-        Span<byte> guidBuffer = stackalloc byte[16];
+        byte[] guidBuffer = new byte[16];
         List<(Vector center, double radius, Vector? left, Vector? right)> nodes = new(entries);
         for (var i = 0; i < entries; i++)
         {
@@ -46,7 +51,7 @@ public class BallTree
             var right = reader.ReadGuid(guidBuffer);
 
             // Find the vectors
-            var centerVector = vectors.GetById(center);
+            var centerVector = internalVectors.Vectors.GetById(center) ?? vectors.GetById(center);
             if (centerVector is null)
             {
                 throw new InvalidDataException($"Vector not found: {center}");
@@ -58,16 +63,42 @@ public class BallTree
         }
     }
 
-    public void Save(BinaryWriter writer, VectorList vectors)
+    public async Task SaveAsync(BinaryWriter writer, VectorList vectors, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(vectors);
 
         writer.Write(s_currentFileVersion); // Write the version number
+
+        // Write internal vectors (centers of internal nodes)
+        var internalVectors = BuildInternalVectors(root);
+        await internalVectors.WriteToAsync(writer, false, cancellationToken).ConfigureAwait(false);
+
         var entries = root?.Count() ?? 0;
         writer.Write(entries);
 
         root?.WriteTo(writer);
+    }
+
+    private static VectorDatabase BuildInternalVectors(BallTreeNode? node)
+    {
+        return BuildInternalVectors(node, new VectorDatabase());
+    }
+
+    private static VectorDatabase BuildInternalVectors(BallTreeNode? node, VectorDatabase internalVectors)
+    {
+        if (node == null)
+            return internalVectors;
+
+        if (node.Left != null || node.Right != null)
+        {
+            internalVectors.Vectors.Add(node.Center);
+        }
+
+        internalVectors = BuildInternalVectors(node.Left, internalVectors);
+        internalVectors = BuildInternalVectors(node.Right, internalVectors);
+
+        return internalVectors;
     }
 
     private BallTreeNode? BuildNodes(IList<Vector> vectors)

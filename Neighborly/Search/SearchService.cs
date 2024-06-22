@@ -111,7 +111,7 @@ namespace Neighborly.Search
                         _kdTree.Load(reader, _vectors);
                         break;
                     case SearchAlgorithm.BallTree:
-                        _ballTree.Load(reader, _vectors);
+                        await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
                         break;
                     default:
                         throw new InvalidOperationException("Unsupported search method");
@@ -119,7 +119,7 @@ namespace Neighborly.Search
             }
         }
 
-        public Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
+        public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(writer);
 
@@ -127,14 +127,13 @@ namespace Neighborly.Search
             writer.Write(s_numberOfStorableIndexes); // Write the number of indexes
 
             cancellationToken.ThrowIfCancellationRequested();
-            ExportIndex(writer, SearchAlgorithm.KDTree);
+            await ExportIndexAsync(writer, SearchAlgorithm.KDTree).ConfigureAwait(false);
 
             cancellationToken.ThrowIfCancellationRequested();
-            ExportIndex(writer, SearchAlgorithm.BallTree);
-            return Task.CompletedTask;
+            await ExportIndexAsync(writer, SearchAlgorithm.BallTree).ConfigureAwait(false);
         }
 
-        private void ExportIndex(BinaryWriter writer, SearchAlgorithm method)
+        private async Task ExportIndexAsync(BinaryWriter writer, SearchAlgorithm method)
         {
             writer.Write((int)method);
 
@@ -144,7 +143,7 @@ namespace Neighborly.Search
                     _kdTree.Save(writer, _vectors);
                     break;
                 case SearchAlgorithm.BallTree:
-                    _ballTree.Save(writer, _vectors);
+                    await _ballTree.SaveAsync(writer, _vectors).ConfigureAwait(false);
                     break;
                 default:
                     throw new InvalidOperationException("Unsupported search method");

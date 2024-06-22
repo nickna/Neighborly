@@ -165,15 +165,7 @@ public partial class VectorDatabase
                 using (var reader = new BinaryReader(decompressionStream))
                 {
                     _vectors.Clear();
-                    var fileVersion = reader.ReadInt32();   // File version
-
-                    Func<BinaryReader, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
-                    {
-                        1 => LoadV1Async,
-                        _ => LoadV0Async
-                    };
-
-                    (int vectorCount, indexesAreDirty) = await importFunc(reader, cancellationToken).ConfigureAwait(false);
+                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, cancellationToken).ConfigureAwait(false);
                     _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
                 }
 
@@ -196,6 +188,19 @@ public partial class VectorDatabase
         }
     }
 
+    internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken)
+    {
+        var fileVersion = reader.ReadInt32();   // File version
+
+        Func<BinaryReader, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
+        {
+            1 => LoadV1Async,
+            _ => LoadV0Async
+        };
+
+        return await importFunc(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Imports vectors from a specified file path with the V1 layout.
     /// </summary>
@@ -204,11 +209,17 @@ public partial class VectorDatabase
     /// followed by the binary representation of each vector. Up to this, the V0 layout is the same.
     /// However, it is followed by the binary representation the indexes.
     /// </remarks>
-    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(BinaryReader reader, CancellationToken cancellationToken = default)
+    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
     {
-        var (vectorCount, _) = await LoadV0Async(reader, cancellationToken).ConfigureAwait(false);
-        await _searchService.LoadAsync(reader, cancellationToken).ConfigureAwait(false);
-        return (vectorCount, false);
+        var (vectorCount, _) = await LoadV0Async(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+
+        if (includeIndexes)
+        {
+            await _searchService.LoadAsync(reader, cancellationToken).ConfigureAwait(false);
+            return (vectorCount, false);
+        }
+
+        return (vectorCount, true);
     }
 
     /// <summary>
@@ -218,7 +229,7 @@ public partial class VectorDatabase
     /// The original layout has a leading integer that indicates the total number of vectors in the database
     /// followed by the binary representation of each vector.
     /// </remarks>
-    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(BinaryReader reader, CancellationToken cancellationToken = default)
+    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
     {
         var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
 
@@ -345,18 +356,7 @@ public partial class VectorDatabase
             using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
             using (var writer = new BinaryWriter(compressionStream))
             {
-                // TODO -- This should be async and potentially parallelized
-                writer.Write(s_currentFileVersion);
-                writer.Write(_vectors.Count);
-                foreach (Vector v in _vectors)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    byte[] bytes = v.ToBinary();
-                    writer.Write(bytes.Length);    // File offset of the next Vector
-                    writer.Write(bytes);           // The Vector itself
-                }
-
-                await _searchService.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
+                await WriteToAsync(writer, true, cancellationToken).ConfigureAwait(false);
             }
 
             _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
@@ -376,6 +376,25 @@ public partial class VectorDatabase
         finally
         {
             _rwLock.ExitWriteLock();
+        }
+    }
+
+    internal async Task WriteToAsync(BinaryWriter writer, bool includeIndexes, CancellationToken cancellationToken = default)
+    {
+        // TODO -- This should be async and potentially parallelized
+        writer.Write(s_currentFileVersion);
+        writer.Write(_vectors.Count);
+        foreach (Vector v in _vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[] bytes = v.ToBinary();
+            writer.Write(bytes.Length);    // File offset of the next Vector
+            writer.Write(bytes);           // The Vector itself
+        }
+
+        if (includeIndexes)
+        {
+            await _searchService.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
         }
     }
     #endregion
