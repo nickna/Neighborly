@@ -161,4 +161,14 @@ public class KDTree
         return results;
     }
 
+    public override bool Equals(object? obj)
+    {
+        if (obj is not KDTree other)
+        {
+            return false;
+        }
+
+        return Equals(root, other.root);
+    }
+
 }

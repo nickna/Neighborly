@@ -14,4 +14,16 @@ public class KDTreeNode
         Left?.WriteTo(writer);
         Right?.WriteTo(writer);
     }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is not KDTreeNode other)
+        {
+            return false;
+        }
+
+        return other.Vector.Equals(Vector) &&
+            (other.Left == null && Left == null || other.Left?.Equals(Left) == true) &&
+            (other.Right == null && Right == null || other.Right?.Equals(Right) == true);
+    }
 }

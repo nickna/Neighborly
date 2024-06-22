@@ -148,5 +148,15 @@ public class BallTree
             .ToList();
     }
 
+    public override bool Equals(object? obj)
+    {
+        if (obj is not BallTree other)
+        {
+            return false;
+        }
+
+        return Equals(root, other.root);
+    }
+
 
 }
