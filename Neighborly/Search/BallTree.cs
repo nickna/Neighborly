@@ -12,7 +12,7 @@ public class BallTree
         root = BuildNodes(vectors.ToArray());
     }
 
-    private BallTreeNode? BuildNodes(Span<Vector> vectors)
+    private static BallTreeNode? BuildNodes(Span<Vector> vectors)
     {
         if (vectors.IsEmpty)
             return null;
@@ -71,24 +71,47 @@ public class BallTree
 
     public IList<Vector> Search(Vector query, int k)
     {
-        return Search(root, query, k).ToList();
+        var result = new CappedDistanceSortedList(k);
+        Search(root, query, k, result);
+        return result.Select(static x => x.vector).ToList();
     }
 
-    private IEnumerable<Vector> Search(BallTreeNode? node, Vector query, int k)
+    private static void Search(BallTreeNode? node, Vector query, int k, CappedDistanceSortedList values)
     {
         if (node == null)
-            return [];
+            return;
 
         var distance = query.Distance(node.Center);
-        if (distance > node.Radius + k)
-            return [];
+        if (values.Count == values.Capacity && distance - node.Radius > values.MaxDistance)
+            return;
 
-        return Search(node.Left, query, k)
-            .Concat(Search(node.Right, query, k))
-            .OrderBy(v => v.Distance(query))
-            .Take(k)
-            .ToList();
+        if (node.Left == null && node.Right == null)
+        {
+            values.Add(distance, node.Center);
+            return;
+        }
+
+        var closestChild = query.Distance(node.Left!.Center) < query.Distance(node.Right!.Center) ? node.Left : node.Right;
+        var furthestChild = closestChild == node.Left ? node.Right : node.Left;
+        Search(closestChild, query, k, values);
+        Search(furthestChild, query, k, values);
     }
 
+    private sealed class CappedDistanceSortedList(int k) : List<(float distance, Vector vector)>(k + 1)
+    {
+        private readonly int _k = k;
 
+        public float MaxDistance => Count > 0 ? this[0].distance : float.MaxValue;
+
+        public void Add(float distance, Vector vector)
+        {
+            ArgumentNullException.ThrowIfNull(vector);
+            Add((distance, vector));
+            Sort(static (a, b) => a.distance.CompareTo(b.distance));
+            if (Count > _k)
+            {
+                RemoveAt(Count - 1);
+            }
+        }
+    }
 }
