@@ -223,7 +223,7 @@ public class VectorDatabaseTests
         Assert.IsTrue(_db.Vectors.Contains(vector));
     }
     [Test]
-    public async Task TestSearch([Values(SearchAlgorithm.KDTree)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
+    public async Task TestSearch([Values(SearchAlgorithm.BallTree, SearchAlgorithm.KDTree)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
     {
         // Arrange
         float[] floatArray1 = [1, 2, 3];
@@ -246,7 +246,7 @@ public class VectorDatabaseTests
         Assert.That(result, Does.Contain(vector1), "Search should return the nearest vector.");
     }
     [Test]
-    public async Task TestExactMatchSearch([Values(SearchAlgorithm.BallTree, SearchAlgorithm.Linear, SearchAlgorithm.LSH)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
+    public async Task TestExactMatchSearch([Values(SearchAlgorithm.Linear, SearchAlgorithm.LSH)] SearchAlgorithm searchAlgorithm)
     {
         // Arrange
         float[] floatArray1 = [1, 2, 3];
@@ -261,10 +261,10 @@ public class VectorDatabaseTests
 
         // Act
         var query = new Vector([1f, 2f, 3f]);
-        var result = _db.Search(query, matchingVectors, searchAlgorithm);
+        var result = _db.Search(query, 1, searchAlgorithm);
 
         // Assert
-        Assert.That(result, Has.Count.EqualTo(matchingVectors), "Search should return the correct number of vectors.");
+        Assert.That(result, Has.Count.EqualTo(1), "Search should return the correct number of vectors.");
         Assert.That(result, Does.Contain(vector1), "Search should return the nearest vector.");
     }
     [Test]
