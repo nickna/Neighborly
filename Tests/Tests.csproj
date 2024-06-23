@@ -21,10 +21,18 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.63.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.63.0" PrivateAssets="All" />
+    <ProtoBuf Include="..\API.gRPC\Protos\Vector.proto" GrpcServices="Client" Link="Protos\Vector.proto" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Neighborly\Neighborly.csproj" />
+    <ProjectReference Include="..\API.gRPC\API.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -76,4 +76,7 @@ if (RESTEnable)
     API.Services.RestServices.MapVectorRoutes(app);
 }
 
-app.Run();
+await app.RunAsync().ConfigureAwait(true);
+
+// Helper to make this visible to tests
+internal partial class Program { }
