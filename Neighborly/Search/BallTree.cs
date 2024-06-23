@@ -34,33 +34,9 @@ public class BallTree
         var internalVectors = new VectorDatabase();
         await internalVectors.ReadFromAsync(reader, false, cancellationToken).ConfigureAwait(false);
 
-        var entries = reader.ReadInt32();
-        // Layout of the each entry in the file:
-        // - Center (Guid)
-        // - Radius (double)
-        // - Left (Guid of the Vector in the left node)
-        // - Right (Guid of the Vector in the left node)
         byte[] guidBuffer = new byte[16];
-        List<(Vector center, double radius, Vector? left, Vector? right)> nodes = new(entries);
-        for (var i = 0; i < entries; i++)
-        {
-            // Read the entry
-            var center = reader.ReadGuid(guidBuffer);
-            var radius = reader.ReadDouble();
-            var left = reader.ReadGuid(guidBuffer);
-            var right = reader.ReadGuid(guidBuffer);
-
-            // Find the vectors
-            var centerVector = internalVectors.Vectors.GetById(center) ?? vectors.GetById(center);
-            if (centerVector is null)
-            {
-                throw new InvalidDataException($"Vector not found: {center}");
-            }
-
-            var leftVector = vectors.GetById(left);
-            var rightVector = vectors.GetById(right);
-            nodes.Add((centerVector, radius, leftVector, rightVector));
-        }
+        // Read the tree starting at the root node
+        root = BallTreeNode.ReadFrom(reader, vectors, internalVectors, guidBuffer);
     }
 
     public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
@@ -72,9 +48,6 @@ public class BallTree
         // Write internal vectors (centers of internal nodes)
         var internalVectors = BuildInternalVectors(root);
         await internalVectors.WriteToAsync(writer, false, cancellationToken).ConfigureAwait(false);
-
-        var entries = root?.Count() ?? 0;
-        writer.Write(entries);
 
         root?.WriteTo(writer);
     }

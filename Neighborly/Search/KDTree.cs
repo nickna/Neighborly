@@ -42,31 +42,9 @@ public class KDTree
         }
 
         root = null;
-        var entries = reader.ReadInt32();
-        // Layout of the each entry in the file:
-        // - Center (Guid)
-        // - Left (Guid of the Vector in the left node)
-        // - Right (Guid of the Vector in the left node)
         Span<byte> guidBuffer = stackalloc byte[16];
-        List<(Vector center, Vector? left, Vector? right)> nodes = new(entries);
-        for (var i = 0; i < entries; i++)
-        {
-            // Read the entry
-            var center = reader.ReadGuid(guidBuffer);
-            var left = reader.ReadGuid(guidBuffer);
-            var right = reader.ReadGuid(guidBuffer);
-
-            // Find the vectors
-            var centerVector = vectors.GetById(center);
-            if (centerVector is null)
-            {
-                throw new InvalidDataException($"Vector not found: {center}");
-            }
-
-            var leftVector = vectors.GetById(left);
-            var rightVector = vectors.GetById(right);
-            nodes.Add((centerVector, leftVector, rightVector));
-        }
+        // Read the tree starting at the root node
+        root = KDTreeNode.ReadFrom(reader, vectors, guidBuffer);
     }
 
     public void Save(BinaryWriter writer, VectorList vectors)
@@ -75,8 +53,6 @@ public class KDTree
         ArgumentNullException.ThrowIfNull(vectors);
 
         writer.Write(s_currentFileVersion); // Write the version number
-        var entries = root?.Count() ?? 0;
-        writer.Write(entries);
 
         root?.WriteTo(writer);
     }
