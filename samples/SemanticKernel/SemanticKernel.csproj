@@ -8,13 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference
-      Include="..\..\Adapters.SemanticKernel\Neighborly.Adapters.SemanticKernel.csproj" />
+    <ProjectReference Include="..\..\Adapters.SemanticKernel\Neighborly.Adapters.SemanticKernel.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.SemanticKernel.Plugins.Memory" Version="1.14.0-alpha" />
-    <PackageReference Include="Testcontainers" Version="3.8.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Plugins.Memory" Version="1.15.0-alpha" />
+    <PackageReference Include="Testcontainers" Version="3.9.0" />
     <PackageReference Include="Atc.SemanticKernel.Connectors.Ollama" Version="1.0.35" />
   </ItemGroup>
 
