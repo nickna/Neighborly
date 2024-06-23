@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Neighborly.Distance;
 
 namespace Neighborly;
 
@@ -161,82 +162,16 @@ public partial class Vector : IEquatable<Vector>
     /// <summary>
     /// Calculates the distance between this vector and another vector 
     /// </summary>
-    /// <param name="vectorDistanceMeasurement">The distance algorithm to use. Default is Euclidian</param>
     /// <param name="other">The other vector to calculate the distance to</param>
+    /// <param name="vectorDistanceMeasurement">The distance algorithm to use. Default is Euclidian</param>
     /// <returns>The distance between the two vectors</returns>
-    public float Distance(Vector other, VectorDistanceMeasurement vectorDistanceMeasurement = VectorDistanceMeasurement.EuclideanDistance)
+    /// <exception cref="ArgumentNullException">Thrown when the <paramref name="other"/> is null.</exception>
+    public float Distance(Vector other, IDistanceCalculator? distanceCalculator = null)
     {
-        switch (vectorDistanceMeasurement)
-        {
-            case VectorDistanceMeasurement.EuclideanDistance:
-                {
-                    // Calculate distance using Euclidean math
-                    float sum = 0;
-                    for (int i = 0; i < Dimension; i++)
-                    {
-                        float diff = Values[i] - other.Values[i];
-                        sum += diff * diff;
-                    }
-                    return (float)Math.Sqrt(sum);
-                }
-            case VectorDistanceMeasurement.ManhattanDistance:
-                {
-                    // Calculate distance metric using Manhattan distance
-                    float sum = 0;
-                    for (int i = 0; i < Dimension; i++)
-                    {
-                        float diff = Values[i] - other.Values[i];
-                        sum += Math.Abs(diff);
-                    }
-                    return sum;
-                }
-            case VectorDistanceMeasurement.ChebyshevDistance:
-                {
-                    // Calculate distance metric using Chebyshev distance
-                    float max = 0;
-                    for (int i = 0; i < Dimension; i++)
-                    {
-                        float diff = Math.Abs(Values[i] - other.Values[i]);
-                        if (diff > max)
-                        {
-                            max = diff;
-                        }
-                    }
-                    return max;
-                }
-            case VectorDistanceMeasurement.MinkowskiDistance:
-                {
-                    // Calculate distance metric using Minkowski distance
-                    float sum = 0;
-                    for (int i = 0; i < Dimension; i++)
-                    {
-                        float diff = Values[i] - other.Values[i];
-                        sum += (float)Math.Pow(Math.Abs(diff), 3);
-                    }
-                    return (float)Math.Pow(sum, 1.0 / 3.0);
-                }
-            case VectorDistanceMeasurement.CosineSimilarity:
-                {
-                    // Calculate distance metric using Cosine similarity
-                    float dotProduct = 0;
-                    float magnitudeA = 0;
-                    float magnitudeB = 0;
-                    for (int i = 0; i < Dimension; i++)
-                    {
-                        dotProduct += Values[i] * other.Values[i];
-                        magnitudeA += Values[i] * Values[i];
-                        magnitudeB += other.Values[i] * other.Values[i];
-                    }
-                    magnitudeA = (float)Math.Sqrt(magnitudeA);
-                    magnitudeB = (float)Math.Sqrt(magnitudeB);
-                    return dotProduct / (magnitudeA * magnitudeB);
-                }
-            default:
-                {
-                    throw new ArgumentException("Invalid distance measurement");
-                }
-        }
+        ArgumentNullException.ThrowIfNull(other);
 
+        distanceCalculator ??= EuclideanDistanceCalculator.Instance;
+        return distanceCalculator.CalculateDistance(this, other);
     }
 
     /// <summary>
@@ -481,9 +416,9 @@ public partial class Vector : IEquatable<Vector>
 
     private void GuardDimensionsMatch(Vector other) => GuardDimensionsMatch(this, other);
 
-    private static void GuardDimensionsMatch(Vector a, Vector b)
+    internal static void GuardDimensionsMatch(Vector a, Vector b)
     {
-        if (a.Dimensions != b.Dimensions)
+        if (a.Dimension != b.Dimension)
         {
             throw new ArgumentException("Dimensions must match");
         }
