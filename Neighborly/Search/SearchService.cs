@@ -127,13 +127,13 @@ namespace Neighborly.Search
             writer.Write(s_numberOfStorableIndexes); // Write the number of indexes
 
             cancellationToken.ThrowIfCancellationRequested();
-            await ExportIndexAsync(writer, SearchAlgorithm.KDTree).ConfigureAwait(false);
+            await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
 
             cancellationToken.ThrowIfCancellationRequested();
-            await ExportIndexAsync(writer, SearchAlgorithm.BallTree).ConfigureAwait(false);
+            await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task ExportIndexAsync(BinaryWriter writer, SearchAlgorithm method)
+        private async Task ExportIndexAsync(BinaryWriter writer, SearchAlgorithm method, CancellationToken cancellationToken)
         {
             writer.Write((int)method);
 
@@ -143,7 +143,7 @@ namespace Neighborly.Search
                     _kdTree.Save(writer, _vectors);
                     break;
                 case SearchAlgorithm.BallTree:
-                    await _ballTree.SaveAsync(writer, _vectors).ConfigureAwait(false);
+                    await _ballTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
                     break;
                 default:
                     throw new InvalidOperationException("Unsupported search method");

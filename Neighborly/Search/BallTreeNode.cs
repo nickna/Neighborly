@@ -9,15 +9,12 @@ public class BallTreeNode
 
     internal int Count() => 1 + (Left?.Count() ?? 0) + (Right?.Count() ?? 0);
 
-    internal void WriteTo(BinaryWriter writer, bool treeIdOnly = false)
+    internal void WriteTo(BinaryWriter writer)
     {
         writer.Write(Center.Id.ToByteArray());
-        if (!treeIdOnly)
-        {
-            writer.Write(Radius);
-            Left?.WriteTo(writer, true);
-            Right?.WriteTo(writer, true);
-        }
+        writer.Write(Radius);
+        Left?.WriteTo(writer);
+        Right?.WriteTo(writer);
     }
 
     public override bool Equals(object? obj)

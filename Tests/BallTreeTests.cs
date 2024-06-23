@@ -18,12 +18,12 @@ public class BallTreeTests
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
         {
-            await originalTree.SaveAsync(writer, vectors).ConfigureAwait(true);
+            await originalTree.SaveAsync(writer).ConfigureAwait(true);
         }
 
         stream.Seek(0, SeekOrigin.Begin);
         BallTree loadedTree = new();
-        using (var reader = new BinaryReader(stream))
+        using (var reader = new BinaryReader(stream, Encoding.UTF8, true))
         {
             await loadedTree.LoadAsync(reader, vectors).ConfigureAwait(true);
         }

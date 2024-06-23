@@ -63,10 +63,9 @@ public class BallTree
         }
     }
 
-    public async Task SaveAsync(BinaryWriter writer, VectorList vectors, CancellationToken cancellationToken = default)
+    public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(vectors);
 
         writer.Write(s_currentFileVersion); // Write the version number
 
