@@ -23,15 +23,23 @@ public class RestTests
         // Assert 1: Vector was added
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.Created), "Vector was not added");
         var vectorUri = response.Headers.Location;
+
+        // Act 2: Get the vector
         response = await client.GetAsync(vectorUri).ConfigureAwait(true);
+
+        // Assert 2: Vector was found
         Assert.That(response.IsSuccessStatusCode, Is.True, "Vector was not found");
 
-        // Act 2: Delete the vector
+        // Act 3: Delete the vector
         response = await client.DeleteAsync(vectorUri).ConfigureAwait(true);
 
-        // Assert 2: Vector was deleted
+        // Assert 3: Vector was deleted
         Assert.That(response.IsSuccessStatusCode, Is.True, "Vector was not deleted");
+
+        // Act 4: Get the vector again
         response = await client.GetAsync(vectorUri).ConfigureAwait(true);
+
+        // Assert 4: Vector was not found (because it was deleted)
         Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.NotFound), "Vector was not deleted");
     }
 }
