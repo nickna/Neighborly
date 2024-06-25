@@ -169,10 +169,11 @@ namespace Tests
             int countBeforeDefrag = _db.Vectors.Count;
 
             // Act: Defragment in batches
-            while (_db.Vectors.CalculateFragmentation() > 0)
+            long fragmentation;
+            do
             {
-                _db.Vectors.DefragBatch();
-            }
+                fragmentation = _db.Vectors.DefragBatch();
+            } while (fragmentation > 0);
 
             int countAfterDefrag = _db.Vectors.Count;
 
@@ -209,20 +210,16 @@ namespace Tests
             }
 
             // Act
-            // Keep in mind that the CalculateFragmentation method is I/O intensive
-            // and pollutes the measured time to complete a defragmentation.
             var stopwatch = Stopwatch.StartNew();
-            while (_db.Vectors.CalculateFragmentation() > 0) 
+            long fragmentation;
+            do
             {
-                _db.Vectors.DefragBatch();
-            }
-            {
-                _db.Vectors.DefragBatch();
-            }
+                fragmentation = _db.Vectors.DefragBatch();
+            } while (fragmentation > 0);
             stopwatch.Stop();
 
             // Assert
-            var maxAcceptableTime = TimeSpan.FromSeconds(30); // Adjust the threshold as needed
+            var maxAcceptableTime = TimeSpan.FromMilliseconds(300); // Adjust the threshold as needed
             Assert.That(stopwatch.Elapsed, Is.LessThan(maxAcceptableTime), $"Defragmentation should complete within {maxAcceptableTime.TotalSeconds} seconds.");
         }
 

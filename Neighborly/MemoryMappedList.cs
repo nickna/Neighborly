@@ -472,12 +472,14 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// Defragments the data file in batches, to avoid blocking I/O for long periods
     /// </summary>
     /// <exception cref="InvalidOperationException"></exception>
-    public void DefragBatch()
+    public long DefragBatch()
     {
         lock (_mutex)
         {
             long newIndexPosition = _defragIndexPosition;
-            long newDataPosition = _newDataPosition; // This is updated after each batch
+            long newDataPosition = _newDataPosition;
+            long totalDataSize = 0;
+            long totalFragmentation = 0;
 
             _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
             _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
@@ -485,6 +487,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
             int bytesRead;
             int batchCount = 0;
+            List<(long oldOffset, int length, long newOffset)> updates = new List<(long, int, long)>(_defragBatchSize);
 
             while ((bytesRead = _indexFile.Stream.Read(entry)) > 0 && batchCount < _defragBatchSize)
             {
@@ -497,34 +500,48 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 if (id.Equals(s_tombStone))
                 {
                     newIndexPosition++;
-                    continue; // Skip tombstoned entries
+                    continue;
                 }
 
                 if (id.Equals(Guid.Empty))
                 {
-                    break; // End of valid entries
+                    break;
                 }
 
                 long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
                 int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
 
-                // Read data associated with the entry
-                byte[] data = new byte[length];
-                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-                _dataFile.Stream.ReadExactly(data);
+                if (offset > newDataPosition)
+                {
+                    totalFragmentation += offset - newDataPosition;
+                }
 
-                // Write the entry back to the index file at the new position
-                BitConverter.TryWriteBytes(entry.Slice(s_idBytesLength, s_offsetBytesLength), newDataPosition);
-                _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
-                _indexFile.Stream.Write(entry);
-
-                // Write the data back to the data file at the new position
-                _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
-                _dataFile.Stream.Write(data);
+                updates.Add((offset, length, newDataPosition));
 
                 newIndexPosition++;
                 newDataPosition += length;
+                totalDataSize += length;
                 batchCount++;
+            }
+
+            // Perform all reads and writes
+            foreach (var update in updates)
+            {
+                _dataFile.Stream.Seek(update.oldOffset, SeekOrigin.Begin);
+                byte[] data = new byte[update.length];
+                _dataFile.Stream.Read(data, 0, update.length);
+
+                _dataFile.Stream.Seek(update.newOffset, SeekOrigin.Begin);
+                _dataFile.Stream.Write(data, 0, update.length);
+            }
+
+            // Update all index entries
+            _indexFile.Stream.Seek(_defragIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+            foreach (var update in updates)
+            {
+                _indexFile.Stream.Seek(s_idBytesLength, SeekOrigin.Current);
+                _indexFile.Stream.Write(BitConverter.GetBytes(update.newOffset), 0, s_offsetBytesLength);
+                _indexFile.Stream.Seek(s_lengthBytesLength, SeekOrigin.Current);
             }
 
             // Update tracking variables for the next batch
@@ -539,6 +556,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 _defragIndexPosition = 0;
                 _newDataPosition = 0;
             }
+
+            // Calculate fragmentation percentage
+            return totalDataSize == 0 ? 0 : totalFragmentation * 100 / totalDataSize;
         }
     }
 

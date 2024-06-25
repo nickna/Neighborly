@@ -452,9 +452,8 @@ public class VectorList : IList<Vector>, IDisposable
         return _memoryMappedList.CalculateFragmentation();
     }
 
-    public void DefragBatch()
+    public long DefragBatch()
     {
-        _memoryMappedList.DefragBatch();
-        return;
+        return _memoryMappedList.DefragBatch();
     }
 }
