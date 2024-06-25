@@ -255,9 +255,11 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+
         var path = Path.GetTempPath();
 
-        // Act
+        // Act    
         await _db.SaveAsync(path).ConfigureAwait(true);
         _db.Vectors.Clear();
         await _db.LoadAsync(path).ConfigureAwait(true);

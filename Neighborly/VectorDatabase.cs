@@ -1,9 +1,8 @@
-﻿using Neighborly.ETL;
-using Microsoft.Extensions.Logging;
-using System.IO.Compression;
+﻿using Microsoft.Extensions.Logging;
+using Neighborly.ETL;
 using Neighborly.Search;
 using System.Diagnostics;
-using CsvHelper;
+using System.IO.Compression;
 
 namespace Neighborly;
 
@@ -12,13 +11,18 @@ namespace Neighborly;
 /// </summary>
 public partial class VectorDatabase
 {
+    /// <summary>
+    /// The version of the database file format that this class writes.
+    /// </summary>
+    private const int s_currentFileVersion = 1;
+
     private readonly ILogger<VectorDatabase> _logger = Logging.LoggerFactory.CreateLogger<VectorDatabase>();
     private readonly Instrumentation _instrumentation;
     /// <summary>
     /// The unique identifier of the database for telemetry purposes.
     /// </summary>
     private readonly Guid _id = Guid.NewGuid();
-    private readonly VectorList _vectors = new();
+    private readonly VectorList _vectors = new(1337);
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
@@ -27,7 +31,7 @@ public partial class VectorDatabase
     /// <summary>
     /// Last time the database was modified. This is updated when a vector is added or removed.
     /// </summary>
-    private DateTime lastModification = DateTime.Now;
+    private DateTime _lastModification = DateTime.UtcNow;
 
     /// <summary>
     /// The time threshold in seconds for rebuilding the search indexes and VectorTags after a database change was detected.
@@ -61,7 +65,7 @@ public partial class VectorDatabase
 
     private void VectorList_Modified(object? sender, EventArgs e)
     {
-        lastModification = DateTime.Now;
+        _lastModification = DateTime.UtcNow;
         _hasUnsavedChanges = true;
         _hasOutdatedIndex = true;
     }
@@ -77,7 +81,7 @@ public partial class VectorDatabase
             CouldNotFindVectorInDb(query, k, ex);
             return new List<Vector>();
         }
-            
+
     }
 
     [LoggerMessage(
@@ -93,10 +97,6 @@ public partial class VectorDatabase
     public VectorDatabase()
         : this(Logging.LoggerFactory.CreateLogger<VectorDatabase>(), null)
     {
-        // Wire up the event handler for the VectorList.Modified event
-        _vectors.Modified += VectorList_Modified;
-        _searchService = new Search.SearchService(_vectors);
-        StartIndexService();
     }
 
     /// <summary>
@@ -125,6 +125,7 @@ public partial class VectorDatabase
             tags: [new("db.namespace", _id)]
         );
 
+        // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
         _searchService = new Search.SearchService(_vectors);
         StartIndexService();
@@ -138,13 +139,13 @@ public partial class VectorDatabase
     /// </summary>
     /// <param name="path">The file path to load the vectors from.</param>
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
-    public async Task LoadAsync(string path, bool createOnNew = true)
+    public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
         {
-            _logger.LogError($"The file {filePath} does not exist.");
+            _logger.LogError("The file {FilePath} does not exist.", filePath);
             throw new FileNotFoundException($"The file {filePath} does not exist.");
         }
         else if (createOnNew && !fileExists)
@@ -157,26 +158,22 @@ public partial class VectorDatabase
             _rwLock.EnterWriteLock();
             try
             {
+                bool indexesAreDirty;
+
                 using (var inputStream = new FileStream(filePath, FileMode.Open))
                 using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
                 using (var reader = new BinaryReader(decompressionStream))
                 {
                     _vectors.Clear();
-                    var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
-
-                    for (int i = 0; i < vectorCount; i++)
-                    {
-                        var nextVector = reader.ReadInt32();    // File offset of the next Vector
-                        var vector = new Vector(reader.ReadBytes(nextVector));
-                        _vectors.Add(vector);
-                    }
-                    Console.WriteLine(inputStream.Name);
-                    reader.Close();
-                    inputStream.Close();
+                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
                 }
 
-                await RebuildSearchIndexesAsync();     // Rebuild both k-d tree and Ball Tree search index  
-                
+                if (indexesAreDirty)
+                {
+                    await RebuildSearchIndexesAsync().ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+                }
+
                 _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
                 _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
@@ -189,7 +186,62 @@ public partial class VectorDatabase
                 }
             }
         }
+    }
 
+    internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken)
+    {
+        var fileVersion = reader.ReadInt32();   // File version
+
+        Func<BinaryReader, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
+        {
+            1 => LoadV1Async,
+            _ => LoadV0Async
+        };
+
+        return await importFunc(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Imports vectors from a specified file path with the V1 layout.
+    /// </summary>
+    /// <remarks>
+    /// The V1 layout has a leading integer that indicates the total number of vectors in the database
+    /// followed by the binary representation of each vector. Up to this, the V0 layout is the same.
+    /// However, it is followed by the binary representation the indexes.
+    /// </remarks>
+    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
+    {
+        var (vectorCount, _) = await LoadV0Async(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+
+        if (includeIndexes)
+        {
+            await _searchService.LoadAsync(reader, cancellationToken).ConfigureAwait(false);
+            return (vectorCount, false);
+        }
+
+        return (vectorCount, true);
+    }
+
+    /// <summary>
+    /// Imports vectors from a specified file path with the original layout.
+    /// </summary>
+    /// <remarks>
+    /// The original layout has a leading integer that indicates the total number of vectors in the database
+    /// followed by the binary representation of each vector.
+    /// </remarks>
+    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
+    {
+        var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
+
+        for (int i = 0; i < vectorCount; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var nextVector = reader.ReadInt32();    // File offset of the next Vector
+            var vector = new Vector(reader.ReadBytes(nextVector));
+            _vectors.Add(vector);
+        }
+
+        return Task.FromResult((vectorCount, true));
     }
 
     private void StartIndexService()
@@ -208,7 +260,7 @@ public partial class VectorDatabase
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
                 if (_hasOutdatedIndex &&
                     _vectors.Count > 0 &&
-                    DateTime.Now.Subtract(lastModification).TotalSeconds > timeThresholdSeconds)
+                    DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
                     await RebuildTagsAsync();
                     await RebuildSearchIndexesAsync();
@@ -267,13 +319,13 @@ public partial class VectorDatabase
     /// <summary>
     /// Saves the vectors to the current directory.
     /// </summary>
-    public async Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
         // Get the current directory
         string currentDirectory = Directory.GetCurrentDirectory();
 
         // Call the existing Save method with the current directory
-        await SaveAsync(currentDirectory);
+        await SaveAsync(currentDirectory, cancellationToken);
     }
 
     /// <summary>
@@ -281,7 +333,7 @@ public partial class VectorDatabase
     /// (In the API server, this method will be called when the host OS sends a shutdown signal.)
     /// </summary>
     /// <param name="path">The file path to save the vectors to.</param>
-    public async Task SaveAsync(string path)
+    public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
     {
         // If the database hasn't been modified, no need to save it
         if (!_hasUnsavedChanges)
@@ -299,21 +351,12 @@ public partial class VectorDatabase
             _rwLock.EnterWriteLock();
             // Save the vectors to a binary file
             string filePath = Path.Combine(path, "vectors.bin");
-            var outputStream = new FileStream(filePath, FileMode.Create);
+            using var outputStream = new FileStream(filePath, FileMode.Create);
             // TODO -- Experiment with other compression types. For now, GZip works.
             using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
             using (var writer = new BinaryWriter(compressionStream))
             {
-                // TODO -- This should be async and potentially parallelized
-                writer.Write(_vectors.Count);
-                foreach (Vector v in _vectors)
-                {
-                    byte[] bytes = v.ToBinary();
-                    writer.Write(bytes.Length);    // File offset of the next Vector
-                    writer.Write(bytes);           // The Vector itself
-                }
-                writer.Close();
-                outputStream.Close();
+                await WriteToAsync(writer, true, cancellationToken).ConfigureAwait(false);
             }
 
             _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
@@ -334,8 +377,25 @@ public partial class VectorDatabase
         {
             _rwLock.ExitWriteLock();
         }
+    }
 
-        
+    internal async Task WriteToAsync(BinaryWriter writer, bool includeIndexes, CancellationToken cancellationToken = default)
+    {
+        // TODO -- This should be async and potentially parallelized
+        writer.Write(s_currentFileVersion);
+        writer.Write(_vectors.Count);
+        foreach (Vector v in _vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[] bytes = v.ToBinary();
+            writer.Write(bytes.Length);    // File offset of the next Vector
+            writer.Write(bytes);           // The Vector itself
+        }
+
+        if (includeIndexes)
+        {
+            await _searchService.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
+        }
     }
     #endregion
 
