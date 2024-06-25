@@ -15,7 +15,7 @@ public class BallTree
         if (vectors.Count == 0)
             return;
 
-        root = BuildNodes(vectors.ToArray());
+        root = BuildNodes(vectors);
     }
 
     private static BallTreeNode? BuildNodes(Span<Vector> vectors)
@@ -24,8 +24,22 @@ public class BallTree
             return null;
 
         if (vectors.Length == 1)
+            return new BallTreeNode
+            {
+                Center = vectors[0],
+                Radius = 0
+            };
 
-        root = BuildNodes(vectors);
+        var center = Aggregate(vectors) / vectors.Length;
+        var radius = MaxDistance(vectors, center);
+
+        return new BallTreeNode
+        {
+            Center = center,
+            Radius = radius,
+            Left = BuildNodes(vectors[..(vectors.Length / 2)]),
+            Right = BuildNodes(vectors[(vectors.Length / 2)..])
+        };
     }
 
     public async Task LoadAsync(BinaryReader reader, VectorList vectors, CancellationToken cancellationToken = default)
@@ -99,15 +113,15 @@ public class BallTree
                 Radius = 0
             };
 
-        var center = Aggregate(vectors) / vectors.Length;
-        var radius = MaxDistance(vectors, center);
+        var center = vectors.Aggregate((a, b) => a + b) / vectors.Count;
+        var radius = vectors.Max(v => v.Distance(center));
 
         return new BallTreeNode
         {
             Center = center,
             Radius = radius,
-            Left = BuildNodes(vectors[..(vectors.Length / 2)]),
-            Right = BuildNodes(vectors[(vectors.Length / 2)..])
+            Left = BuildNodes(vectors.Take(vectors.Count / 2).ToList()),
+            Right = BuildNodes(vectors.Skip(vectors.Count / 2).ToList())
         };
     }
 
