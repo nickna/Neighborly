@@ -1,5 +1,4 @@
 using Microsoft.Win32.SafeHandles;
-using Serilog.Core;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
@@ -18,7 +17,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly MemoryMappedFileHolder _dataFile;
     private readonly object _mutex = new();
     private long _count;
+    /// <summary>
+    /// Indicates if the index stream is at the end of the stream.
+    /// This is used to enable fast adding of multiple vectors in sequence.
+    /// </summary>
+    private bool _isAtEndOfIndexStream = true;
     private bool _disposedValue;
+    private long _defragPosition = 0; // Tracks the current position in the index file for defragmentation
+    private long _defragIndexPosition;
+    private long _newDataPosition;
+    private const int _defragBatchSize = 100; // Number of entries to defrag in one batch, adjust based on performance needs
 
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern SafeFileHandle CreateFile(
@@ -74,9 +82,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         // Only run this function on Windows
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
         {
-            return; 
+            return;
         }
- 
+
         // Create a sparse file
         SafeFileHandle fileHandle = CreateFile(
             path,
@@ -170,6 +178,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
             long offset = BitConverter.ToInt64(offsetBytes);
             int length = BitConverter.ToInt32(lengthBytes);
+            if (offset < 0L || length <= 0)
+            {
+                return null;
+            }
 
             _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
             Span<byte> bytes = stackalloc byte[length];
@@ -183,7 +195,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         lock (_mutex)
         {
             (_, long offset, int length) = SearchVectorInIndex(id);
-            if (offset < 0L || length < 0L)
+            if (offset < 0L || length <= 0)
             {
                 return null;
             }
@@ -248,6 +260,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         lock (_mutex)
         {
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            if (!_isAtEndOfIndexStream)
+            {
+                ReadToEnd();
+            }
+
             Span<byte> idBytes = entry[..s_idBytesLength];
             if (!vector.Id.TryWriteBytes(idBytes))
             {
@@ -271,6 +288,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _dataFile.Stream.Write(data);
 
             ++_count;
+            _isAtEndOfIndexStream = true;
         }
     }
 
@@ -280,6 +298,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         lock (_mutex)
         {
+            _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
@@ -295,7 +314,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 if (id == vector.Id)
                 {
                     // Seek to the beginning of the entry and remove the ID with a tombstone-ID
-                    _indexFile.Stream.Seek(-s_indexEntryByteLength, SeekOrigin.Current);
+                    ReverseIndexStreamByIdBytesLength();
                     _indexFile.Stream.Write(s_tombStoneBytes);
                     // Seek to after the entry
                     _indexFile.Stream.Seek(s_indexEntryByteLength - s_idBytesLength, SeekOrigin.Current);
@@ -304,6 +323,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 }
                 else if (id.Equals(Guid.Empty))
                 {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
                     break;
                 }
             }
@@ -328,11 +349,199 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
     }
 
+    /// <summary>
+    /// Calculate the fragmentation of the data file
+    /// </summary>
+    /// <returns></returns>
+    /// <exception cref="InvalidOperationException"></exception>
+    public long CalculateFragmentation()
+    {
+        lock (_mutex)
+        {
+            long expectedDataPosition = 0; // Expected start position of the next data entry
+            long totalFragmentation = 0; // Total size of gaps between data entries
+            long totalDataSize = 0; // Total size of data entries
+
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin); // Start from the beginning of the index file
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength]; // Buffer for reading index entries
+            int bytesRead;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0) // Read each index entry
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    // If the read entry is incomplete, skip it and continue to the next entry
+                    _indexFile.Stream.Seek(s_indexEntryByteLength - bytesRead, SeekOrigin.Current);
+                    continue;
+                }
+
+                Guid id = new(entry[..s_idBytesLength]); // Extract the ID from the entry
+                if (id.Equals(s_tombStone) || id.Equals(Guid.Empty))
+                {
+                    continue; // Skip tombstoned or empty entries
+                }
+
+                long actualOffset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength)); // Actual start position of the data entry
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength)); // Length of the data entry
+
+                if (actualOffset > expectedDataPosition)
+                {
+                    // If there's a gap between the expected and actual position, it's fragmentation
+                    long gapSize = actualOffset - expectedDataPosition;
+                    totalFragmentation += gapSize;
+                }
+
+                // Update the expected position for the next entry
+                expectedDataPosition = actualOffset + length;
+                totalDataSize += length;
+            }
+
+            if (totalDataSize == 0)
+            {
+                return 0;
+            }
+
+            return totalFragmentation * 100 / totalDataSize;
+        }
+    }
+
+
+
+    /// <summary>
+    /// Performs a blocking defragmentation of the data file, regardless of the fragmentation level
+    /// </summary>
+    /// <exception cref="InvalidOperationException"></exception>
     public void Defrag()
     {
-        // TODO: Implement defragmentation - remove tombstones and compact data
-        throw new NotImplementedException();
+        lock (_mutex)
+        {
+            long newIndexPosition = 0;
+            long newDataPosition = 0;
+
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+            _dataFile.Stream.Seek(0, SeekOrigin.Begin);
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id.Equals(s_tombStone))
+                {
+                    continue; // Skip tombstoned entries
+                }
+
+                if (id.Equals(Guid.Empty))
+                {
+                    break; // End of valid entries
+                }
+
+                long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+
+                // Read data associated with the entry
+                byte[] data = new byte[length];
+                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+                _dataFile.Stream.ReadExactly(data);
+
+                // Update the offset in the index entry to the new data position
+                BitConverter.TryWriteBytes(entry.Slice(s_idBytesLength, s_offsetBytesLength), newDataPosition);
+
+                // Write the updated index entry back to the index file at the new position
+                _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+                _indexFile.Stream.Write(entry);
+
+                // Write the data back to the data file at the new position
+                _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+                _dataFile.Stream.Write(data);
+
+                newIndexPosition++;
+                newDataPosition += length;
+            }
+        }
     }
+
+    /// <summary>
+    /// Defragments the data file in batches, to avoid blocking I/O for long periods
+    /// </summary>
+    /// <exception cref="InvalidOperationException"></exception>
+    public void DefragBatch()
+    {
+        lock (_mutex)
+        {
+            long newIndexPosition = _defragIndexPosition;
+            long newDataPosition = _newDataPosition; // This is updated after each batch
+
+            _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+            _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+            int batchCount = 0;
+
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0 && batchCount < _defragBatchSize)
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id.Equals(s_tombStone))
+                {
+                    newIndexPosition++;
+                    continue; // Skip tombstoned entries
+                }
+
+                if (id.Equals(Guid.Empty))
+                {
+                    break; // End of valid entries
+                }
+
+                long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+                int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+
+                // Read data associated with the entry
+                byte[] data = new byte[length];
+                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+                _dataFile.Stream.ReadExactly(data);
+
+                // Write the entry back to the index file at the new position
+                BitConverter.TryWriteBytes(entry.Slice(s_idBytesLength, s_offsetBytesLength), newDataPosition);
+                _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+                _indexFile.Stream.Write(entry);
+
+                // Write the data back to the data file at the new position
+                _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+                _dataFile.Stream.Write(data);
+
+                newIndexPosition++;
+                newDataPosition += length;
+                batchCount++;
+            }
+
+            // Update tracking variables for the next batch
+            _defragIndexPosition = newIndexPosition;
+            _newDataPosition = newDataPosition;
+
+            // Detecting the end of defragmentation
+            if (_defragIndexPosition == _count || bytesRead == 0)
+            {
+                // Reset state variables for the next defragmentation cycle
+                _defragPosition = 0;
+                _defragIndexPosition = 0;
+                _newDataPosition = 0;
+            }
+        }
+    }
+
 
     public void Clear()
     {
@@ -364,6 +573,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         lock (_mutex)
         {
+            _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
             _dataFile.Stream.Seek(0, SeekOrigin.Begin);
 
@@ -385,6 +595,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
                 if (id.Equals(Guid.Empty))
                 {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
                     break;
                 }
 
@@ -405,6 +617,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private (long index, long offset, int length) SearchVectorInIndex(Guid id)
     {
+        _isAtEndOfIndexStream = false;
         _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
         Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
@@ -429,6 +642,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
             else if (vectorId.Equals(Guid.Empty))
             {
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
                 break;
             }
 
@@ -436,6 +651,66 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
 
         return (-1L, -1L, -1);
+    }
+
+    /// <summary>
+    /// Reads the index file and the data file to the last entry,
+    /// so that new data can be appended safely.
+    /// </summary>
+    private void ReadToEnd()
+    {
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+
+        // To keep track of the current position in the data file
+        // that we can use to append new data.
+        // Theoretically, this should always be the last records offset + length,
+        // but we can't be sure that the index file is always in sync with the data file.
+        long maxOffset = -1L;
+        int lengthAtMaxOffset = -1;
+
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        int bytesRead;
+        while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+        {
+            if (bytesRead != s_indexEntryByteLength)
+            {
+                throw new InvalidOperationException("Failed to read the index entry");
+            }
+
+            Guid vectorId = new(entry[..s_idBytesLength]);
+            if (!vectorId.Equals(Guid.Empty))
+            {
+                Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                long offset = BitConverter.ToInt64(offsetBytes);
+                int length = BitConverter.ToInt32(lengthBytes);
+
+                if (offset > maxOffset || (offset == maxOffset && length > lengthAtMaxOffset))
+                {
+                    maxOffset = offset;
+                    lengthAtMaxOffset = length;
+                }
+            }
+            else
+            {
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
+                _dataFile.Stream.Seek(maxOffset + lengthAtMaxOffset, SeekOrigin.Begin);
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// If the index stream is not at the beginning, it will be moved to the previous entry.
+    /// This is to go back one entry after searching for an entry and getting an empty entry.
+    /// </summary>
+    private void ReverseIndexStreamByIdBytesLength()
+    {
+        if (_indexFile.Stream.Position != 0L)
+        {
+            _indexFile.Stream.Seek(-s_indexEntryByteLength, SeekOrigin.Current);
+        }
     }
 
     private class MemoryMappedFileHolder : IDisposable
@@ -461,7 +736,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             DisposeStreams();
 
-            _fileName= Path.GetTempFileName();
+            _fileName = Path.GetTempFileName();
             _WinFileAlloc(_fileName);
             double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
             Logging.Logger.Information("Creating temporary file: {FileName}, size {capacity} TiB", _fileName, capacityTiB);

@@ -65,7 +65,7 @@ Neighborly offers a range of advanced search algorithms to efficiently query vec
 We welcome contributions! If you have ideas for new features or have found bugs, please open an issue or submit a pull request. For major changes, please discuss them in an issue first.
 
 # License
-This project is licensed under the MIT License. See the LICENSE file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE.txt) file for details.
 
 # Contact
 For any questions or further assistance, feel free to contact [![GitHub](https://img.shields.io/badge/GitHub-nickna-blue)](https://github.com/nickna).

@@ -26,7 +26,7 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector);
 
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
-        Assert.IsTrue(_db.Vectors.Contains(vector), "Database should contain the added vector.");
+        Assert.That(_db.Vectors.Contains(vector), Is.True,  "Database should contain the added vector.");
     }
 
 
@@ -220,7 +220,7 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector);
 
         Assert.That(_db.Count, Is.EqualTo(initialCount + 1));
-        Assert.IsTrue(_db.Vectors.Contains(vector));
+        Assert.That(_db.Vectors.Contains(vector), Is.True);
     }
     [Test]
     public async Task TestSearch([Values(SearchAlgorithm.BallTree, SearchAlgorithm.KDTree)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
@@ -264,8 +264,10 @@ public class VectorDatabaseTests
         var result = _db.Search(query, 1, searchAlgorithm);
 
         // Assert
-        Assert.That(result, Has.Count.EqualTo(1), "Search should return the correct number of vectors.");
-        Assert.That(result, Does.Contain(vector1), "Search should return the nearest vector.");
+
+        Assert.That(result.Count, Is.EqualTo(1), "Search should return the correct number of vectors.");
+        Assert.That(result.Contains(vector1), Is.True,  "Search should return the nearest vector.");
+
     }
     [Test]
     public async Task TestSaveAndLoad()
@@ -280,9 +282,11 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+
         var path = Path.GetTempPath();
 
-        // Act
+        // Act    
         await _db.SaveAsync(path).ConfigureAwait(true);
         _db.Vectors.Clear();
         await _db.LoadAsync(path).ConfigureAwait(true);

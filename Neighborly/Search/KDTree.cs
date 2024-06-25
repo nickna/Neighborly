@@ -9,6 +9,11 @@ namespace Neighborly.Search;
 /// </summary>
 public class KDTree
 {
+    /// <summary>
+    /// The version of the database file format that this class writes.
+    /// </summary>
+    private const int s_currentFileVersion = 1;
+
     private KDTreeNode? root;
 
     public void Build(VectorList vectors)
@@ -22,28 +27,59 @@ public class KDTree
             return;
         }
 
-        root = Build(vectors.ToArray(), 0, false);
+        root = Build(vectors, 0);
     }
 
-    private KDTreeNode? Build(Span<Vector> vectors, int depth, bool isSorted)
+    public void Load(BinaryReader reader, VectorList vectors)
     {
-        if (vectors.IsEmpty || vectors[0].Dimensions == 0)
-            return null;
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(vectors);
 
-        var axis = depth % vectors[0].Dimensions;
-
-        if (!isSorted)
+        var version = reader.ReadInt32(); // Read the version number
+        if (version != s_currentFileVersion)
         {
-            vectors.Sort((a, b) => a[axis].CompareTo(b[axis]));
+            throw new InvalidDataException($"Invalid KD tree version: {version}");
         }
 
-        var median = vectors.Length / 2;
+        root = null;
+        Span<byte> guidBuffer = stackalloc byte[16];
+        // Read the tree starting at the root node
+        root = KDTreeNode.ReadFrom(reader, vectors, guidBuffer);
+    }
+
+    public void Save(BinaryWriter writer, VectorList vectors)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(vectors);
+
+        writer.Write(s_currentFileVersion); // Write the version number
+
+        root?.WriteTo(writer);
+    }
+
+    private KDTreeNode? Build(IList<Vector> vectors, int depth)
+    {
+        if (vectors.Count <= 0)
+        {
+            return null;
+        }
+
+        var firstVector = vectors[0];
+        if (firstVector.Dimensions == 0)
+        {
+            return null;
+        }
+
+        var axis = depth % firstVector.Dimensions;
+        var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
+
+        var median = sortedVectors.Count / 2;
 
         return new KDTreeNode
         {
-            Vector = vectors[median],
-            Left = Build(vectors[..median], depth + 1, true),
-            Right = Build(vectors[(median + 1)..], depth + 1, true)
+            Vector = sortedVectors[median],
+            Left = Build(sortedVectors.Take(median).ToList(), depth + 1),
+            Right = Build(sortedVectors.Skip(median + 1).ToList(), depth + 1)
         };
     }
 
@@ -53,7 +89,6 @@ public class KDTree
         {
             throw new ArgumentNullException(nameof(query), "Query vector cannot be null");
         }
-
         if (k <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
@@ -64,6 +99,7 @@ public class KDTree
             .Select(t => t.Item1)
             .ToList() ?? new List<Vector>();
 
+
     }
 
     private List<Tuple<Vector, double>>? NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth)
@@ -71,11 +107,13 @@ public class KDTree
         if (node == null || node.Vector == null)
             return new List<Tuple<Vector, double>>();
 
+
         var axis = depth % query.Dimensions;
         var next = node.Vector[axis] > query[axis] ? node.Left : node.Right;
         var others = node.Vector[axis] > query[axis] ? node.Right : node.Left;
 
         var best = NearestNeighbors(next, query, k, depth + 1) ?? new List<Tuple<Vector, double>>();
+
         if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
         {
             var distance = (node.Vector - query).Magnitude;
@@ -84,6 +122,7 @@ public class KDTree
 
             if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
             {
+
                 best = best.Concat(NearestNeighbors(others, query, k, depth + 1) ?? new List<Tuple<Vector, double>>())
                     .OrderBy(t => t.Item2)
                     .Take(k)
@@ -100,6 +139,16 @@ public class KDTree
         var results = NearestNeighbors(query, k);
 
         return results;
+    }
+
+    public override bool Equals(object? obj)
+    {
+        if (obj is not KDTree other)
+        {
+            return false;
+        }
+
+        return Equals(root, other.root);
     }
 
 }
