@@ -1,6 +1,8 @@
 namespace Neighborly.Tests;
 
 using Neighborly;
+using Neighborly.Distance;
+using Neighborly.Tests.Helpers;
 
 [TestFixture]
 public class VectorTests
@@ -100,5 +102,35 @@ public class VectorTests
         // Assert
         Assert.That(divisor.Values[0], Is.EqualTo(5f).Within(0.01f));
         Assert.That(divisor.Values[1], Is.EqualTo(20f).Within(0.01f));
+    }
+
+    [Test]
+    public void DistanceUsesProvidedCalculator()
+    {
+        // Arrange
+        Vector vector1 = new([1.0f, 2.0f]);
+        Vector vector2 = new([3.1f, 4.2f]);
+        const float expectedDistance = 13.37f;
+        IDistanceCalculator calculator = new MockDistanceCalculator(vector1, vector2, expectedDistance);
+
+        // Act
+        float distance = vector1.Distance(vector2, calculator);
+
+        // Assert
+        Assert.That(distance, Is.EqualTo(expectedDistance).Within(0.01f));
+    }
+
+    [Test]
+    public void DistanceUsesEuclideanCalculatorByDefault()
+    {
+        // Arrange
+        Vector vector1 = new([1.0f, 2.0f]);
+        Vector vector2 = new([3.1f, 4.2f]);
+
+        // Act
+        float distance = vector1.Distance(vector2);
+
+        // Assert
+        Assert.That(distance, Is.EqualTo(3.041f).Within(0.01f));
     }
 }
