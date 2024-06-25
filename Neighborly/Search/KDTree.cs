@@ -97,20 +97,23 @@ public class KDTree
         return NearestNeighbors(root, query, k, 0)?
             .OrderBy(t => (t.Item1 - query).Magnitude)
             .Select(t => t.Item1)
-            .ToList() ?? [];
+            .ToList() ?? new List<Vector>();
+
 
     }
 
     private List<Tuple<Vector, double>>? NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth)
     {
         if (node == null || node.Vector == null)
-            return [];
+            return new List<Tuple<Vector, double>>();
+
 
         var axis = depth % query.Dimensions;
         var next = node.Vector[axis] > query[axis] ? node.Left : node.Right;
         var others = node.Vector[axis] > query[axis] ? node.Right : node.Left;
 
-        var best = NearestNeighbors(next, query, k, depth + 1) ?? [];
+        var best = NearestNeighbors(next, query, k, depth + 1) ?? new List<Tuple<Vector, double>>();
+
         if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
         {
             var distance = (node.Vector - query).Magnitude;
@@ -119,7 +122,8 @@ public class KDTree
 
             if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
             {
-                best = best.Concat(NearestNeighbors(others, query, k, depth + 1) ?? [])
+
+                best = best.Concat(NearestNeighbors(others, query, k, depth + 1) ?? new List<Tuple<Vector, double>>())
                     .OrderBy(t => t.Item2)
                     .Take(k)
                     .ToList();

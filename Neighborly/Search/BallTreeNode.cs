@@ -1,6 +1,6 @@
 ﻿namespace Neighborly.Search;
 
-public class BallTreeNode
+public class BallTreeNode 
 {
     public required Vector Center { get; set; }
     public double Radius { get; set; }

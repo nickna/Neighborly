@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Neighborly;
+using Neighborly.Search;
 using Neighborly.Tests.Helpers;
 
 [TestFixture]
@@ -192,7 +193,7 @@ public class VectorDatabaseTests
         Assert.That(foundVectors, Does.Contain(vector1), "FindAll should include the first matching vector.");
         Assert.That(foundVectors, Does.Contain(vector2), "FindAll should include the second matching vector.");
 
-         var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector([7f, 8, 9])));
+        var notFoundVectors = _db.Vectors.FindAll(v => v.Equals(new Vector([7f, 8, 9])));
         Assert.That(notFoundVectors.Count, Is.EqualTo(0), "FindAll should return an empty list if no vectors match the condition.");
     }
 
@@ -222,7 +223,7 @@ public class VectorDatabaseTests
         Assert.That(_db.Vectors.Contains(vector), Is.True);
     }
     [Test]
-    public void TestSearch()
+    public async Task TestSearch([Values(SearchAlgorithm.BallTree, SearchAlgorithm.KDTree)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
     {
         // Arrange
         float[] floatArray1 = [1, 2, 3];
@@ -234,13 +235,39 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+
         // Act
         var query = new Vector([2f, 3f, 4f]);
-        var result = _db.Search(query, 1, Neighborly.Search.SearchAlgorithm.Linear);
+        var result = _db.Search(query, matchingVectors, searchAlgorithm);
 
         // Assert
+        Assert.That(result, Has.Count.EqualTo(matchingVectors), "Search should return the correct number of vectors.");
+        Assert.That(result, Does.Contain(vector1), "Search should return the nearest vector.");
+    }
+    [Test]
+    public async Task TestExactMatchSearch([Values(SearchAlgorithm.Linear, SearchAlgorithm.LSH)] SearchAlgorithm searchAlgorithm)
+    {
+        // Arrange
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
+
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
+
+        _db.Vectors.Add(vector1);
+        _db.Vectors.Add(vector2);
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+
+        // Act
+        var query = new Vector([1f, 2f, 3f]);
+        var result = _db.Search(query, 1, searchAlgorithm);
+
+        // Assert
+
         Assert.That(result.Count, Is.EqualTo(1), "Search should return the correct number of vectors.");
         Assert.That(result.Contains(vector1), Is.True,  "Search should return the nearest vector.");
+
     }
     [Test]
     public async Task TestSaveAndLoad()
@@ -327,7 +354,7 @@ public class VectorDatabaseTests
     {
         // Arrange
         var logger = new MockLogger<VectorDatabase>();
-        var db = new VectorDatabase(logger, null) {  };
+        var db = new VectorDatabase(logger, null) { };
 
         var query = new Vector([1f, 2f, 3f]);
         var k = -1;
