@@ -311,6 +311,26 @@ public class VectorList : IList<Vector>, IDisposable
 
     }
 
+    internal Vector? GetById(Guid id)
+    {
+        lock (_lock)
+        {
+            if (Guid.Empty.Equals(id))
+            {
+                // Return default if id is empty
+                return default;
+            }
+
+            var index = FindIndexById(id);
+            if (index != -1)
+            {
+                return Get(index);
+            }
+
+            return default;
+        }
+    }
+
     public bool Remove(Vector item)
     {
         var index = _vectorList.FindIndex(x => x != null && x.Equals(item));

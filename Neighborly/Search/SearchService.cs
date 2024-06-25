@@ -8,12 +8,20 @@ namespace Neighborly.Search
 {
     public class SearchService
     {
+        /// <summary>
+        /// The version of the database file format that this class writes.
+        /// </summary>
+        private const int s_currentFileVersion = 1;
+        private const int s_numberOfStorableIndexes = 2;
+
+        private readonly VectorList _vectors;
         private Search.KDTree _kdTree;
-        private Search.BallTree _ballTree; 
-        private VectorList _vectors;
+        private Search.BallTree _ballTree;
 
         public SearchService(VectorList vectors)
         {
+            ArgumentNullException.ThrowIfNull(vectors);
+
             _vectors = vectors;
             _kdTree = new();
             _ballTree = new();
@@ -35,12 +43,9 @@ namespace Neighborly.Search
             _kdTree = new();
             _ballTree = new();
         }
+
         public void BuildIndex(SearchAlgorithm method)
         {
-            if (_vectors == null)
-            {
-                throw new ArgumentNullException(nameof(_vectors), "Vector list cannot be null");
-            }
             if (_vectors.Count == 0)
             {
                 return;
@@ -81,11 +86,68 @@ namespace Neighborly.Search
                 case SearchAlgorithm.LSH:
                     return LSHSearch.Search(_vectors, query, k);
                 default:
-                    return new List<Vector>();  // Other SearchMethods do not support search
+                    return [];  // Other SearchMethods do not support search
             }
         }
 
+        public async Task LoadAsync(BinaryReader reader, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(reader);
 
+            var version = reader.ReadInt32(); // Read the version number
+            if (version != s_currentFileVersion)
+            {
+                throw new InvalidDataException($"Unsupported file version {version}");
+            }
 
+            var count = reader.ReadInt32(); // Read the number of index
+            for (var i = 0; i < count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var method = (SearchAlgorithm)reader.ReadInt32();
+                switch (method)
+                {
+                    case SearchAlgorithm.KDTree:
+                        _kdTree.Load(reader, _vectors);
+                        break;
+                    case SearchAlgorithm.BallTree:
+                        await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
+                        break;
+                    default:
+                        throw new InvalidOperationException("Unsupported search method");
+                }
+            }
+        }
+
+        public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(writer);
+
+            writer.Write(s_currentFileVersion);
+            writer.Write(s_numberOfStorableIndexes); // Write the number of indexes
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task ExportIndexAsync(BinaryWriter writer, SearchAlgorithm method, CancellationToken cancellationToken)
+        {
+            writer.Write((int)method);
+
+            switch (method)
+            {
+                case SearchAlgorithm.KDTree:
+                    _kdTree.Save(writer, _vectors);
+                    break;
+                case SearchAlgorithm.BallTree:
+                    await _ballTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
+                    break;
+                default:
+                    throw new InvalidOperationException("Unsupported search method");
+            }
+        }
     }
 }
