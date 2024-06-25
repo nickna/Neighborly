@@ -747,13 +747,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
             catch (System.IO.IOException ex)
             {
-                Logging.Logger.Error(ex, "Failed to create memory-mapped file");
                 if (File.Exists(_fileName))
                 {
                     File.Delete(_fileName);
-                    Logging.Logger.Information($"File deleted ({_fileName}) due to error: {ex.Message}");
+                    Logging.Logger.Error($"Error occurred while trying to create file ({_fileName}). File was successfully deleted. Error: {ex.Message}");
                 }
-                throw;
+                else
+                {
+                    Logging.Logger.Error($"Error occurred while trying to create file ({_fileName}). Error: {ex.Message}");
+                }
+                    throw;
             }
         }
 
@@ -769,6 +772,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                         if (File.Exists(_fileName))
                         {
                             File.Delete(_fileName);
+                            Logging.Logger.Information("Deleted temporary file: {FileName}", _fileName);
+                        }
+                        else
+                        {
+                            Logging.Logger.Warning("Temporary file not found: {FileName}", _fileName);
                         }
                     }
                     catch (Exception ex)
