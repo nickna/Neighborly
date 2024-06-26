@@ -22,7 +22,7 @@ public partial class VectorDatabase
     /// The unique identifier of the database for telemetry purposes.
     /// </summary>
     private readonly Guid _id = Guid.NewGuid();
-    private readonly VectorList _vectors = new(1337);
+    private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
@@ -338,12 +338,14 @@ public partial class VectorDatabase
         // If the database hasn't been modified, no need to save it
         if (!_hasUnsavedChanges)
         {
+            _logger.LogInformation("The database has not been modified since the last save.");
             return;
         }
 
         if (!Directory.Exists(path))
         {
             Directory.CreateDirectory(path);
+            _logger.LogInformation("The directory {Path} was created.", path);
         }
 
         try

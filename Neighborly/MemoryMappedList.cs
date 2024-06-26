@@ -567,7 +567,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         lock (_mutex)
         {
+            _indexFile.DisposeStreams();
             _indexFile.Reset();
+            _dataFile.DisposeStreams();
             _dataFile.Reset();
             _count = 0;
         }
@@ -754,8 +756,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         public void Reset()
         {
-            DisposeStreams();
-
             _fileName = Path.GetTempFileName();
             _WinFileAlloc(_fileName);
             double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
@@ -822,7 +822,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             GC.SuppressFinalize(this);
         }
 
-        private void DisposeStreams()
+        public void DisposeStreams()
         {
             _stream?.Dispose();
             _file?.Dispose();
