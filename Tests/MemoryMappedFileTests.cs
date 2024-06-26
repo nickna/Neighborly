@@ -18,9 +18,15 @@ namespace Tests
         [SetUp]
         public void Setup()
         {
-            _db?.Vectors?.Dispose();
+            _db?.Dispose();
 
             _db = new VectorDatabase();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            _db.Dispose();
         }
 
         [Test]

@@ -56,7 +56,7 @@ public class BallTree
         root = null;
 
         // Read internal vectors (centers of internal nodes)
-        var internalVectors = new VectorDatabase();
+        using var internalVectors = new VectorDatabase();
         await internalVectors.ReadFromAsync(reader, false, cancellationToken).ConfigureAwait(false);
 
         byte[] guidBuffer = new byte[16];
@@ -71,7 +71,7 @@ public class BallTree
         writer.Write(s_currentFileVersion); // Write the version number
 
         // Write internal vectors (centers of internal nodes)
-        var internalVectors = BuildInternalVectors(root);
+        using var internalVectors = BuildInternalVectors(root);
         await internalVectors.WriteToAsync(writer, false, cancellationToken).ConfigureAwait(false);
 
         root?.WriteTo(writer);

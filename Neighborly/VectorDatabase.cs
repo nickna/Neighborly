@@ -9,7 +9,7 @@ namespace Neighborly;
 /// <summary>
 /// Represents a database for storing and searching vectors.
 /// </summary>
-public partial class VectorDatabase
+public partial class VectorDatabase : IDisposable
 {
     /// <summary>
     /// The version of the database file format that this class writes.
@@ -57,6 +57,8 @@ public partial class VectorDatabase
     /// Indicates whether the database has changed since the last indexing, and it needs to be rebuilt.
     /// </summary>
     private bool _hasOutdatedIndex = false;
+
+    private bool _disposedValue;
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
@@ -413,5 +415,27 @@ public partial class VectorDatabase
         return etl.ExportDataAsync(Vectors, path, cancellationToken);
     }
     #endregion
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposedValue)
+        {
+            if (disposing)
+            {
+                _rwLock.Dispose();
+                _vectors.Modified -= VectorList_Modified;
+                _vectors.Dispose();
+            }
+
+            _disposedValue = true;
+        }
+    }
+
+    public void Dispose()
+    {
+        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        Dispose(disposing: true);
+        GC.SuppressFinalize(this);
+    }
 
 }

@@ -45,7 +45,7 @@ OllamaTextGenerationService ollamaText = new(ollamaUri, modelName);
 OllamaTextEmbeddingGenerationService ollamaEmbedding = new(ollamaUri, embeddingModelName);
 
 #pragma warning disable SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
-var db = new VectorDatabase(loggerFactory.CreateLogger<VectorDatabase>(), null);
+using var db = new VectorDatabase(loggerFactory.CreateLogger<VectorDatabase>(), null);
 var memory = new MemoryBuilder()
     .WithLoggerFactory(loggerFactory)
     .WithMemoryStore(new NeighborlyMemoryStore(db)) // Use NeighborlyMemoryStore
