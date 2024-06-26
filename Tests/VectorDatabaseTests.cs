@@ -11,9 +11,15 @@ public class VectorDatabaseTests
     [SetUp]
     public void Setup()
     {
-        _db?.Vectors?.Dispose();
+        _db?.Dispose();
 
         _db = new VectorDatabase();
+    }
+
+    [TearDown]
+    public void TearDown()
+    {
+        _db.Dispose();
     }
 
     // Replace all Assert.AreEqual calls with Assert.That calls
@@ -354,13 +360,12 @@ public class VectorDatabaseTests
     {
         // Arrange
         var logger = new MockLogger<VectorDatabase>();
-        var db = new VectorDatabase(logger, null) { };
 
         var query = new Vector([1f, 2f, 3f]);
         var k = -1;
 
         // Act
-        db.Search(query, k);
+        _db.Search(query, k);
 
         // Assert
         Assert.That(logger.LastLogLevel, Is.EqualTo(LogLevel.Error), "An error should be logged.");

@@ -16,6 +16,12 @@ public class LoggingTests
         _db = new VectorDatabase(_logger, null);
     }
 
+    [TearDown]
+    public void TearDown()
+    {
+        _db.Dispose();
+    }
+
     [Test]
     public async Task TestMethodThatShouldLogError()
     {
