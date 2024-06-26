@@ -1,80 +1,82 @@
-﻿using Neighborly;
+﻿using Microsoft.AspNetCore.Mvc;
+using Neighborly;
+using Neighborly.API.Mappers;
+using Neighborly.API.Models;
 
-namespace API.Services
+namespace API.Services;
+
+/// <summary>
+/// REST API endpoints for the Vector service
+/// </summary>
+public static class RestServices
 {
-    /// <summary>
-    /// REST API endpoints for the Vector service
-    /// </summary>
-    public static class RestServices
+    public static void MapVectorRoutes(WebApplication app, VectorMapper vectorMapper)
     {
-        public static void MapVectorRoutes(WebApplication app)
+        app.MapPost("/vector", (VectorDatabase db, VectorDto vector) =>
         {
-            app.MapPost("/vector", (VectorDatabase db, Vector vector) =>
+            db.Vectors.Add(vectorMapper.Map(vector));
+            return Results.Created($"/vector/{vector.Id}", vector);
+        });
+
+        app.MapGet("/vector/{id}", (VectorDatabase db, Guid id) =>
+        {
+            var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
+
+            if (vector == null)
             {
-                db.Vectors.Add(vector);
-                return Results.Created($"/vectors/{vector.Id}", vector);
-            });
-
-            app.MapGet("/vector/{id}", (VectorDatabase db, Guid id) =>
+                return Results.NotFound();
+            }
+            else
             {
-                var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
+                return Results.Ok(vectorMapper.Map(vector));
+            }
+        });
 
-                if (vector == null)
-                {
-                    return Results.NotFound();
-                }
-                else
-                {
-                    return Results.Ok(vector);
-                }
-            });
-
-            app.MapPut("/vector/{id}", (VectorDatabase db, Guid Id, Vector vector) =>
+        app.MapPut("/vector/{id}", (VectorDatabase db, Guid Id, VectorDto vector) =>
+        {
+            if (db.Vectors.Update(Id, vectorMapper.Map(vector)))
             {
-                if (db.Vectors.Update(Id, vector))
-                {
-                    return Results.Ok(vector);
-                }
-                else
-                {
-                    return Results.NotFound();
-                }
-            });
-
-            app.MapDelete("/vector/{id}", (VectorDatabase db, Guid id) =>
+                return Results.Ok(vector);
+            }
+            else
             {
-                var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
+                return Results.NotFound();
+            }
+        });
 
-                if (vector == null)
-                {
-                    return Results.NotFound();
-                }
-                else
-                {
-                    db.Vectors.Add(vector);
-                }
+        app.MapDelete("/vector/{id}", (VectorDatabase db, Guid id) =>
+        {
+            var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
 
-                return Results.NoContent();
-            });
-
-            app.MapGet("/vectors/searchNearest", (VectorDatabase db, Vector query, int k) =>
+            if (vector == null)
             {
-                var vectors = db.Search(query, k);
-                if (vectors == null)
-                {
-                    return Results.NotFound();
-                }
-                else
-                {
-                    return Results.Ok(vectors);
-                }
-            });
-
-            app.MapDelete("/db/clear", (VectorDatabase db) =>
+                return Results.NotFound();
+            }
+            else
             {
-                db.Vectors.Clear();
-                return Results.NoContent();
-            });
-        }
+                db.Vectors.RemoveById(id);
+            }
+
+            return Results.NoContent();
+        });
+
+        app.MapPost("/vectors/searchNearest", ([FromServices] VectorDatabase db, [FromBody] VectorDto query, [FromQuery] int k) =>
+        {
+            var vectors = db.Search(vectorMapper.Map(query), k);
+            if (vectors == null)
+            {
+                return Results.NotFound();
+            }
+            else
+            {
+                return Results.Ok(vectors);
+            }
+        });
+
+        app.MapDelete("/db/clear", (VectorDatabase db) =>
+        {
+            db.Vectors.Clear();
+            return Results.NoContent();
+        });
     }
 }

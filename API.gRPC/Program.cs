@@ -1,5 +1,6 @@
 using Neighborly;
 using Neighborly.API;
+using Neighborly.API.Mappers;
 using OpenTelemetry;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -11,10 +12,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddLogging();
 builder.Services.AddGrpc();
 builder.Services.AddSingleton<VectorDatabase>();
+builder.Services.AddSingleton<VectorMapper>();
 
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(serviceName: "Neighborly"))
-    .WithTracing(builder => 
+    .WithTracing(builder =>
     {
         builder.AddAspNetCoreInstrumentation()
             .AddInstrumentation<Instrumentation>()
@@ -59,9 +61,12 @@ if (!gRPCEnable && !RESTEnable)
 await vectorDatabase.LoadAsync(databasePath);
 
 // Save Database on application shutdown
-lifetime.ApplicationStopping.Register(() =>
+lifetime.ApplicationStopping.Register(async () =>
 {
-    vectorDatabase.SaveAsync(databasePath).RunSynchronously();
+    if (!string.IsNullOrEmpty(databasePath))
+    {
+        await vectorDatabase.SaveAsync(databasePath).ConfigureAwait(false);
+    }
 });
 
 // Configure the gRPC API
@@ -73,7 +78,8 @@ if (gRPCEnable)
 // Configure the REST API
 if (RESTEnable)
 {
-    API.Services.RestServices.MapVectorRoutes(app);
+    var mapper = app.Services.GetRequiredService<VectorMapper>();
+    API.Services.RestServices.MapVectorRoutes(app, mapper);
 }
 
 await app.RunAsync().ConfigureAwait(true);

@@ -4,7 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Neighborly.API.Protos;
 using static Neighborly.API.Protos.Vector;
 
-namespace Neighborly.Tests;
+namespace Neighborly.Tests.Integration;
 
 [TestFixture]
 public class GrpcTests
