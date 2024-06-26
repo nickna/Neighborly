@@ -62,11 +62,6 @@ public class VectorList : IList<Vector>, IDisposable
         GC.SuppressFinalize(this);
     }
 
-    ~VectorList()
-    {
-        Dispose(false);
-    }
-
     public void Add(Vector item)
     {
         ArgumentNullException.ThrowIfNull(item);

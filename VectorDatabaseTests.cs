@@ -8,7 +8,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestAdd()
     {
-        var db = new VectorDatabase();
+        using var db = new VectorDatabase();
         var vector = new Vector(1, 2, 3);
         db.Add(vector);
         Assert.AreEqual(1, db.Count);
@@ -18,7 +18,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemove()
     {
-        var db = new VectorDatabase();
+        using var db = new VectorDatabase();
         var vector = new Vector(1, 2, 3);
         db.Add(vector);
         db.Remove(vector);
@@ -29,7 +29,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestUpdate()
     {
-        var db = new VectorDatabase();
+        using var db = new VectorDatabase();
         var oldVector = new Vector(1, 2, 3);
         var newVector = new Vector(4, 5, 6);
         db.Add(oldVector);
@@ -42,7 +42,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestAddRange()
     {
-        var db = new VectorDatabase();
+        using var db = new VectorDatabase();
         var vectors = new List<Vector> { new Vector(1, 2, 3), new Vector(4, 5, 6) };
         db.AddRange(vectors);
         Assert.AreEqual(2, db.Count);
@@ -55,7 +55,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemoveRange()
     {
-        var db = new VectorDatabase();
+        using var db = new VectorDatabase();
         var vectors = new List<Vector> { new Vector(1, 2, 3), new Vector(4, 5, 6) };
         db.AddRange(vectors);
         db.RemoveRange(vectors);
