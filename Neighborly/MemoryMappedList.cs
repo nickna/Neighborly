@@ -76,9 +76,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
     }
 
-#pragma warning disable CA1822 // Mark members as static - mimmicking ICollection<Vector>
+#pragma warning disable CA1822 // Mark members as static - mimicking ICollection<Vector>
     public bool IsReadOnly => false;
-#pragma warning restore CA1822 // Mark members as static - mimmicking ICollection<Vector>
+#pragma warning restore CA1822 // Mark members as static - mimicking ICollection<Vector>
 
     protected virtual void Dispose(bool disposing)
     {
@@ -117,9 +117,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 return null;
             }
 
+            _isAtEndOfIndexStream = false;
+
+            // Seek to the first possible position of the index entry
             _indexFile.Stream.Seek(index * s_indexEntryByteLength, SeekOrigin.Begin);
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-            _indexFile.Stream.ReadExactly(entry);
+
+            Guid? vectorId = null;
+            // Skip over tombstoned entries
+            while (vectorId is null || vectorId.Equals(Guid.Empty) || vectorId.Equals(s_tombStone))
+            {
+                _indexFile.Stream.ReadExactly(entry);
+                vectorId = new(entry[..s_idBytesLength]);
+            }
 
             Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
             Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
@@ -688,7 +698,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     break;
                 }
 
-                ++index;
+            if (vectorId != s_tombStone)
+            {
+                    ++index;
+            }
             }
         }
 

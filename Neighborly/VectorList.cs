@@ -33,7 +33,7 @@ public class VectorList : IList<Vector>, IDisposable
     /// </summary>
     public void Defrag()
     {
-       _memoryMappedList.Defrag();
+        _memoryMappedList.Defrag();
     }
 
     /// <summary>
