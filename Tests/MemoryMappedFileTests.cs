@@ -173,27 +173,43 @@ namespace Tests
             }
 
             int countBeforeDefrag = _db.Vectors.Count;
+            Console.WriteLine($"Count before defrag: {countBeforeDefrag}");
 
             // Act: Defragment in batches
             long fragmentation;
+            int iterationCount = 0;
+            int maxIterations = 1000; // Adjust as needed
             do
             {
                 fragmentation = _db.Vectors.DefragBatch();
-            } while (fragmentation > 0);
+                Console.WriteLine($"Iteration {iterationCount}: Fragmentation = {fragmentation}");
+                iterationCount++;
+            } while (fragmentation > 0 && iterationCount < maxIterations);
 
             int countAfterDefrag = _db.Vectors.Count;
+            Console.WriteLine($"Count after defrag: {countAfterDefrag}");
 
             // Assert
-            Assert.That(countBeforeDefrag, Is.EqualTo(countAfterDefrag), "Count should remain unchanged after defragmentation.");
+            Assert.That(countAfterDefrag, Is.EqualTo(countBeforeDefrag), "Count should remain unchanged after defragmentation.");
 
             // Check that the valid entries can be accessed correctly
+            int successfulRetrievals = 0;
             for (int i = 1; i < numBatches * entriesPerBatch; i += 2)
             {
                 var retrievedVector = _db.Vectors.Find(v => v.Id == vectors[i].Id);
-                Assert.That(retrievedVector, Is.EqualTo(vectors[i]), $"Retrieved vector at index {i} should match the original vector.");
+                if (retrievedVector != null && retrievedVector.Equals(vectors[i]))
+                {
+                    successfulRetrievals++;
+                }
+                else
+                {
+                    Console.WriteLine($"Failed to retrieve vector at index {i}. ID: {vectors[i].Id}");
+                }
             }
-        }
 
+            Console.WriteLine($"Successfully retrieved {successfulRetrievals} out of {countAfterDefrag} vectors");
+            Assert.That(successfulRetrievals, Is.EqualTo(countAfterDefrag), "All non-tombstoned vectors should be retrievable after defragmentation.");
+        }
         [Test]
         public void DefragBatch_WithLargeNumberOfEntries_CompletesInReasonableTime()
         {

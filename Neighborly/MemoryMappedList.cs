@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using System.Buffers;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
@@ -480,17 +481,21 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             long newDataPosition = _newDataPosition;
             long totalDataSize = 0;
             long totalFragmentation = 0;
+            int entriesProcessed = 0;
 
             _indexFile.Stream.Seek(newIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
             _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
 
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
             int bytesRead;
-            int batchCount = 0;
-            List<(long oldOffset, int length, long newOffset)> updates = new List<(long, int, long)>(_defragBatchSize);
+            List<(Guid id, long oldOffset, int length, long newOffset)> updates = new List<(Guid, long, int, long)>(_defragBatchSize);
 
-            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0 && batchCount < _defragBatchSize)
+            // Find the maximum entry size in this batch
+            int maxEntrySize = 0;
+
+            while (entriesProcessed < _defragBatchSize && newIndexPosition < _count)
             {
+                bytesRead = _indexFile.Stream.Read(entry);
                 if (bytesRead != s_indexEntryByteLength)
                 {
                     throw new InvalidOperationException("Failed to read the index entry");
@@ -516,48 +521,59 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     totalFragmentation += offset - newDataPosition;
                 }
 
-                updates.Add((offset, length, newDataPosition));
+                updates.Add((id, offset, length, newDataPosition));
+                maxEntrySize = Math.Max(maxEntrySize, length);
 
                 newIndexPosition++;
                 newDataPosition += length;
                 totalDataSize += length;
-                batchCount++;
+                entriesProcessed++;
             }
 
-            // Perform all reads and writes
-            foreach (var update in updates)
-            {
-                _dataFile.Stream.Seek(update.oldOffset, SeekOrigin.Begin);
-                byte[] data = new byte[update.length];
-                _dataFile.Stream.Read(data, 0, update.length);
+            // Rent a buffer from the ArrayPool
+            byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(maxEntrySize);
 
-                _dataFile.Stream.Seek(update.newOffset, SeekOrigin.Begin);
-                _dataFile.Stream.Write(data, 0, update.length);
+            try
+            {
+                // Perform all reads and writes
+                foreach (var update in updates)
+                {
+                    // Read data from old position
+                    _dataFile.Stream.Seek(update.oldOffset, SeekOrigin.Begin);
+                    _dataFile.Stream.Read(sharedBuffer, 0, update.length);
+
+                    // Write data to new position
+                    _dataFile.Stream.Seek(update.newOffset, SeekOrigin.Begin);
+                    _dataFile.Stream.Write(sharedBuffer, 0, update.length);
+
+                    // Update index entry
+                    _indexFile.Stream.Seek(_defragIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
+                    _indexFile.Stream.Write(update.id.ToByteArray());
+                    _indexFile.Stream.Write(BitConverter.GetBytes(update.newOffset));
+                    _indexFile.Stream.Write(BitConverter.GetBytes(update.length));
+
+                    _defragIndexPosition++;
+                }
             }
-
-            // Update all index entries
-            _indexFile.Stream.Seek(_defragIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
-            foreach (var update in updates)
+            finally
             {
-                _indexFile.Stream.Seek(s_idBytesLength, SeekOrigin.Current);
-                _indexFile.Stream.Write(BitConverter.GetBytes(update.newOffset), 0, s_offsetBytesLength);
-                _indexFile.Stream.Seek(s_lengthBytesLength, SeekOrigin.Current);
+                // Return the buffer to the pool
+                ArrayPool<byte>.Shared.Return(sharedBuffer);
             }
 
             // Update tracking variables for the next batch
-            _defragIndexPosition = newIndexPosition;
             _newDataPosition = newDataPosition;
 
             // Detecting the end of defragmentation
-            if (_defragIndexPosition == _count || bytesRead == 0)
+            if (newIndexPosition >= _count)
             {
                 // Reset state variables for the next defragmentation cycle
-                _defragPosition = 0;
                 _defragIndexPosition = 0;
                 _newDataPosition = 0;
+                return 0; // Defragmentation complete
             }
 
-            // Calculate fragmentation percentage
+            // Calculate and return fragmentation percentage
             return totalDataSize == 0 ? 0 : totalFragmentation * 100 / totalDataSize;
         }
     }
