@@ -249,13 +249,7 @@ public class VectorList : IList<Vector>, IDisposable
                 return default;
             }
 
-            var index = FindIndexById(id);
-            if (index != -1)
-            {
-                return Get(index);
-            }
-
-            return default;
+            return _memoryMappedList.GetVector(id);
         }
     }
 
