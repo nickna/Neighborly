@@ -187,6 +187,16 @@ public class BallTree
         Search(furthestChild, query, k, values);
     }
 
+    public override bool Equals(object? obj)
+    {
+        if (obj is not BallTree other)
+        {
+            return false;
+        }
+
+        return Equals(root, other.root);
+    }
+
     private sealed class CappedDistanceSortedList(int k) : List<(float distance, Vector vector)>(k + 1)
     {
         private readonly int _k = k;

@@ -63,10 +63,12 @@ public class VectorDatabaseTests
         Assert.That(_db.Count, Is.EqualTo(1), "Count should be 1 after adding a vector.");
         Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the added vector.");
 
-        _db.Vectors.Update(vector1.Id, vector2);
+        var updated = _db.Vectors.Update(vector1.Id, vector2);
+        Assert.That(updated, Is.True, "Update should return true when the old item exists.");
         Assert.That(_db.Count, Is.EqualTo(1), "Count should still be 1 after updating a vector.");
-        Assert.That(_db.Vectors.Contains(vector1), Is.False, "Database should not contain the old vector.");
-        Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the new vector.");
+        var vectorFromDb = _db.Vectors.GetById(vector1.Id);
+        Assert.That(vectorFromDb, Is.EqualTo(vector2), "The vector should be updated in the database.");
+        Assert.That(vectorFromDb, Is.Not.EqualTo(vector1), "The vector should not be the same as the old vector.");
     }
 
     [Test]
