@@ -34,7 +34,7 @@ public class VectorList : IList<Vector>, IDisposable
     /// </summary>
     public void Defrag()
     {
-       _memoryMappedList.Defrag();
+        _memoryMappedList.Defrag();
     }
 
     /// <summary>
@@ -91,7 +91,7 @@ public class VectorList : IList<Vector>, IDisposable
     }
 
 
-    public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a speficic index is not supported");
+    public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a specific index is not supported");
 
     public int IndexOf(Vector item)
     {
@@ -317,9 +317,7 @@ public class VectorList : IList<Vector>, IDisposable
 
         lock (_lock)
         {
-            int index = 0;
             var updated = _memoryMappedList.Update(vector);
-
             if (updated)
             {
                 Modified?.Invoke(this, EventArgs.Empty);
