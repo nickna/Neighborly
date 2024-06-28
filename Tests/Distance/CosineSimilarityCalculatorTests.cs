@@ -1,4 +1,6 @@
-﻿namespace Neighborly.Distance.Tests;
+﻿using Neighborly.Distance;
+
+namespace Neighborly.Tests.Distance;
 
 [TestFixture]
 public class CosineSimilarityCalculatorTests

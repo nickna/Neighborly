@@ -3,6 +3,7 @@ using Neighborly;
 using Neighborly.Tests.Helpers;
 using Serilog.Sinks.InMemory;
 
+namespace Neighborly.Tests; 
 [TestFixture]
 public class LoggingTests
 {

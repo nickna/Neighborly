@@ -3,6 +3,7 @@ using Neighborly;
 using Neighborly.Search;
 using Neighborly.Tests.Helpers;
 
+namespace Neighborly.Tests;
 [TestFixture]
 public class VectorDatabaseTests
 {
