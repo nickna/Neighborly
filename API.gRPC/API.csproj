@@ -28,4 +28,8 @@
   <ItemGroup>
     <Protobuf Include=".\Protos\Vector.proto" GrpcServices="Server" />
   </ItemGroup>
+  
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tests" />
+  </ItemGroup>
 </Project>
