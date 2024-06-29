@@ -261,6 +261,49 @@ namespace Neighborly.Tests
             Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain vector1.");
             Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain vector2.");
         }
+        [Test]
+        public void GetFileInfo_WhenCalledAfterForceFlush_ReturnsCorrectFileInfo()
+        {
+            // Arrange
+            var vector1 = new Vector(new float[] { 1, 2, 3 });
+            var vector2 = new Vector(new float[] { 4, 5, 6 });
+            _db.Vectors.Add(vector1);
+            _db.Vectors.Add(vector2);
+
+            // Act
+            _db.Vectors.ForceFlush();
+            var fileInfo = _db.Vectors.GetFileInfo();
+
+            // Assert
+            Assert.That(fileInfo, Is.InstanceOf<long[]>(), "FileInfo should be an array of long.");
+            Assert.That(fileInfo.Length, Is.EqualTo(4), "FileInfo should contain four elements.");
+
+            // Assuming the first element is the size of the index file and the second is the size of the data file
+            // These assertions might need to be adjusted based on the actual implementation of GetFileInfo
+            Assert.That(fileInfo[0], Is.GreaterThan(0), "Index file size should be greater than 0.");
+            Assert.That(fileInfo[2], Is.GreaterThan(0), "Data file size should be greater than 0.");
+        }
+
+        [Test]
+        public void GetFileInfo_WhenCalled_ReturnsCorrectFileInfo()
+        {
+            // Arrange
+            var vector1 = new Vector(new float[] { 1, 2, 3 });
+            var vector2 = new Vector(new float[] { 4, 5, 6 });
+            _db.Vectors.Add(vector1);
+            _db.Vectors.Add(vector2);
+
+            // Act
+            var fileInfo = _db.Vectors.GetFileInfo();
+
+            // Assert
+            Assert.That(fileInfo, Is.InstanceOf<long[]>(), "FileInfo should be an array of long.");
+            Assert.That(fileInfo.Length, Is.EqualTo(4), "FileInfo should contain four elements.");
+
+            // Assuming that these small sampling of Vectors are resident in memory and not yet flushed to disk
+            Assert.That(fileInfo[0], Is.EqualTo(0), "Index file size should be 0.");
+            Assert.That(fileInfo[2], Is.EqualTo(0), "Data file size should be 0.");
+        }
 
     }
 }

@@ -351,4 +351,15 @@ public class VectorList : IList<Vector>, IDisposable
     {
         return _memoryMappedList.DefragBatch();
     }
+
+    internal long[] GetFileInfo()
+    {
+        return _memoryMappedList.GetFileInfo();
+    }
+
+    internal void ForceFlush()
+    {
+        _memoryMappedList.ForceFlush();
+        return;
+    }
 }
