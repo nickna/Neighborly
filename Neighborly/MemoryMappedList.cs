@@ -214,10 +214,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         get
         {
-            lock (_mutex)
-            {
-                return _count;
-            }
+            return Interlocked.Read(ref _count);
         }
     }
 
@@ -378,9 +375,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _indexFile.Stream.Write(entry);
             _dataFile.Stream.Write(data);
 
-            ++_count;
             _isAtEndOfIndexStream = true;
         }
+        Interlocked.Increment(ref _count);
     }
 
     public bool Remove(Vector vector)
@@ -745,37 +742,40 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private (long index, long offset, int length) SearchVectorInIndex(Guid id)
     {
-        _isAtEndOfIndexStream = false;
-        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-
-        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-        int bytesRead;
-        long index = 0L;
-        while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+        lock (_mutex)
         {
-            if (bytesRead != s_indexEntryByteLength)
-            {
-                throw new InvalidOperationException("Failed to read the index entry");
-            }
+            _isAtEndOfIndexStream = false;
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
-            Guid vectorId = new(entry[..s_idBytesLength]);
-            if (id == vectorId)
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+            long index = 0L;
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
             {
-                Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-                Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
-                long offset = BitConverter.ToInt64(offsetBytes);
-                int length = BitConverter.ToInt32(lengthBytes);
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
 
-                return (index, offset, length);
-            }
-            else if (vectorId.Equals(Guid.Empty))
-            {
-                _isAtEndOfIndexStream = true;
-                ReverseIndexStreamByIdBytesLength();
-                break;
-            }
+                Guid vectorId = new(entry[..s_idBytesLength]);
+                if (id == vectorId)
+                {
+                    Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                    Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                    long offset = BitConverter.ToInt64(offsetBytes);
+                    int length = BitConverter.ToInt32(lengthBytes);
 
-            ++index;
+                    return (index, offset, length);
+                }
+                else if (vectorId.Equals(Guid.Empty))
+                {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
+                    break;
+                }
+
+                ++index;
+            }
         }
 
         return (-1L, -1L, -1);
