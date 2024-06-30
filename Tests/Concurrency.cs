@@ -26,6 +26,7 @@ public class VectorDatabaseConcurrencyTests
         _db.Dispose();
     }
 
+    // This test may intermittently fail due to the nature of concurrent operations.
     [Test]
     public async Task ConcurrencyStressTest()
     {
@@ -176,7 +177,7 @@ public class VectorDatabaseConcurrencyTests
         {
             values[i] = (float)random.NextDouble();
         }
-        return new Vector(values);
+        return new Vector(values, Path.GetRandomFileName().Replace(".", ""));
     }
 
     private Vector GetRandomVector(VectorDatabase db)
