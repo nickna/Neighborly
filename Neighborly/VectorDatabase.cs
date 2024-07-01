@@ -27,6 +27,9 @@ public partial class VectorDatabase : IDisposable
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
     private ReaderWriterLockSlim _rwLock = new();
+    private Thread indexService;
+    private CancellationTokenSource _indexServiceCancellationTokenSource;
+
 
     /// <summary>
     /// Last time the database was modified. This is updated when a vector is added or removed.
@@ -252,12 +255,15 @@ public partial class VectorDatabase : IDisposable
         if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
             return;
 
+        _indexServiceCancellationTokenSource = new CancellationTokenSource();
+        var cancellationToken = _indexServiceCancellationTokenSource.Token;
+
         // Create a new thread that will react when _hasOutdatedIndex is set to true
-        var indexService = new Thread(async () =>
+        indexService = new Thread(async () =>
         {
             _logger.LogInformation("Indexing thread started.");
 
-            while (!_vectors.IsReadOnly)
+            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
             {
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
                 if (_hasOutdatedIndex &&
@@ -268,12 +274,21 @@ public partial class VectorDatabase : IDisposable
                     await RebuildSearchIndexesAsync();
                     _indexRebuildCounter.Add(1);
                 }
-                Thread.Sleep(5000);
+                await Task.Delay(5000, cancellationToken);
             }
 
             _logger.LogInformation("Indexing thread stopping.");
         });
         indexService.Priority = ThreadPriority.Lowest;
+    }
+    private void StopIndexService()
+    {
+        if (indexService != null && indexService.IsAlive)
+        {
+            _indexServiceCancellationTokenSource.Cancel();
+            _indexServiceCancellationTokenSource.Dispose();
+            _logger.LogInformation("Indexing stop requested.");
+        }
     }
 
     /// <summary>
@@ -424,6 +439,8 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
+                StopIndexService();
+                _searchService = null;
                 _rwLock.Dispose();
                 _vectors.Modified -= VectorList_Modified;
                 _vectors.Dispose();

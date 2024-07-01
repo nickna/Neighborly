@@ -84,7 +84,7 @@ public class VectorList : IList<Vector>, IDisposable
     }
 
 
-    public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a speficic index is not supported");
+    public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a specific index is not supported");
 
     public int IndexOf(Vector item)
     {
