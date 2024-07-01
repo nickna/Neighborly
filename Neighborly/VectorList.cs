@@ -10,7 +10,6 @@ public class VectorList : IList<Vector>, IDisposable
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
     private readonly MemoryMappedList _memoryMappedList = new(int.MaxValue);
-    private readonly object _lock = new();
     private bool _disposed = false;
 
     /// <summary>
@@ -66,10 +65,7 @@ public class VectorList : IList<Vector>, IDisposable
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        lock (_lock)
-        {
-            _memoryMappedList.Add(item);
-        }
+        _memoryMappedList.Add(item);
 
         Modified?.Invoke(this, EventArgs.Empty);
     }
@@ -84,10 +80,7 @@ public class VectorList : IList<Vector>, IDisposable
 
     public Vector? Get(int index)
     {
-        lock (_lock)
-        {
-            return _memoryMappedList.GetVector(index);
-        }
+        return _memoryMappedList.GetVector(index);
     }
 
 
@@ -95,103 +88,83 @@ public class VectorList : IList<Vector>, IDisposable
 
     public int IndexOf(Vector item)
     {
-        lock (_lock)
+        // Vector not found in list, check in memory mapped list
+        long memoryMappedIndex = _memoryMappedList.IndexOf(item);
+        if (memoryMappedIndex != -1)
         {
-            // Vector not found in list, check in memory mapped list
-            long memoryMappedIndex = _memoryMappedList.IndexOf(item);
-            if (memoryMappedIndex != -1)
-            {
-                // TOOD: Fix cast with https://github.com/nickna/Neighborly/issues/33
-                return (int)(memoryMappedIndex);
-            }
-
-            return -1;
+            // TOOD: Fix cast with https://github.com/nickna/Neighborly/issues/33
+            return (int)(memoryMappedIndex);
         }
+
+        return -1;
     }
     public bool IsReadOnly { get; private set; }
     public List<Vector> FindAll(Predicate<Vector> match)
     {
-        lock (_lock)
+        if (match == null)
         {
-            if (match == null)
-            {
-                throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
-            }
-
-            var foundItems = new List<Vector>();
-
-            foundItems.AddRange(_memoryMappedList.Where(x => x != null && match(x)).Select(x => x!));
-
-            return foundItems;
+            throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
         }
+
+        var foundItems = new List<Vector>();
+
+        foundItems.AddRange(_memoryMappedList.Where(x => x != null && match(x)).Select(x => x!));
+
+        return foundItems;
     }
 
     public Vector? Find(Predicate<Vector> match)
     {
-        lock (_lock)
+        if (match == null)
         {
-            if (match == null)
-            {
-                throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
-            }
-
-            foreach (var item in _memoryMappedList)
-            {
-                if (item != null && match(item))
-                {
-                    return item;
-                }
-            }
-
-            return default;
+            throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
         }
+
+        foreach (var item in _memoryMappedList)
+        {
+            if (item != null && match(item))
+            {
+                return item;
+            }
+        }
+
+        return default;
     }
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        lock (_lock)
+        if (array == null)
         {
-            if (array == null)
-            {
-                throw new ArgumentNullException(nameof(array), "Array cannot be null");
-            }
-
-            if (arrayIndex < 0)
-            {
-                throw new ArgumentOutOfRangeException(nameof(arrayIndex), "Array index cannot be less than 0");
-            }
-
-            if (array.Length - arrayIndex < Count)
-            {
-                throw new ArgumentException("The number of elements in the list is greater than the available space from arrayIndex to the end of the destination array");
-            }
-
-            _memoryMappedList.CopyTo(array, arrayIndex);
+            throw new ArgumentNullException(nameof(array), "Array cannot be null");
         }
+
+        if (arrayIndex < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(arrayIndex), "Array index cannot be less than 0");
+        }
+
+        if (array.Length - arrayIndex < Count)
+        {
+            throw new ArgumentException("The number of elements in the list is greater than the available space from arrayIndex to the end of the destination array");
+        }
+
+        _memoryMappedList.CopyTo(array, arrayIndex);
     }
 
     public Vector this[int index]
     {
         get
         {
-            lock (_lock)
-            {
-                return Get(index) ?? throw new IndexOutOfRangeException();
-            }
+            return Get(index) ?? throw new IndexOutOfRangeException();
         }
         set
         {
-            lock (_lock)
+            if (index < 0 || index >= Count)
             {
-                if (index < 0 || index >= Count)
-                {
-                    throw new IndexOutOfRangeException();
-                }
-
-                throw new NotSupportedException("Updating items on disk is not supported");
+                throw new IndexOutOfRangeException();
             }
 
-            // Modified?.Invoke(this, EventArgs.Empty);
+            throw new NotSupportedException("Updating items on disk is not supported");
         }
     }
 
@@ -202,37 +175,25 @@ public class VectorList : IList<Vector>, IDisposable
     /// <returns></returns>
     public bool Contains(Vector item)
     {
-        lock (_lock)
-        {
-            return _memoryMappedList.GetVector(item.Id) != null;
-        }
+        return _memoryMappedList.GetVector(item.Id) != null;
     }
 
     public IEnumerator<Vector> GetEnumerator()
     {
-        lock (_lock)
-        {
-            foreach (var vector in _memoryMappedList)
-            {
-                yield return vector;
-            }
-        }
+        return _memoryMappedList.GetEnumerator();
     }
 
     public void RemoveAt(int index)
     {
-        lock (_lock)
+        if (index < 0 || index >= Count)
         {
-            if (index < 0 || index >= Count)
-            {
-                throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
-            }
+            throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
+        }
 
-            var vector = _memoryMappedList.GetVector(index);
-            if (vector != null)
-            {
-                _memoryMappedList.Remove(vector);
-            }
+        var vector = _memoryMappedList.GetVector(index);
+        if (vector != null)
+        {
+            _memoryMappedList.Remove(vector);
         }
 
         Modified?.Invoke(this, EventArgs.Empty);
@@ -241,16 +202,13 @@ public class VectorList : IList<Vector>, IDisposable
 
     internal Vector? GetById(Guid id)
     {
-        lock (_lock)
+        if (Guid.Empty.Equals(id))
         {
-            if (Guid.Empty.Equals(id))
-            {
-                // Return default if id is empty
-                return default;
-            }
-
-            return _memoryMappedList.GetVector(id);
+            // Return default if id is empty
+            return default;
         }
+
+        return _memoryMappedList.GetVector(id);
     }
 
     public bool Remove(Vector item)
@@ -262,10 +220,7 @@ public class VectorList : IList<Vector>, IDisposable
 
     public void Clear()
     {
-        lock (_lock)
-        {
-            _memoryMappedList.Clear();
-        }
+        _memoryMappedList.Clear();
 
         Modified?.Invoke(this, EventArgs.Empty);
     }
@@ -283,31 +238,25 @@ public class VectorList : IList<Vector>, IDisposable
 
     public int FindIndex(Predicate<Vector> match)
     {
-        lock (_lock)
+        var index = 0;
+
+        foreach (var item in _memoryMappedList)
         {
-            var index = 0;
-
-            foreach (var item in _memoryMappedList)
+            ++index;
+            if (item != null && match(item))
             {
-                ++index;
-                if (item != null && match(item))
-                {
-                    return index;
-                }
+                return index;
             }
-
-            return -1; // Return -1 if no match is found
         }
+
+        return -1; // Return -1 if no match is found
     }
 
     public void RemoveRange(IEnumerable<Vector> items)
     {
-        lock (_lock)
+        foreach (var item in items)
         {
-            foreach (var item in items)
-            {
-                Remove(item);
-            }
+            Remove(item);
         }
     }
 
@@ -315,30 +264,22 @@ public class VectorList : IList<Vector>, IDisposable
     {
         vector.Id = Id; // Change the Id of the incoming vector to match the Id of the existing vector
 
-        lock (_lock)
+        var updated = _memoryMappedList.Update(vector);
+
+        if (updated)
         {
-            int index = 0;
-            var updated = _memoryMappedList.Update(vector);
-
-            if (updated)
-            {
-                Modified?.Invoke(this, EventArgs.Empty);
-            }
-
-            return updated;
+            Modified?.Invoke(this, EventArgs.Empty);
         }
 
+        return updated;
     }
 
     public void RemoveById(Guid guid)
     {
-        lock (_lock)
+        int index = FindIndexById(guid);
+        if (index != -1)
         {
-            int index = FindIndexById(guid);
-            if (index != -1)
-            {
-                RemoveAt(index);
-            }
+            RemoveAt(index);
         }
     }
 
