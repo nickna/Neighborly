@@ -16,7 +16,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private static readonly byte[] s_tombStoneBytes;
     private readonly MemoryMappedFileHolder _indexFile;
     private readonly MemoryMappedFileHolder _dataFile;
-    private readonly object _mutex = new();
+    private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
     private long _count;
     /// <summary>
     /// Indicates if the index stream is at the end of the stream.
@@ -31,14 +31,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
   
     /// <summary>
-    /// Forces the data in the memory-mapped files to be flushed to disk.
+    /// Flush the memory-mapped files to disk
     /// </summary>
-    public void ForceFlush()
+    public void Flush()
     {
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             _indexFile.Stream.Flush();
             _dataFile.Stream.Flush();
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
         }
     }
 
@@ -104,7 +109,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public Vector? GetVector(long index)
     {
-        lock (_mutex)
+        _rwLock.EnterReadLock();
+        try
         {
             if (index < 0L || index >= _count)
             {
@@ -129,11 +135,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _dataFile.Stream.ReadExactly(bytes);
             return new Vector(bytes);
         }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     public Vector? GetVector(Guid id)
     {
-        lock (_mutex)
+        _rwLock.EnterReadLock();
+        try
         {
             (_, long offset, int length) = SearchVectorInIndex(id);
             if (offset < 0L || length <= 0)
@@ -146,11 +157,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _dataFile.Stream.ReadExactly(bytes);
             return new Vector(bytes);
         }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             if (array == null)
             {
@@ -172,14 +188,23 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 array[arrayIndex++] = item;
             }
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     public long FindIndexById(Guid id)
     {
-        lock (_mutex)
+        _rwLock.EnterReadLock();
+        try
         {
             (long index, _, _) = SearchVectorInIndex(id);
             return index;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -187,10 +212,15 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        lock (_mutex)
+        _rwLock.EnterReadLock();
+        try
         {
             (long index, _, _) = SearchVectorInIndex(item.Id);
             return index;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -198,7 +228,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         ArgumentNullException.ThrowIfNull(vector);
 
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
             if (!_isAtEndOfIndexStream)
@@ -230,6 +261,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
             _isAtEndOfIndexStream = true;
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
         Interlocked.Increment(ref _count);
     }
 
@@ -237,7 +272,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         ArgumentNullException.ThrowIfNull(vector);
 
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
@@ -270,7 +306,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 }
             }
         }
-
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
         return false;
     }
 
@@ -278,16 +317,13 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         ArgumentNullException.ThrowIfNull(vector);
 
-        lock (_mutex)
+        if (Remove(vector))
         {
-            if (Remove(vector))
-            {
-                Add(vector);
-                return true;
-            }
-
-            return false;
+            Add(vector);
+            return true;
         }
+
+        return false;
     }
 
     /// <summary>
@@ -297,7 +333,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <exception cref="InvalidOperationException"></exception>
     public long CalculateFragmentation()
     {
-        lock (_mutex)
+        _rwLock.EnterReadLock();
+        try
         {
             long expectedDataPosition = 0; // Expected start position of the next data entry
             long totalFragmentation = 0; // Total size of gaps between data entries
@@ -345,6 +382,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
             return totalFragmentation * 100 / totalDataSize;
         }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
     }
 
 
@@ -355,7 +396,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <exception cref="InvalidOperationException"></exception>
     public void Defrag()
     {
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             long newIndexPosition = 0;
             long newDataPosition = 0;
@@ -407,6 +449,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 newDataPosition += length;
             }
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -415,7 +461,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <exception cref="InvalidOperationException"></exception>
     public long DefragBatch()
     {
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             long newIndexPosition = _defragIndexPosition;
             long newDataPosition = _newDataPosition;
@@ -516,18 +563,27 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             // Calculate and return fragmentation percentage
             return totalDataSize == 0 ? 0 : totalFragmentation * 100 / totalDataSize;
         }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
 
     public void Clear()
     {
-        lock (_mutex)
+        _rwLock.EnterWriteLock();
+        try
         {
             _indexFile.DisposeStreams();
             _indexFile.Reset();
             _dataFile.DisposeStreams();
             _dataFile.Reset();
             _count = 0;
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
         }
     }
 
@@ -549,7 +605,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public IEnumerator<Vector> GetEnumerator()
     {
-        lock (_mutex)
+        //_rwLock.EnterReadLock();
+        try
         {
             _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
@@ -589,13 +646,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 yield return new Vector(bytes);
             }
         }
+        finally
+        {
+            //_rwLock.ExitReadLock();
+        }
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     private (long index, long offset, int length) SearchVectorInIndex(Guid id)
     {
-        lock (_mutex)
+        
         {
             _isAtEndOfIndexStream = false;
             _indexFile.Stream.Seek(0, SeekOrigin.Begin);
@@ -703,7 +764,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// [2] = bytes allocated for Data file
     /// [3] = total (sparce) capacity of Data file
     /// </returns>
-    /// <seealso cref="ForceFlush"/>
+    /// <seealso cref="Flush"/>
     internal long[] GetFileInfo()
     {
         return MemoryMappedFileServices.GetFileInfo(_indexFile, _dataFile);

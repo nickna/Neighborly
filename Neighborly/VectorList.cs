@@ -300,7 +300,7 @@ public class VectorList : IList<Vector>, IDisposable
 
     internal void ForceFlush()
     {
-        _memoryMappedList.ForceFlush();
+        _memoryMappedList.Flush();
         return;
     }
 }
