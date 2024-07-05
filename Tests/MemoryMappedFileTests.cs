@@ -362,4 +362,40 @@ public class MemoryMappedFileTests
         int inddexOfFirstById = _db.Vectors.FindIndexById(vector1.Id);
         Assert.That(inddexOfFirstById, Is.EqualTo(-1), "FindIndexById should return -1 for the first vector after it is removed.");
     }
+
+    [Test]
+    public void TestVectorEnumeratorAfterModification()
+    {
+        float[] floatArray1 = [1, 2, 3];
+        var vector1 = new Vector(floatArray1);
+
+        float[] floatArray2 = [4, 5, 6];
+        var vector2 = new Vector(floatArray2);
+
+        float[] floatArray3 = [7, 8, 9];
+        var vector3 = new Vector(floatArray3);
+
+        _db.Vectors.Add(vector1);
+        _db.Vectors.Add(vector2);
+        _db.Vectors.Add(vector3);
+
+        _db.Vectors.Remove(vector2);
+
+        var vectors = _db.Vectors.ToList(); // Force enumeration
+
+        Assert.That(vectors, Contains.Item(vector1), "Database should contain vector1.");
+        Assert.That(vectors, Does.Not.Contain(vector2), "Database should not contain vector2.");
+        Assert.That(vectors, Contains.Item(vector3), "Database should contain vector3.");
+
+        // Update the 3nd vector
+        var updatedVector3 = new Vector(new float[] { 42, 69, 420 });
+        var updated = _db.Vectors.Update(vector3.Id, updatedVector3);
+        Assert.That(updated, Is.True, "Update should return true when the vector is updated.");
+
+        var updatedVectors = _db.Vectors.ToList(); // Force enumeration
+        Assert.That(updatedVectors, Contains.Item(vector1), "Database should contain vector1.");
+        Assert.That(updatedVectors, Does.Not.Contain(vector2), "Database should not contain vector2.");
+        Assert.That(updatedVectors, Does.Not.Contain(vector3), "Database should not contain vector3.");
+        Assert.That(updatedVectors, Contains.Item(updatedVector3), "Database should contain updatedVector3.");
+    }
 }
