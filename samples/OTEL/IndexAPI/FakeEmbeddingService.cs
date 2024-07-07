@@ -12,16 +12,14 @@ public class FakeEmbeddingService(Instrumentation instrumentation)
 
         try
         {
-            return await GetEmbeddingsImplAsync(text, cancellationToken).ConfigureAwait(false);
+            var result = await GetEmbeddingsImplAsync(text, cancellationToken).ConfigureAwait(false);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }
         catch (Exception ex)
         {
             activity?.SetStatus(ActivityStatusCode.Error, ex.ToString());
             throw;
-        }
-        finally
-        {
-            activity?.Stop();
         }
     }
 
@@ -35,6 +33,6 @@ public class FakeEmbeddingService(Instrumentation instrumentation)
         cancellationToken.ThrowIfCancellationRequested();
         await Task.Delay(Random.Shared.Next(4_2, 1_3_3_7), cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        return Enumerable.Range(0, text.Length).Select(static _ => (float)Random.Shared.NextDouble()).ToArray();
+        return Enumerable.Range(0, 1024).Select(static _ => (float)Random.Shared.NextDouble()).ToArray();
     }
 }

@@ -3,6 +3,7 @@ using Neighborly.ETL;
 using Neighborly.Search;
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.CompilerServices;
 
 namespace Neighborly;
 
@@ -22,6 +23,7 @@ public partial class VectorDatabase : IDisposable
     /// The unique identifier of the database for telemetry purposes.
     /// </summary>
     private readonly Guid _id = Guid.NewGuid();
+    private readonly IEnumerable<KeyValuePair<string, object?>>? _defaultTags;
     private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
@@ -77,16 +79,20 @@ public partial class VectorDatabase : IDisposable
 
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
+        using var activity = StartActivity(tags: [new("search.method", searchMethod), new("search.k", k)]);
         try
         {
-            return _searchService.Search(query, k, searchMethod);
+            var result = _searchService.Search(query, k, searchMethod);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
         }
         catch (Exception ex)
         {
             CouldNotFindVectorInDb(query, k, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return new List<Vector>();
         }
-
     }
 
     [LoggerMessage(
@@ -129,6 +135,7 @@ public partial class VectorDatabase : IDisposable
             description: "The number of times the search index was rebuilt.",
             tags: [new("db.namespace", _id)]
         );
+        _defaultTags = [new("db.system", "neighborly"), new("db.namespace", _id)];
 
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
@@ -146,16 +153,20 @@ public partial class VectorDatabase : IDisposable
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
     public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
+        using var activity = StartActivity(name: "LoadVectors");
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
         {
             _logger.LogError("The file {FilePath} does not exist.", filePath);
-            throw new FileNotFoundException($"The file {filePath} does not exist.");
+            var error = $"The file {filePath} does not exist.";
+            activity?.SetStatus(ActivityStatusCode.Error, error);
+            throw new FileNotFoundException(error);
         }
         else if (createOnNew && !fileExists)
         {
             // Do nothing here. We'll create the file when SaveAsync() is called
+            activity?.SetStatus(ActivityStatusCode.Ok, "File does not exist. Will create it when saving.");
             return;
         }
         else
@@ -182,6 +193,8 @@ public partial class VectorDatabase : IDisposable
                 _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
                 _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
+
+                activity?.SetStatus(ActivityStatusCode.Ok);
             }
             finally
             {
@@ -282,6 +295,7 @@ public partial class VectorDatabase : IDisposable
         indexService.Priority = ThreadPriority.Lowest;
         indexService.Start();
     }
+
     private void StopIndexService()
     {
         if (indexService != null && indexService.IsAlive)
@@ -304,9 +318,8 @@ public partial class VectorDatabase : IDisposable
         }
         await Task.Run(() =>
         {
-            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "RebuildTags", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            using var activity = StartActivity(name: "RebuildTags");
             _vectors.Tags.BuildMap();
-            activity?.Stop();
             activity?.SetStatus(ActivityStatusCode.Ok);
         });
         _hasOutdatedIndex = false;
@@ -317,9 +330,8 @@ public partial class VectorDatabase : IDisposable
     {
         await Task.Run(() =>
         {
-            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "BuildAllSearchIndexes", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            using var activity = StartActivity(name: "BuildAllSearchIndexes");
             _searchService.BuildAllIndexes();
-            activity?.Stop();
             activity?.SetStatus(ActivityStatusCode.Ok);
         });
     }
@@ -327,9 +339,8 @@ public partial class VectorDatabase : IDisposable
     {
         await Task.Run(() =>
         {
-            using var activity = _instrumentation.ActivitySource.StartActivity(ActivityKind.Internal, name: "BuildSearchIndex", tags: [new("db.system", "neighborly"), new("db.namespace", _id)]);
+            using var activity = StartActivity(name: "BuildSearchIndex");
             _searchService.BuildIndex(searchMethod);
-            activity?.Stop();
             activity?.SetStatus(ActivityStatusCode.Ok);
         });
     }
@@ -353,10 +364,12 @@ public partial class VectorDatabase : IDisposable
     /// <param name="path">The file path to save the vectors to.</param>
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
     {
+        using var activity = StartActivity(name: "SaveVectors");
         // If the database hasn't been modified, no need to save it
         if (!_hasUnsavedChanges)
         {
             _logger.LogInformation("The database has not been modified since the last save.");
+            activity?.SetStatus(ActivityStatusCode.Ok);
             return;
         }
 
@@ -380,6 +393,7 @@ public partial class VectorDatabase : IDisposable
             }
 
             _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
+            activity?.SetStatus(ActivityStatusCode.Ok);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -420,17 +434,72 @@ public partial class VectorDatabase : IDisposable
     #endregion
 
     #region Import/Export
-    public Task ImportDataAsync(string path, bool isDirectory, ContentType contentType, CancellationToken cancellationToken = default)
+
+    [LoggerMessage(
+        EventId = 9_000,
+        Level = LogLevel.Debug,
+        Message = "Importing vectors from {ContentType} source {Path}.")]
+    private partial void ImportingData(ContentType contentType, string path);
+
+    [LoggerMessage(
+        EventId = 9_001,
+        Level = LogLevel.Information,
+        Message = "Vectors were imported source {Path}.")]
+    private partial void ImportedData(string path);
+
+    public async Task ImportDataAsync(string path, bool isDirectory, ContentType contentType, CancellationToken cancellationToken = default)
     {
-        IETL etl = EtlFactory.CreateEtl(contentType);
-        etl.IsDirectory = isDirectory;
-        return etl.ImportDataAsync(path, Vectors, cancellationToken);
+        using var activity = StartActivity(tags: [new("import.contentType", contentType), new("import.isDirectory", isDirectory)]);
+        _rwLock.EnterWriteLock();
+        try
+        {
+            ImportingData(contentType, path);
+            IETL etl = EtlFactory.CreateEtl(contentType);
+            etl.IsDirectory = isDirectory;
+            await etl.ImportDataAsync(path, Vectors, cancellationToken).ConfigureAwait(false);
+            ImportedData(path);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        }
+        finally
+        {
+            if (_rwLock.IsWriteLockHeld)
+            {
+                _rwLock.ExitWriteLock();
+            }
+        }
     }
 
-    public Task ExportDataAsync(string path, ContentType contentType, CancellationToken cancellationToken = default)
+    [LoggerMessage(
+        EventId = 9_010,
+        Level = LogLevel.Debug,
+        Message = "Exporting {VectorCount} vectors to {Path} with type {ContentType}.")]
+    private partial void ExportingData(int vectorCount, string path, ContentType contentType);
+
+    [LoggerMessage(
+        EventId = 9_011,
+        Level = LogLevel.Information,
+        Message = "Vectors were exported to {Path}.")]
+    private partial void ExportedData(string path);
+
+    public async Task ExportDataAsync(string path, ContentType contentType, CancellationToken cancellationToken = default)
     {
-        IETL etl = EtlFactory.CreateEtl(contentType);
-        return etl.ExportDataAsync(Vectors, path, cancellationToken);
+        using var activity = StartActivity(tags: [new("export.contentType", contentType)]);
+        _rwLock.EnterReadLock();
+        try
+        {
+            ExportingData(Vectors.Count, path, contentType);
+            IETL etl = EtlFactory.CreateEtl(contentType);
+            await etl.ExportDataAsync(Vectors, path, cancellationToken).ConfigureAwait(false);
+            ExportedData(path);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        }
+        finally
+        {
+            if (_rwLock.IsReadLockHeld)
+            {
+                _rwLock.ExitReadLock();
+            }
+        }
     }
     #endregion
 
@@ -458,4 +527,17 @@ public partial class VectorDatabase : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private Activity? StartActivity(ActivityKind kind = ActivityKind.Internal, ActivityContext parentContext = default, IEnumerable<KeyValuePair<string, object?>>? tags = null, IEnumerable<ActivityLink>? links = null, DateTimeOffset startTime = default, [CallerMemberName] string name = "")
+    {
+        if (tags is null)
+        {
+            tags = _defaultTags;
+        }
+        else
+        {
+            tags = [.. tags, .. _defaultTags];
+        }
+
+        return _instrumentation.ActivitySource.StartActivity(kind, parentContext, tags, links, startTime, name);
+    }
 }
