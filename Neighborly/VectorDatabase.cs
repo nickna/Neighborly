@@ -280,6 +280,7 @@ public partial class VectorDatabase : IDisposable
             _logger.LogInformation("Indexing thread stopping.");
         });
         indexService.Priority = ThreadPriority.Lowest;
+        indexService.Start();
     }
     private void StopIndexService()
     {
