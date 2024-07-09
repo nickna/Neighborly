@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: "nuget"
+    directory: "/Neighborly" # The directory of the first project
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "nuget"
+    directory: "/Tests" # The directory of the second project
+    schedule:
+      interval: "daily"
+  - package-ecosystem: "nuget"
+    directory: "/API.gRPC" # The directory of the third project
+    schedule:
+      interval: "daily"
