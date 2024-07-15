@@ -1,0 +1,15 @@
+Metadata-Version: 2.1
+Name: neighborly_python
+Version: 0.1.0
+Summary: Neighborly Vector Data Access Library for Python
+Home-page: https://github.com/nickna/neighborly
+Author: KNN Labs
+Author-email: nick@knnlabs.com
+License: MIT
+Project-URL: Bug Tracker, https://github.com/nickna/neighborly/issues
+Classifier: Programming Language :: Python :: 3
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Requires-Python: >=3.6
+Description-Content-Type: text/markdown
+Requires-Dist: pythonnet

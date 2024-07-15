@@ -1,0 +1,13 @@
+MANIFEST.in
+README.md
+pyproject.toml
+setup.cfg
+setup.py
+src/neighborly/Neighborly.dll
+src/neighborly/__init__.py
+src/neighborly/database.py
+src/neighborly_python.egg-info/PKG-INFO
+src/neighborly_python.egg-info/SOURCES.txt
+src/neighborly_python.egg-info/dependency_links.txt
+src/neighborly_python.egg-info/requires.txt
+src/neighborly_python.egg-info/top_level.txt
