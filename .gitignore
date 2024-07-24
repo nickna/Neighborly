@@ -363,3 +363,9 @@ MigrationBackup/
 FodyWeavers.xsd
 /Neighborly.Python/dist
 /Neighborly.Python/src/neighborly/Neighborly.dll
+/Neighborly.Python/src/neighborly_python.egg-info/dependency_links.txt
+/Neighborly.Python/src/neighborly_python.egg-info/requires.txt
+/Neighborly.Python/src/neighborly_python.egg-info/SOURCES.txt
+/Neighborly.Python/src/neighborly_python.egg-info/top_level.txt
+/Neighborly.Python/src/NeighborlyPython.egg-info
+/Neighborly.Python/src/Neighborly.egg-info
