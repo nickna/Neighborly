@@ -6,7 +6,7 @@
 Neighborly is an open-source vector database designed to store and retrieve high-dimensional vector data efficiently. 
 
 # Features
-* Multithreaded and Thread-safe operations for CPython!
+* Thread-safe operations for multi-threaded CPython!
 * Disk-backed Storage: Efficiently handle large volumes of vector data with memory caching and disk storage for persistence. 
 * High Performance: Optimized for fast read and write operations.
 * Cross-Platform Compatibility: The backing library is cross-platform compatible and will go anywhere Python does
@@ -34,13 +34,32 @@ pip install /path/to/neighborly.whl
 ```
 
 # Examples
+## Usage
+
+Here's a quick example of how to use Neighborly:
+
 ```python
-from neighborly import *
+from neighborly import VectorDatabase, Vector
+
+# Create a new vector database
 db = VectorDatabase()
-v = Vector([1, 2, 3])
-db.add_vector(v)
+
+# Create and add vectors
+vector1 = Vector([1.0, 2.0, 3.0])
+vector2 = Vector([4.0, 5.0, 6.0])
+db.add_vector(vector1)
+db.add_vector(vector2)
+
+# Perform a similarity search
+query = Vector([1.1, 2.1, 3.1])
+results = db.search(query, k=1)
+print(f"Nearest vector: {results[0].values}")
+
+# Use vector tags
+tags = create_vector_tags([1, 2, 3])
+print(f"Tags: {tags.to_list()}")
+
+# Save and load the database
+db.save("my_database_file")
+db.load("my_database_file")
 ```
-
-
-
-
