@@ -23,6 +23,7 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="build_package.py" />
     <Compile Include="setup.py" />
     <Compile Include="src\neighborly\database.py" />
     <Compile Include="src\neighborly\__init__.py" />
@@ -41,9 +42,14 @@
     <Message Text="Starting Python package build process..." Importance="high" />
     <Exec Command="python &quot;$(ProjectDir)build_package.py&quot;" />
     <Message Text="Python package build completed." Importance="high" />
-    <Message Text="Copying Neighborly.dll..." Importance="high" />
-    <Copy SourceFiles="$(SolutionDir)Neighborly\bin\$(Configuration)\net8.0\Neighborly.dll" DestinationFiles="$(ProjectDir)src\neighborly\Neighborly.dll" />
-    <Message Text="Neighborly.dll copied successfully." Importance="high" />
+    <Message Text="Copying Neighborly DLLs..." Importance="high" />
+    <ItemGroup>
+      <NeighborlyDlls Include="$(SolutionDir)Neighborly\bin\$(Configuration)\net8.0\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(NeighborlyDlls)" DestinationFolder="$(ProjectDir)src\neighborly\" />
+    <Message Text="Neighborly DLLs copied successfully." Importance="high" />
   </Target>
-  <Target Name="CoreCompile" />
+  <Target Name="CoreCompile">
+    <!-- Add your CoreCompile tasks here if needed -->
+  </Target>
 </Project>

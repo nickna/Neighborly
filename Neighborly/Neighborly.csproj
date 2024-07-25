@@ -11,6 +11,7 @@
     <PackageTags>vector database</PackageTags>
     <Description>Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with .NET, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(DockerBuild)' != 'true'">
@@ -32,7 +33,6 @@
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.InMemory" Version="0.11.0" />
-    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="8.0.1" />
     <PackageReference Include="System.Linq.Async" Version="6.0.1" />
   </ItemGroup>
 

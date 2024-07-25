@@ -34,6 +34,9 @@ EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SemanticKernel", "samples\SemanticKernel\SemanticKernel.csproj", "{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}"
 EndProject
 Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "Neighborly.Python", "Neighborly.Python\Neighborly.Python.pyproj", "{4A09C5F6-CAFA-4EB9-B57A-2882EC18404B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{CD5ACC75-E9FD-4A2D-9684-5C60DC758CDA} = {CD5ACC75-E9FD-4A2D-9684-5C60DC758CDA}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
