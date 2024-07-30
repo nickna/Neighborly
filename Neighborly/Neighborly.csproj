@@ -12,7 +12,26 @@
     <Description>Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with .NET, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;android-x64</RuntimeIdentifiers>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="fpzip_runtimes\win\x64\fpzip.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>fpzip_runtimes\win\x64</PackagePath>
+    </None>
+    <None Include="fpzip_runtimes\linux\x64\libfpzip.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>runtimes\linux\x64</PackagePath>
+    </None>
+    <None Include="fpzip_runtimes\macos\x64\libfpzip.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Pack>true</Pack>
+      <PackagePath>fpzip_runtimes\macos\x64</PackagePath>
+    </None>
+  </ItemGroup>
 
   <ItemGroup Condition="'$(DockerBuild)' != 'true'">
     <None Include="..\LICENSE.txt">
@@ -39,5 +58,13 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Tests" />
     <InternalsVisibleTo Include="API" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="fpzip_runtimes\linux\arm\" />
+    <Folder Include="fpzip_runtimes\linux\x64\" />
+    <Folder Include="fpzip_runtimes\macos\x64\" />
+    <Folder Include="fpzip_runtimes\win\arm\" />
+    <Folder Include="fpzip_runtimes\win\x64\" />
   </ItemGroup>
 </Project>

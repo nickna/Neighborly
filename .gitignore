@@ -21,11 +21,6 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
-x64/
-x86/
-[Ww][Ii][Nn]32/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
 bld/
 [Bb]in/
 [Oo]bj/
@@ -392,8 +387,4 @@ FodyWeavers.xsd
 /Neighborly.Python/src/neighborly/Snappier.dll
 /Neighborly.Python/src/neighborly/System.Linq.Async.dll
 /Neighborly.Python/src/neighborly/ZstdSharp.dll
-/Neighborly.Python/src/YourPythonPackage.egg-info/dependency_links.txt
-/Neighborly.Python/src/YourPythonPackage.egg-info/PKG-INFO
-/Neighborly.Python/src/YourPythonPackage.egg-info/requires.txt
-/Neighborly.Python/src/YourPythonPackage.egg-info/SOURCES.txt
-/Neighborly.Python/src/YourPythonPackage.egg-info/top_level.txt
+/Neighborly.Python/src/YourPythonPackage.egg-info/
