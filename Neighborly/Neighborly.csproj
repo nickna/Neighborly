@@ -16,20 +16,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="fpzip_runtimes\win\x64\fpzip.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Pack>true</Pack>
-      <PackagePath>fpzip_runtimes\win\x64</PackagePath>
-    </None>
     <None Include="fpzip_runtimes\linux\x64\libfpzip.so">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <Pack>true</Pack>
       <PackagePath>runtimes\linux\x64</PackagePath>
-    </None>
-    <None Include="fpzip_runtimes\macos\x64\libfpzip.dylib">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <Pack>true</Pack>
-      <PackagePath>fpzip_runtimes\macos\x64</PackagePath>
     </None>
   </ItemGroup>
 
@@ -63,8 +53,35 @@
   <ItemGroup>
     <Folder Include="fpzip_runtimes\linux\arm\" />
     <Folder Include="fpzip_runtimes\linux\x64\" />
-    <Folder Include="fpzip_runtimes\macos\x64\" />
-    <Folder Include="fpzip_runtimes\win\arm\" />
-    <Folder Include="fpzip_runtimes\win\x64\" />
+    <Folder Include="fpzip_runtimes\osx\x64\" />
+    <Folder Include="fpzip_runtimes\windows\arm\" />
+    <Folder Include="fpzip_runtimes\windows\x64\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="fpzip_runtimes\android\x64\libfpzip.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\linux\arm\libfpzip.so">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\macos\x64\libfpzip.1.3.0.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\macos\x64\libfpzip.1.dylib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\windows\arm\fpzip.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\windows\arm\fpzip.lib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\windows\x64\fpzip.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="fpzip_runtimes\windows\x64\fpzip.lib">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

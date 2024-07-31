@@ -1,36 +1,57 @@
 ﻿using System;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
-public static class FpZip
+public static class FpZipLib
 {
     private static readonly Dictionary<OSPlatform, Dictionary<Architecture, string>> SupportedPlatforms =
-     new Dictionary<OSPlatform, Dictionary<Architecture, string>>
- {
-        { OSPlatform.Windows, new Dictionary<Architecture, string> { { Architecture.X64, "fpzip.dll" } } },
-        { OSPlatform.Windows, new Dictionary<Architecture, string> { { Architecture.Arm, "fpzip.dll" } } },
-        { OSPlatform.Linux,   new Dictionary<Architecture, string> { { Architecture.X64, "libfpzip.so" } } },
-        { OSPlatform.Linux,   new Dictionary<Architecture, string> { { Architecture.Arm, "libfpzip.so" } } },
-        { OSPlatform.OSX,     new Dictionary<Architecture, string> { { Architecture.X64, "libfpzip.dylib" } } },
-        { OSPlatform.Create("ANDROID"), new Dictionary<Architecture, string> { { Architecture.X64, "libfpzip.so" } } }
- };
+        new Dictionary<OSPlatform, Dictionary<Architecture, string>>
+        {
+            { OSPlatform.Windows, new Dictionary<Architecture, string>
+                {
+                    { Architecture.X64, "fpzip.dll" },
+                    { Architecture.Arm, "fpzip.dll" }
+                }
+            },
+            { OSPlatform.Linux, new Dictionary<Architecture, string>
+                {
+                    { Architecture.X64, "libfpzip.so" },
+                    { Architecture.Arm, "libfpzip.so" }
+                }
+            },
+            { OSPlatform.OSX, new Dictionary<Architecture, string>
+                {
+                    { Architecture.X64, "libfpzip.dylib" }
+                }
+            },
+            { OSPlatform.Create("ANDROID"), new Dictionary<Architecture, string>
+                {
+                    { Architecture.X64, "libfpzip.so" }
+                }
+            }
+        };
 
-
-    static FpZip()
+    static FpZipLib()
     {
-        NativeLibrary.SetDllImportResolver(typeof(FpZip).Assembly, ImportResolver);
+        NativeLibrary.SetDllImportResolver(typeof(FpZipLib).Assembly, ImportResolver);
     }
 
     private static IntPtr ImportResolver(string libraryName, System.Reflection.Assembly assembly, DllImportSearchPath? searchPath)
     {
         if (libraryName != "fpzip")
             return IntPtr.Zero;
+
         foreach (var platform in SupportedPlatforms)
         {
             if (RuntimeInformation.IsOSPlatform(platform.Key))
             {
                 if (platform.Value.TryGetValue(RuntimeInformation.ProcessArchitecture, out string libName))
                 {
-                    return NativeLibrary.Load(libName, assembly, searchPath);
+                    // Search path is fpzip_runtimes/{os}/{cpu}/
+                    var path = $"./fpzip_runtimes/{platform.Key}/{RuntimeInformation.ProcessArchitecture}/{libName}";
+                    return NativeLibrary.Load(path, assembly, searchPath);
+
+                    //return NativeLibrary.Load(libName, assembly, searchPath);
                 }
                 break;
             }
