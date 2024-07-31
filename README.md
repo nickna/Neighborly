@@ -3,7 +3,6 @@
 
 [![CodeQL](https://github.com/nickna/Neighborly/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/nickna/Neighborly/actions/workflows/github-code-scanning/codeql)
 [![Dependabot Updates](https://github.com/nickna/Neighborly/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/nickna/Neighborly/actions/workflows/dependabot/dependabot-updates)
-![neighborly-header](https://github.com/nickna/Neighborly/assets/4017153/2dd8a22d-511d-4457-bde5-ac4ceaecf166)
 [![CodeFactor](https://www.codefactor.io/repository/github/nickna/neighborly/badge)](https://www.codefactor.io/repository/github/nickna/neighborly)
 
 ![neighborly-header](https://github.com/nickna/Neighborly/assets/4017153/2dd8a22d-511d-4457-bde5-ac4ceaecf166)
