@@ -64,7 +64,57 @@ namespace Neighborly.Search
             }
         }
 
-        public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+        private float CalculateDefaultThreshold(string text)
+        {
+            // Adjust these values based on your specific requirements
+            const float FullTextThreshold = 0.5f;
+            const float PartialTextThreshold = 0.8f;
+            const int FullTextLengthThreshold = 20; // Consider text shorter than this as partial
+            const int PartialTextLengthThreshold = 5; // Very short queries should have an even lower threshold
+
+            if (text.Length < PartialTextLengthThreshold)
+            {
+                return 0.9f; // Even more lenient for very short queries
+            }
+            else if (text.Length < FullTextLengthThreshold)
+            {
+                return PartialTextThreshold;
+            }
+            else
+            {
+                return FullTextThreshold;
+            }
+        }
+
+        public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
+            }
+
+            // If no threshold is provided, calculate a default based on the text length
+            float effectiveThreshold = similarityThreshold ?? CalculateDefaultThreshold(text);
+
+            // Convert text into an embedding
+            var embedding = EmbeddingFactory.Instance.GenerateEmbedding(text);            
+            var query = new Vector(embedding);
+            var results = this.Search(query, k, method, effectiveThreshold);
+
+
+            // For partial text searches, also consider prefix matching
+            if (text.Length < 20) // Adjust this threshold as needed
+            {
+                var prefixMatches = _vectors.Where(v => v.OriginalText.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+                                            .Take(k)
+                                            .ToList();
+                results = results.Concat(prefixMatches).Distinct().Take(k).ToList();
+            }
+
+            return results;
+
+        }
+        public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
         {
             if (query == null)
             {
@@ -75,19 +125,27 @@ namespace Neighborly.Search
                 throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
             }
 
+            IList<Vector> results;
             switch (method)
             {
                 case SearchAlgorithm.KDTree:
-                    return _kdTree.NearestNeighbors(query, k);
+                    results = _kdTree.NearestNeighbors(query, k);
+                    break;
                 case SearchAlgorithm.BallTree:
-                    return _ballTree.Search(query, k);
+                    results = _ballTree.Search(query, k);
+                    break;
                 case SearchAlgorithm.Linear:
-                    return LinearSearch.Search(_vectors, query, k);
+                    results = LinearSearch.Search(_vectors, query, k);
+                    break;
                 case SearchAlgorithm.LSH:
-                    return LSHSearch.Search(_vectors, query, k);
+                    results = LSHSearch.Search(_vectors, query, k);
+                    break;
                 default:
                     return [];  // Other SearchMethods do not support search
             }
+
+            // Apply similarity threshold
+            return results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
         }
 
         public async Task LoadAsync(BinaryReader reader, CancellationToken cancellationToken = default)
