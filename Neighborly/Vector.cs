@@ -66,6 +66,18 @@ public partial class Vector : IEquatable<Vector>
 
     }
 
+    /// <summary>
+    /// Generates the embedding for the specified text and initializes a new instance of the Vector class.
+    /// </summary>
+    /// <param name="originalText"></param>
+    public Vector(string originalText)
+    {
+        Values = EmbeddingFactory.Instance.GenerateEmbedding(originalText);
+        OriginalText = originalText;
+        Id = Guid.NewGuid();
+        Tags = new short[0];
+    }
+
     public Vector(BinaryReader stream)
     {
         // Read the Guid
