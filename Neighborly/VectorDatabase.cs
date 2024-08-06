@@ -4,6 +4,7 @@ using Neighborly.Search;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace Neighborly;
 
@@ -99,7 +100,7 @@ public partial class VectorDatabase : IDisposable
         using var activity = StartActivity(tags: [new("search.method", searchMethod), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(query, k, searchMethod, similarityThreshold);
+            var result = _searchService.Search(query:query, k, searchMethod, similarityThreshold: similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
