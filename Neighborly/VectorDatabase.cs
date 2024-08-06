@@ -77,6 +77,23 @@ public partial class VectorDatabase : IDisposable
         _hasOutdatedIndex = true;
     }
 
+    public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+    {
+        using var activity = StartActivity(tags: [new("search.method", method), new("search.k", k)]);
+        try
+        {
+            var result = _searchService.Search(text, k, method);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            // CouldNotFindVectorInDb(text, k, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
+        }
+    }
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
         using var activity = StartActivity(tags: [new("search.method", searchMethod), new("search.k", k)]);

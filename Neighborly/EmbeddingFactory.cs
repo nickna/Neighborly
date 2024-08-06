@@ -50,7 +50,7 @@ public class EmbeddingFactory
 
     private class OutputData
     {
-        [VectorType(300)]
+        [VectorType]
         public float[] Features { get; set; }
     }
 
