@@ -64,6 +64,12 @@ namespace Neighborly.Search
             }
         }
 
+        public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+        {
+            var embedding = EmbeddingFactory.Instance.GenerateEmbedding(text);
+            var query = new Vector(embedding);
+            return this.Search(query, k, method);
+        }
         public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
         {
             if (query == null)
