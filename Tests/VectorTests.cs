@@ -133,4 +133,18 @@ public class VectorTests
         // Assert
         Assert.That(distance, Is.EqualTo(3.041f).Within(0.01f));
     }
+
+    [Test]
+    public void Constructor_GeneratesEmbeddings_WhenOriginalTextIsSpecified([ValueSource(nameof(s_originalTexts))] string originalText)
+    {
+        // Arrange
+        float[] expectedEmbeddings = Neighborly.EmbeddingFactory.Instance.GenerateEmbedding(originalText);
+
+        // Act
+        Vector vector = new Vector(originalText);
+
+        // Assert
+        Assert.That(vector.OriginalText, Is.EqualTo(originalText));
+        Assert.That(vector.Values, Is.EqualTo(expectedEmbeddings));
+    }
 }
