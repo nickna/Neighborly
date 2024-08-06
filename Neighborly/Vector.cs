@@ -49,7 +49,7 @@ public partial class Vector : IEquatable<Vector>
         Values = values;
         Id = Guid.NewGuid();
         OriginalText = string.Empty;
-        Tags = new short[0];
+        Tags = Array.Empty<short>();
     }
 
     /// <summary>

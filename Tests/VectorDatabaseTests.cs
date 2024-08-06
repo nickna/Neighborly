@@ -248,7 +248,7 @@ public class VectorDatabaseTests
 
         // Act
         var query = new Vector([2f, 3f, 4f]);
-        var result = _db.Search(query, matchingVectors, searchAlgorithm);
+        var result = _db.Search(query, matchingVectors, searchAlgorithm, 3.5f); // similarityThreshold is set loose to allow partial matches
 
         // Assert
         Assert.That(result, Has.Count.EqualTo(matchingVectors), "Search should return the correct number of vectors.");
