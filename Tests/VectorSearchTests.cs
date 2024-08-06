@@ -76,7 +76,7 @@ public class VectorSearchTests
         var searchText = "this text does not exist";
 
         // Act 
-        var results = _db.Search(text: searchText, k: 1);
+        var results = _db.Search(text: searchText, k: 1, similarityThreshold: 0.5f);
 
         // Assert
         Assert.That(results.Count, Is.EqualTo(0));

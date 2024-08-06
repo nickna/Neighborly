@@ -64,13 +64,22 @@ namespace Neighborly.Search
             }
         }
 
-        public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+        public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
         {
-            var embedding = EmbeddingFactory.Instance.GenerateEmbedding(text);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
+            }
+
+            // Convert text into an embedding
+            var embedding = EmbeddingFactory.Instance.GenerateEmbedding(text);            
             var query = new Vector(embedding);
-            return this.Search(query, k, method);
+            var results = this.Search(query, k, method);
+            
+            // Filter results based on similarity
+            return results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
         }
-        public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+        public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
         {
             if (query == null)
             {

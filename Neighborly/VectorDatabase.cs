@@ -77,12 +77,12 @@ public partial class VectorDatabase : IDisposable
         _hasOutdatedIndex = true;
     }
 
-    public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree)
+    public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.method", method), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(text, k, method);
+            var result = _searchService.Search(text, k, method, similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
@@ -94,12 +94,12 @@ public partial class VectorDatabase : IDisposable
             return new List<Vector>();
         }
     }
-    public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
+    public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.method", searchMethod), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(query, k, searchMethod);
+            var result = _searchService.Search(query, k, searchMethod, similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
