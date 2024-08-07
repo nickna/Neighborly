@@ -38,6 +38,15 @@ Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "Neighborly.Python", "Neighb
 		{CD5ACC75-E9FD-4A2D-9684-5C60DC758CDA} = {CD5ACC75-E9FD-4A2D-9684-5C60DC758CDA}
 	EndProjectSection
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{C82FB1F0-FB55-48D9-B80B-A2C1C1AE2BE2}"
+	ProjectSection(SolutionItems) = preProject
+		concurrency_explained.md = concurrency_explained.md
+		indexing_explained.md = indexing_explained.md
+		logging_explained.md = logging_explained.md
+		tagging_explained.md = tagging_explained.md
+		vector_storage_explained.md = vector_storage_explained.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
