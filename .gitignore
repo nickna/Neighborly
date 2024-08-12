@@ -388,3 +388,6 @@ FodyWeavers.xsd
 /Neighborly.Python/src/neighborly/System.Linq.Async.dll
 /Neighborly.Python/src/neighborly/ZstdSharp.dll
 /Neighborly.Python/src/YourPythonPackage.egg-info/
+/.aider.tags.cache.v3
+/.aider.chat.history.md
+/.aider.input.history
