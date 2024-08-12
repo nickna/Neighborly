@@ -31,6 +31,12 @@ public partial class Vector : IEquatable<Vector>
     public short[] Tags { get; }
 
     /// <summary>
+    /// Attributes that associate this vector to a specific user or organization.
+    /// Also used to determine storage priority (e.g., cache, disk, etc.)
+    /// </summary>
+    public VectorAttributes Attributes { get; set; }
+
+    /// <summary>
     /// Embedding of the vector in a high-dimensional space.
     /// </summary>
     public float[] Values { get; }
@@ -109,11 +115,14 @@ public partial class Vector : IEquatable<Vector>
             tags[i] = stream.ReadInt16();
         }
 
+        // Read the VectorAttributes
+        VectorAttributes attributes = new VectorAttributes(stream);
+
         Tags = tags;
         Id = id;
         Values = values;
         OriginalText = originalText;
-        Tags = tags;
+        Attributes = attributes;
     }
 
     public Vector(byte[] byteArray)
@@ -149,10 +158,14 @@ public partial class Vector : IEquatable<Vector>
             tags[i] = BitConverter.ToInt16(tagsSource[(i * sizeof(short))..((i + 1) * sizeof(short))]);
         }
 
+        int attributesOffset = tagsOffset + (tagsLength * sizeof(short));
+        var attributes = new VectorAttributes(new BinaryReader(new MemoryStream(source[attributesOffset..].ToArray())));
+
         Id = id;
         Values = values;
         OriginalText = originalText;
         Tags = tags;
+        Attributes = attributes;
     }
 
     internal Vector(Guid id, float[] values, short[] tags, string? originalText)
@@ -313,14 +326,18 @@ public partial class Vector : IEquatable<Vector>
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
+        byte[] attributesBytes = Attributes.ToBinary();
+        int attributesBytesLength = attributesBytes.Length;
+
         int valuesBytesLength = Values.Length * sizeof(float);
         int tagsBytesLength = Tags.Length * sizeof(short);
         int originalTextBytesLength = Encoding.UTF8.GetByteCount(OriginalText);
-        int resultLength = s_idBytesLength + s_valuesLengthBytesLength + s_originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + s_tagsLengthBytesLength + tagsBytesLength;
+        int resultLength = s_idBytesLength + s_valuesLengthBytesLength + s_originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + s_tagsLengthBytesLength + tagsBytesLength + attributesBytesLength;
 
         int valuesOffset = s_originalTextOffset + originalTextBytesLength;
         int tagsLengthOffset = valuesOffset + valuesBytesLength;
         int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
+        int attributesOffset = tagsOffset + tagsBytesLength;
 
         Span<byte> result = stackalloc byte[resultLength];
         Span<byte> idBytes = result[..s_idBytesLength];
@@ -370,6 +387,9 @@ public partial class Vector : IEquatable<Vector>
                 throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
             }
         }
+
+        Span<byte> attributesBytesSpan = result[attributesOffset..(attributesOffset + attributesBytesLength)];
+        attributesBytes.CopyTo(attributesBytesSpan);
 
         return result.ToArray();
     }
