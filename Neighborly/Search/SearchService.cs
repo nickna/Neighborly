@@ -189,13 +189,25 @@ namespace Neighborly.Search
             ArgumentNullException.ThrowIfNull(writer);
 
             writer.Write(s_currentFileVersion);
-            writer.Write(s_numberOfStorableIndexes); // Write the number of indexes
 
-            cancellationToken.ThrowIfCancellationRequested();
-            await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+            // Count how many indexes we actually have
+            int actualIndexCount = 0;
+            if (_kdTree != null) actualIndexCount++;
+            if (_ballTree != null) actualIndexCount++;
 
-            cancellationToken.ThrowIfCancellationRequested();
-            await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+            writer.Write(actualIndexCount); // Write the actual number of indexes
+
+            if (_kdTree != null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (_ballTree != null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         private async Task ExportIndexAsync(BinaryWriter writer, SearchAlgorithm method, CancellationToken cancellationToken)

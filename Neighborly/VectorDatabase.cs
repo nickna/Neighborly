@@ -288,6 +288,7 @@ public partial class VectorDatabase : IDisposable
     /// </remarks>
     private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Loading vectors from the V1 layout.");
         var (vectorCount, _) = await LoadV0Async(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
 
         if (includeIndexes)
@@ -308,6 +309,7 @@ public partial class VectorDatabase : IDisposable
     /// </remarks>
     private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Loading vectors from the original (V0) layout.");
         var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
 
         for (int i = 0; i < vectorCount; i++)
@@ -346,7 +348,15 @@ public partial class VectorDatabase : IDisposable
                     await RebuildSearchIndexesAsync();
                     _indexRebuildCounter.Add(1);
                 }
-                await Task.Delay(5000, cancellationToken);
+                try
+                {
+                    await Task.Delay(5000, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    _logger.LogInformation("Indexing thread was canceled.");
+                    break;
+                }
             }
 
             _logger.LogInformation("Indexing thread stopping.");
@@ -424,6 +434,10 @@ public partial class VectorDatabase : IDisposable
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
     {
         using var activity = StartActivity(name: "SaveVectors");
+        
+        string filePath = Path.Combine(path, "vectors.bin");
+        string oldFilePath = Path.Combine(path, "vectors.old.bin");
+
         // If the database hasn't been modified, no need to save it
         if (!_hasUnsavedChanges)
         {
@@ -438,11 +452,21 @@ public partial class VectorDatabase : IDisposable
             _logger.LogInformation("The directory {Path} was created.", path);
         }
 
+        if (File.Exists(filePath))
+        {
+            if (File.Exists(oldFilePath))
+            {
+                File.Delete(oldFilePath);
+                _logger.LogInformation("The file {oldFilePath} exists and is deleted.", oldFilePath);
+            }
+            File.Move(filePath, oldFilePath, true);
+            _logger.LogInformation("The file {Path} exists and is moved to {oldFilePath} temporarily.", path, oldFilePath);
+        }
+
         try
         {
             _rwLock.EnterWriteLock();
             // Save the vectors to a binary file
-            string filePath = Path.Combine(path, "vectors.bin");
             using var outputStream = new FileStream(filePath, FileMode.Create);
             // TODO -- Experiment with other compression types. For now, GZip works.
             using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
@@ -450,9 +474,12 @@ public partial class VectorDatabase : IDisposable
             {
                 await WriteToAsync(writer, true, cancellationToken).ConfigureAwait(false);
             }
-
-            _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
+            outputStream.Close();
+            _hasUnsavedChanges = false; // Clear the flag to indicate the database hasn't been modified
             activity?.SetStatus(ActivityStatusCode.Ok);
+            File.Delete(oldFilePath);   // Delete the old file
+            _logger.LogInformation("Saved the database to {FilePath} and deleted old backup {oldFilePath}.", filePath, oldFilePath);
+
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -568,6 +595,7 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
+                _logger.LogInformation("Shutting down VectorDatabase.");
                 StopIndexService();
                 _searchService = null;
                 _rwLock.Dispose();
@@ -586,6 +614,18 @@ public partial class VectorDatabase : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// StartActivity is responsible for starting a new activity for tracing and telemetry purposes. 
+    /// This function leverages the ActivitySource class from the System.Diagnostics namespace to create and start an activity, 
+    /// which can be used to track the execution of code and collect telemetry data.
+    /// </summary>
+    /// <param name="kind">Specifies the kind of activity (e.g., internal, server, client). The default is ActivityKind.Internal.</param>
+    /// <param name="parentContext">Provides the context of the parent activity, if any. The default is an empty context.</param>
+    /// <param name="tags">A collection of key-value pairs representing tags to be associated with the activity. The default is null.</param>
+    /// <param name="links">A collection of links to other activities. The default is null.</param>
+    /// <param name="startTime">The start time of the activity. The default is the current time.</param>
+    /// <param name="name"> The name of the activity. The default is the name of the calling method, provided by the CallerMemberName attribute.</param>
+    /// <returns></returns>
     private Activity? StartActivity(ActivityKind kind = ActivityKind.Internal, ActivityContext parentContext = default, IEnumerable<KeyValuePair<string, object?>>? tags = null, IEnumerable<ActivityLink>? links = null, DateTimeOffset startTime = default, [CallerMemberName] string name = "")
     {
         if (tags is null)
