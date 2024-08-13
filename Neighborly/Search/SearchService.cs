@@ -17,11 +17,11 @@ namespace Neighborly.Search
         private readonly VectorList _vectors;
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
-        private EmbeddingGenerator embeddingGenerator;
+        private EmbeddingGenerator embeddingGenerator = EmbeddingGenerator.Instance;
         public EmbeddingGenerator EmbeddingGenerator
         {
-            get => EmbeddingGenerator;
-            set => EmbeddingGenerator = value;
+            get => embeddingGenerator;
+            set => embeddingGenerator = value;
         }
 
         public SearchService(VectorList vectors)
