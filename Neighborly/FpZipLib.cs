@@ -2,6 +2,10 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
+/// <summary>
+/// Bindings for the fpzip, a library for lossless compression of floating-point data.
+/// Source: https://github.com/llnl/fpzip
+/// </summary>
 public static class FpZipLib
 {
     private static readonly Dictionary<OSPlatform, Dictionary<Architecture, string>> SupportedPlatforms =

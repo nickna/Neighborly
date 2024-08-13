@@ -1,6 +1,10 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
+/// <summary>
+/// Bindings for the fpzip, a library for lossless compression of floating-point data.
+/// Source: https://github.com/llnl/fpzip
+/// </summary>
 public class FpZipCompression : IDisposable
 {
     private IntPtr _fpz;
