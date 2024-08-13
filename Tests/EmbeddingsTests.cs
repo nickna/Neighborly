@@ -14,7 +14,7 @@ public class EmbeddingsTests
     public void GenerateMLNet_Embedding()
     {
         // Arrange
-        EmbeddingFactory embeddingFactory = new EmbeddingFactory();
+        EmbeddingGenerator embeddingFactory = new EmbeddingGenerator();
 
         // Act
         float[] embedding = embeddingFactory.GenerateEmbedding("Hello, World!");
@@ -27,7 +27,7 @@ public class EmbeddingsTests
     public void GenerateMLNet_EmbeddingsAreDifferent()
     {
         // Arrange
-        EmbeddingFactory embeddingFactory = new EmbeddingFactory();
+        EmbeddingGenerator embeddingFactory = new EmbeddingGenerator();
 
         // Act
         float[] embedding1 = embeddingFactory.GenerateEmbedding("Hello, Earth!");
@@ -42,8 +42,8 @@ public class EmbeddingsTests
     public void GenerateOllama_Embedding()
     {
         // Arrange
-        EmbeddingFactory embeddingFactory = new 
-            EmbeddingFactory(new EmbeddingFactoryInfo { Source = EmbeddingSource.Ollama });
+        EmbeddingGenerator embeddingFactory = new 
+            EmbeddingGenerator(new EmbeddingGenerationInfo { Source = EmbeddingSource.Ollama });
         // Default Llama 3.1 model
 
         // Act
@@ -58,8 +58,8 @@ public class EmbeddingsTests
     public void GenerateOllama_EmbeddingsAreDifferent()
     {
         // Arrange
-        EmbeddingFactory embeddingFactory = new
-            EmbeddingFactory(new EmbeddingFactoryInfo { Source = EmbeddingSource.Ollama });
+        EmbeddingGenerator embeddingFactory = new
+            EmbeddingGenerator(new EmbeddingGenerationInfo { Source = EmbeddingSource.Ollama });
 
         // Act
         float[] embedding1 = embeddingFactory.GenerateEmbedding("Hello, Earth!");

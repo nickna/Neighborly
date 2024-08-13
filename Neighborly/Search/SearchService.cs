@@ -17,6 +17,12 @@ namespace Neighborly.Search
         private readonly VectorList _vectors;
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
+        private EmbeddingGenerator embeddingGenerator;
+        public EmbeddingGenerator EmbeddingGenerator
+        {
+            get => EmbeddingGenerator;
+            set => EmbeddingGenerator = value;
+        }
 
         public SearchService(VectorList vectors)
         {
@@ -25,6 +31,7 @@ namespace Neighborly.Search
             _vectors = vectors;
             _kdTree = new();
             _ballTree = new();
+            embeddingGenerator = EmbeddingGenerator.Instance;
         }
 
         /// <summary>
@@ -97,7 +104,7 @@ namespace Neighborly.Search
             float effectiveThreshold = similarityThreshold ?? CalculateDefaultThreshold(text);
 
             // Convert text into an embedding
-            var embedding = EmbeddingFactory.Instance.GenerateEmbedding(text);            
+            var embedding = embeddingGenerator.GenerateEmbedding(text);            
             var query = new Vector(embedding);
             var results = this.Search(query, k, method, effectiveThreshold);
 

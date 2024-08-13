@@ -13,18 +13,18 @@ using JsonSerializer = System.Text.Json.JsonSerializer;
 
 namespace Neighborly;
 
-public class EmbeddingFactory
+public class EmbeddingGenerator
 {
-    private static readonly Lazy<EmbeddingFactory> _instance = new Lazy<EmbeddingFactory>(() => new EmbeddingFactory());
+    private static readonly Lazy<EmbeddingGenerator> _instance = new Lazy<EmbeddingGenerator>(() => new EmbeddingGenerator());
 
-    public static EmbeddingFactory Instance => _instance.Value;
+    public static EmbeddingGenerator Instance => _instance.Value;
 
     private readonly ITransformer _model;
     private readonly MLContext _mlContext;
-    private readonly EmbeddingFactoryInfo _embeddingFactoryInfo;
+    private readonly EmbeddingGenerationInfo _embeddingFactoryInfo;
     private readonly HttpClient _httpClient;
 
-    public EmbeddingFactory(EmbeddingFactoryInfo embeddingFactoryInfo)
+    public EmbeddingGenerator(EmbeddingGenerationInfo embeddingFactoryInfo)
     {
         _embeddingFactoryInfo = embeddingFactoryInfo;
         switch (embeddingFactoryInfo.Source)
@@ -51,7 +51,7 @@ public class EmbeddingFactory
         }
     }
 
-    public EmbeddingFactory() : this(new EmbeddingFactoryInfo { Source = EmbeddingSource.Internal })
+    public EmbeddingGenerator() : this(new EmbeddingGenerationInfo { Source = EmbeddingSource.Internal })
     {
     }
 
@@ -133,7 +133,7 @@ public enum EmbeddingSource
     Ollama
 }
 
-public struct EmbeddingFactoryInfo
+public struct EmbeddingGenerationInfo
 {
     public EmbeddingSource Source { get; set; }
 

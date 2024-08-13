@@ -138,7 +138,7 @@ public class VectorTests
     public void Constructor_GeneratesEmbeddings_WhenOriginalTextIsSpecified([ValueSource(nameof(s_originalTexts))] string originalText)
     {
         // Arrange
-        float[] expectedEmbeddings = Neighborly.EmbeddingFactory.Instance.GenerateEmbedding(originalText);
+        float[] expectedEmbeddings = Neighborly.EmbeddingGenerator.Instance.GenerateEmbedding(originalText);
 
         // Act
         Vector vector = new Vector(originalText);

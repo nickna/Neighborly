@@ -390,4 +390,20 @@ public class VectorDatabaseTests
         Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!, null));
     }
 
+    [Test]
+    [Ignore("Requires Ollama running locally. Not suitable for automated builds.")]
+    public void Search_ChangeEmbeddingFactory()
+    {
+        // Arrange
+        var embeddingFactory = new EmbeddingGenerationInfo { Source = EmbeddingSource.Ollama };
+        _db.SetEmbeddingGenerationInfo(embeddingFactory);
+
+        // Act
+        Vector v = _db.GenerateVector(originalText: "Hello, World!");
+
+        // Assert
+        Assert.That(v, Is.Not.Null);
+        Assert.That(v.OriginalText, Is.EqualTo("Hello, World!"));
+
+    }
 }

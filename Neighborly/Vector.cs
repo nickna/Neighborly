@@ -78,7 +78,7 @@ public partial class Vector : IEquatable<Vector>
     /// <param name="originalText"></param>
     public Vector(string originalText)
     {
-        Values = EmbeddingFactory.Instance.GenerateEmbedding(originalText);
+        Values = EmbeddingGenerator.Instance.GenerateEmbedding(originalText);
         OriginalText = originalText;
         Id = Guid.NewGuid();
         Tags = new short[0];

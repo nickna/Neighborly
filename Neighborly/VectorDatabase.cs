@@ -78,12 +78,44 @@ public partial class VectorDatabase : IDisposable
         _hasOutdatedIndex = true;
     }
 
-    public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+    /// <summary>
+    /// Passes in details about how to generate embeddings.
+    /// </summary>
+    /// <seealso cref="EmbeddingGenerationInfo"/>
+    public void SetEmbeddingGenerationInfo(EmbeddingGenerationInfo embeddingGeneratorInfo)
     {
-        using var activity = StartActivity(tags: [new("search.method", method), new("search.k", k)]);
+        ArgumentNullException.ThrowIfNull(embeddingGeneratorInfo);
+        _searchService.EmbeddingGenerator = new EmbeddingGenerator(embeddingGeneratorInfo);
+
+    }
+
+    /// <summary>
+    /// Generates a Vector class from text.
+    /// </summary>
+    /// <param name="originalText"></param>
+    /// <returns></returns>
+    public Vector GenerateVector(string originalText)
+    {
+        float[] embedding = _searchService.EmbeddingGenerator.GenerateEmbedding(originalText);
+        return new Vector(embedding, originalText);
+    }
+
+    /// <summary>
+    /// Searches for a specified text in the database and returns the k nearest neighbors.
+    /// This text is first converted into an embedding using the EmbeddingGenerator.
+    /// </summary>
+    /// <param name="text"></param>
+    /// <param name="k">Proximity</param>
+    /// <param name="searchMethod">Search algorithm</param>
+    /// <param name="similarityThreshold"></param>
+    /// <returns>Vectors that match the search results</returns>
+    /// <seealso cref="EmbeddingGenerator"/>
+    public IList<Vector> Search(string text, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+    {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(text, k, method, similarityThreshold);
+            var result = _searchService.Search(text, k, searchMethod, similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
@@ -95,9 +127,18 @@ public partial class VectorDatabase : IDisposable
             return new List<Vector>();
         }
     }
+
+    /// <summary>
+    /// Searches for a specified vector in the database and returns the k nearest neighbors.
+    /// </summary>
+    /// <param name="query"></param>
+    /// <param name="k"></param>
+    /// <param name="searchMethod">Search algorithm</param>
+    /// <param name="similarityThreshold"></param>
+    /// <returns></returns>
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
-        using var activity = StartActivity(tags: [new("search.method", searchMethod), new("search.k", k)]);
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
         try
         {
             var result = _searchService.Search(query:query, k, searchMethod, similarityThreshold: similarityThreshold);
@@ -326,7 +367,7 @@ public partial class VectorDatabase : IDisposable
 
     /// <summary>
     /// Creates a new kd-tree index for the vectors and a map of tags to vector IDs.
-    /// (This method is eventually calls when the database is modified.)
+    /// (This searchMethod is eventually calls when the database is modified.)
     /// </summary>
     public async Task RebuildTagsAsync()
     {
@@ -371,13 +412,13 @@ public partial class VectorDatabase : IDisposable
         // Get the current directory
         string currentDirectory = Directory.GetCurrentDirectory();
 
-        // Call the existing Save method with the current directory
+        // Call the existing Save searchMethod with the current directory
         await SaveAsync(currentDirectory, cancellationToken);
     }
 
     /// <summary>
     /// Saves the vectors to a specified file path.
-    /// (In the API server, this method will be called when the host OS sends a shutdown signal.)
+    /// (In the API server, this searchMethod will be called when the host OS sends a shutdown signal.)
     /// </summary>
     /// <param name="path">The file path to save the vectors to.</param>
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
@@ -540,7 +581,7 @@ public partial class VectorDatabase : IDisposable
 
     public void Dispose()
     {
-        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' searchMethod
         Dispose(disposing: true);
         GC.SuppressFinalize(this);
     }
