@@ -47,6 +47,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{C82FB1F0-F
 		vector_storage_explained.md = vector_storage_explained.md
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmarks", "Benchmarks\Benchmarks.csproj", "{4D83C2EC-599E-4D45-8ABA-F72A633D62F2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -83,6 +85,10 @@ Global
 		{77C06B8E-264D-4B49-8F74-0FF80E8C12DA}.Release|Any CPU.Build.0 = Release|Any CPU
 		{4A09C5F6-CAFA-4EB9-B57A-2882EC18404B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{4A09C5F6-CAFA-4EB9-B57A-2882EC18404B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D83C2EC-599E-4D45-8ABA-F72A633D62F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D83C2EC-599E-4D45-8ABA-F72A633D62F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D83C2EC-599E-4D45-8ABA-F72A633D62F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D83C2EC-599E-4D45-8ABA-F72A633D62F2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
