@@ -13,6 +13,8 @@ namespace Neighborly.Search
         /// </summary>
         private const int s_currentFileVersion = 1;
         private const int s_numberOfStorableIndexes = 2;
+        private readonly SemaphoreSlim _loadsaveSemaphore = new(1, 1);
+        private readonly SemaphoreSlim _rebuildSemaphore = new(1, 1);
 
         private readonly VectorList _vectors;
         private Search.KDTree _kdTree;
@@ -36,13 +38,14 @@ namespace Neighborly.Search
 
         /// <summary>
         /// Build all indexes for the given vector list
-        /// (Not recommended for production use)
         /// </summary>
-        public void BuildAllIndexes()
+        public async Task BuildAllIndexes()
         {
-            // TODO -- Examine memory footprint and performance of each index
-            BuildIndex(SearchAlgorithm.KDTree);
-            BuildIndex(SearchAlgorithm.BallTree);
+            await Task.Run(() =>
+            {
+                BuildIndex(SearchAlgorithm.KDTree);
+                BuildIndex(SearchAlgorithm.BallTree);
+            }).ConfigureAwait(false);
         }
 
         public void Clear()
@@ -57,17 +60,25 @@ namespace Neighborly.Search
             {
                 return;
             }
+            _rebuildSemaphore.Wait();
 
-            switch (method)
+            try
             {
-                case SearchAlgorithm.KDTree:
-                    _kdTree.Build(_vectors);
-                    break;
-                case SearchAlgorithm.BallTree:
-                    _ballTree.Build(_vectors);
-                    break;
-                default:
-                    return;  // Other SearchMethods do not require building an index
+                switch (method)
+                {
+                    case SearchAlgorithm.KDTree:
+                        _kdTree.Build(_vectors);
+                        break;
+                    case SearchAlgorithm.BallTree:
+                        _ballTree.Build(_vectors);
+                        break;
+                    default:
+                        return;  // Other SearchMethods do not require building an index
+                }
+            }
+            finally
+            {
+                _rebuildSemaphore.Release();
             }
         }
 
@@ -158,55 +169,70 @@ namespace Neighborly.Search
         public async Task LoadAsync(BinaryReader reader, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(reader);
-
-            var version = reader.ReadInt32(); // Read the version number
-            if (version != s_currentFileVersion)
+            await _loadsaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
+            try
             {
-                throw new InvalidDataException($"Unsupported file version {version}");
-            }
-
-            var count = reader.ReadInt32(); // Read the number of index
-            for (var i = 0; i < count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var method = (SearchAlgorithm)reader.ReadInt32();
-                switch (method)
+                var version = reader.ReadInt32(); // Read the version number
+                if (version != s_currentFileVersion)
                 {
-                    case SearchAlgorithm.KDTree:
-                        _kdTree.Load(reader, _vectors);
-                        break;
-                    case SearchAlgorithm.BallTree:
-                        await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
-                        break;
-                    default:
-                        throw new InvalidOperationException("Unsupported search method");
+                    throw new InvalidDataException($"Unsupported file version {version}");
                 }
+
+                var count = reader.ReadInt32(); // Read the number of index
+                for (var i = 0; i < count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var method = (SearchAlgorithm)reader.ReadInt32();
+                    switch (method)
+                    {
+                        case SearchAlgorithm.KDTree:
+                            _kdTree.Load(reader, _vectors);
+                            break;
+                        case SearchAlgorithm.BallTree:
+                            await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
+                            break;
+                        default:
+                            throw new InvalidOperationException("Unsupported search method");
+                    }
+                }
+            }
+            finally
+            {
+                _loadsaveSemaphore.Release();
             }
         }
 
         public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(writer);
+            await _loadsaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
 
-            writer.Write(s_currentFileVersion);
-
-            // Count how many indexes we actually have
-            int actualIndexCount = 0;
-            if (_kdTree != null) actualIndexCount++;
-            if (_ballTree != null) actualIndexCount++;
-
-            writer.Write(actualIndexCount); // Write the actual number of indexes
-
-            if (_kdTree != null)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+                writer.Write(s_currentFileVersion);
+
+                // Count how many indexes we actually have
+                int actualIndexCount = 0;
+                if (_kdTree != null) actualIndexCount++;
+                if (_ballTree != null) actualIndexCount++;
+
+                writer.Write(actualIndexCount); // Write the actual number of indexes
+
+                if (_kdTree != null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (_ballTree != null)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+                }
             }
-
-            if (_ballTree != null)
+            finally
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+                _loadsaveSemaphore.Release();
             }
         }
 

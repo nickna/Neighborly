@@ -241,6 +241,7 @@ public partial class VectorDatabase : IDisposable
                 {
                     _vectors.Clear();
                     (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, cancellationToken).ConfigureAwait(false);
+                    _logger.LogInformation("IndexesAreDirty = {IndexesAreDirty}", indexesAreDirty);
                     _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
                 }
 
@@ -268,7 +269,7 @@ public partial class VectorDatabase : IDisposable
     internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken)
     {
         var fileVersion = reader.ReadInt32();   // File version
-
+        _logger.LogInformation("File version: {FileVersion}", fileVersion);
         Func<BinaryReader, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
         {
             1 => LoadV1Async,
@@ -335,7 +336,7 @@ public partial class VectorDatabase : IDisposable
         // Create a new thread that will react when _hasOutdatedIndex is set to true
         indexService = new Thread(async () =>
         {
-            _logger.LogInformation("Indexing thread started.");
+            _logger.LogInformation("Indexing Thread: Started.");
 
             while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
             {
@@ -344,8 +345,12 @@ public partial class VectorDatabase : IDisposable
                     _vectors.Count > 0 &&
                     DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
-                    await RebuildTagsAsync();
-                    await RebuildSearchIndexesAsync();
+                    Stopwatch sw = Stopwatch.StartNew(); // Track Time for index to complete
+                    _logger.LogInformation("Indexing Thread: Rebuilding Tags and Search.");
+                    await RebuildTagsAsync().ConfigureAwait(false);
+                    await RebuildSearchIndexesAsync().ConfigureAwait(false);
+                    sw.Stop();
+                    _logger.LogInformation("Indexing Thread: Rebuilt Tags and Search in {ElapsedMilliseconds} ms.", sw.ElapsedMilliseconds);
                     _indexRebuildCounter.Add(1);
                 }
                 try
@@ -354,12 +359,12 @@ public partial class VectorDatabase : IDisposable
                 }
                 catch (TaskCanceledException)
                 {
-                    _logger.LogInformation("Indexing thread was canceled.");
+                    _logger.LogInformation("Indexing Thread: Cancelling...");
                     break;
                 }
             }
 
-            _logger.LogInformation("Indexing thread stopping.");
+            _logger.LogInformation("Indexing Thread: Stopped.");
         });
         indexService.Priority = ThreadPriority.Lowest;
         indexService.Start();
@@ -369,9 +374,9 @@ public partial class VectorDatabase : IDisposable
     {
         if (indexService != null && indexService.IsAlive)
         {
+            _logger.LogInformation("Indexing Thread: Stop requested.");
             _indexServiceCancellationTokenSource.Cancel();
             _indexServiceCancellationTokenSource.Dispose();
-            _logger.LogInformation("Indexing stop requested.");
         }
     }
 
@@ -385,6 +390,7 @@ public partial class VectorDatabase : IDisposable
         {
             return;
         }
+
         await Task.Run(() =>
         {
             using var activity = StartActivity(name: "RebuildTags");
@@ -394,18 +400,17 @@ public partial class VectorDatabase : IDisposable
         _hasOutdatedIndex = false;
     }
 
-    // This is an async function
+    // Rebuild K-D tree and Ball Tree indexes
     public async Task RebuildSearchIndexesAsync()
     {
-        await Task.Run(() =>
-        {
-            using var activity = StartActivity(name: "BuildAllSearchIndexes");
-            _searchService.BuildAllIndexes();
-            activity?.SetStatus(ActivityStatusCode.Ok);
-        });
+        using var activity = StartActivity(name: "BuildAllSearchIndexes");
+        await _searchService.BuildAllIndexes();
+        activity?.SetStatus(ActivityStatusCode.Ok);
+
     }
+    
     public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
-    {
+    {     
         await Task.Run(() =>
         {
             using var activity = StartActivity(name: "BuildSearchIndex");

@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Serilog.Core;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -17,6 +18,7 @@ namespace Neighborly
         private Dictionary<short, List<Guid>> _tagMap = new();
         private VectorList _vectorList;
         public event EventHandler? Modified;
+        private readonly SemaphoreSlim _rebuildTagsSemaphore = new(1, 1);
 
         public VectorTags(VectorList vectorList)
         {
@@ -170,12 +172,13 @@ namespace Neighborly
         /// <exception cref="ArgumentNullException"></exception>
         public void BuildMap()
         {
-            if (_vectorList == null || _vectorList.Count == 0)
+            if (_tagMap.Count == 0 || _vectorList.Count == 0 || _vectorList == null || !_rebuildTagsSemaphore.Wait(0))
             {
-                throw new ArgumentNullException(nameof(VectorList));
+                return;
             }
-            lock (_tagMap)
-            {
+
+            try
+            { 
                 _tagMap.Clear();
                 for (int i = 0; i < _vectorList.Count; i++)
                 {
@@ -189,6 +192,10 @@ namespace Neighborly
                         _tagMap[tagId].Add(vector.Id);
                     }
                 }
+            }
+            finally
+            {
+                _rebuildTagsSemaphore.Release();
             }
 
         }
