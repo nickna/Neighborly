@@ -141,7 +141,7 @@ public class VectorTests
         float[] expectedEmbeddings = Neighborly.EmbeddingGenerator.Instance.GenerateEmbedding(originalText);
 
         // Act
-        Vector vector = new Vector(originalText);
+        Vector vector = new Vector(originalText:originalText);
 
         // Assert
         Assert.That(vector.OriginalText, Is.EqualTo(originalText));

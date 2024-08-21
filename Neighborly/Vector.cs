@@ -49,39 +49,37 @@ public partial class Vector : IEquatable<Vector>
     /// <summary>
     /// Initializes a new instance of the Vector class with the specified values.
     /// </summary>
+    /// <example>
+    /// var vec = new Vector("The quick brown fox jumps over the lazy dog"); // This will generate the embedding (Values) for the text
+    /// var vec2 = new Vector(new float[] { 1.0f, 2.0f, 3.0f }); // This will use the provided values
+    /// </example>
     /// <param name="values">The array of float values representing the vector</param>
-    public Vector(float[] values)
+    /// <param name="originalText">human-readable text that relates to the Values (aka embeddings)</param>
+    /// <param name="tags">metadata that can help identify and categorize content</param>
+    public Vector(float[]? values = null, string? originalText = null, short[]? tags = null)
     {
-        Values = values;
-        Id = Guid.NewGuid();
-        OriginalText = string.Empty;
-        Tags = Array.Empty<short>();
-    }
+        if (values == null && originalText == null)
+        {
+            throw new ArgumentException("Either values or originalText must be provided.");
+        }
 
-    /// <summary>
-    /// Initializes a new instance of the Vector class with the specified values and text.
-    /// </summary>
-    /// <param name="values">The array of float values representing the vector</param>
-    /// <param name="originalText"></param>
-    public Vector(float[] values, string originalText)
-    {
-        Values = values;
-        OriginalText = originalText;
-        Id = Guid.NewGuid();
-        Tags = new short[0];
+        if (values != null)
+        {
+            Values = values;
+            OriginalText = originalText ?? string.Empty;
+        }
+        else
+        {
+            Values = EmbeddingGenerator.Instance.GenerateEmbedding(originalText!);
+            OriginalText = originalText!;
+        }
 
-    }
-
-    /// <summary>
-    /// Generates the embedding for the specified text and initializes a new instance of the Vector class.
-    /// </summary>
-    /// <param name="originalText"></param>
-    public Vector(string originalText)
-    {
-        Values = EmbeddingGenerator.Instance.GenerateEmbedding(originalText);
-        OriginalText = originalText;
         Id = Guid.NewGuid();
-        Tags = new short[0];
+        
+        if (tags == null)
+            Tags = Array.Empty<short>();
+        else
+            Tags = tags;
     }
 
     public Vector(BinaryReader stream)
