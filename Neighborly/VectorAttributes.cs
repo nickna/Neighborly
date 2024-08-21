@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Neighborly;
 
-public struct VectorAttributes
+public struct VectorAttributes : IDataPersistence
 {
     public sbyte Priority { get; set; }
     public uint UserId { get; set; }
@@ -21,6 +21,13 @@ public struct VectorAttributes
         Priority = stream.ReadSByte();
         UserId = stream.ReadUInt32();
         OrgId = stream.ReadUInt32();
+    }
+
+    public void ToBinaryStream(BinaryWriter stream)
+    {
+        stream.Write(Priority);
+        stream.Write(UserId);
+        stream.Write(OrgId);
     }
 
     public byte[] ToBinary()
@@ -45,4 +52,5 @@ public struct VectorAttributes
 
         return result.ToArray();
     }
+
 }

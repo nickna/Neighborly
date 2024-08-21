@@ -1,4 +1,5 @@
-﻿using Serilog.Core;
+﻿using CsvHelper;
+using Serilog.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,17 +13,44 @@ namespace Neighborly
     /// Each tag is assigned a unique id (short) which can be used to identify the tag.
     /// The tags are case-insensitive and are stored in lower case.
     /// </summary>
-    public class VectorTags 
+    public class VectorTags : IDataPersistence
     {
         private Dictionary<short, string> _tags = new();
         private Dictionary<short, List<Guid>> _tagMap = new();
         private VectorList _vectorList;
+        private BinaryReader reader;
+
         public event EventHandler? Modified;
         private readonly SemaphoreSlim _rebuildTagsSemaphore = new(1, 1);
 
         public VectorTags(VectorList vectorList)
         {
             this._vectorList = vectorList;
+        }
+
+        public VectorTags(BinaryReader reader)
+        {
+            var count = reader.ReadInt32();
+            for (int x = 0; x < count; x++)
+            {
+                _tags.Add(reader.ReadInt16(), reader.ReadString());
+            }
+
+            count = reader.ReadInt32();
+            
+            for (int x = 0; x < count; x++)
+            {
+                var tagId = reader.ReadInt16();
+                var vectorCount = reader.ReadInt32();
+                for (int y = 0; y < vectorCount; y++)
+                {
+                    if (!_tagMap.ContainsKey(tagId))
+                    {
+                        _tagMap.Add(tagId, new List<Guid>());
+                    }
+                    _tagMap[tagId].Add(new Guid(reader.ReadBytes(16)));
+                }
+            }
         }
 
         public short GetId(string tag)
@@ -213,6 +241,27 @@ namespace Neighborly
         {
             Modified?.Invoke(this, EventArgs.Empty);
             throw new NotImplementedException();
+        }
+
+        public void ToBinaryStream(BinaryWriter writer)
+        {
+            writer.Write(_tags.Count);
+            foreach (var tag in _tags)
+            {
+                writer.Write(tag.Key);
+                writer.Write(tag.Value);
+            }
+
+            writer.Write(_tagMap.Count);
+            foreach (var tag in _tagMap)
+            {
+                writer.Write(tag.Key);
+                writer.Write(tag.Value.Count);
+                foreach (var vectorId in tag.Value)
+                {
+                    writer.Write(vectorId.ToByteArray());
+                }
+            }
         }
     }
 }
