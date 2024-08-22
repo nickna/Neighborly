@@ -7,7 +7,7 @@ namespace Neighborly;
 /// Core data structure for representing a vector of floats.
 /// </summary>
 [Serializable]
-public partial class Vector : IEquatable<Vector>
+public partial class Vector : IEquatable<Vector>, IDataPersistence
 {
     private const int s_idBytesLength = 16;
     private const int s_valuesLengthBytesLength = sizeof(int);
@@ -56,7 +56,7 @@ public partial class Vector : IEquatable<Vector>
     /// <param name="values">The array of float values representing the vector</param>
     /// <param name="originalText">human-readable text that relates to the Values (aka embeddings)</param>
     /// <param name="tags">metadata that can help identify and categorize content</param>
-    public Vector(float[]? values = null, string? originalText = null, short[]? tags = null)
+    public Vector(float[]? values = null, string? originalText = null, short[]? tags = null, VectorAttributes? vectorAttributes = null)
     {
         if (values == null && originalText == null)
         {
@@ -80,47 +80,34 @@ public partial class Vector : IEquatable<Vector>
             Tags = Array.Empty<short>();
         else
             Tags = tags;
+
+        Attributes = vectorAttributes ?? new VectorAttributes();
     }
 
     public Vector(BinaryReader stream)
     {
         // Read the Guid
-        byte[] idBytes = stream.ReadBytes(s_idBytesLength);
-        Guid id = new Guid(idBytes);
+        Id = new Guid(stream.ReadBytes(s_idBytesLength));
 
-        // Read the length of the values array
+        OriginalText = stream.ReadString();
+
+        // Read the Values array length, then create the values
         int valuesLength = stream.ReadInt32();
-
-        // Read the length of the original text
-        int originalTextLength = stream.ReadInt32();
-
-        // Read the original text
-        byte[] originalTextBytes = stream.ReadBytes(originalTextLength);
-        string originalText = Encoding.UTF8.GetString(originalTextBytes);
-
-        // Read the values
-        float[] values = new float[valuesLength];
+        Values = new float[valuesLength];
         for (int i = 0; i < valuesLength; i++)
         {
-            values[i] = stream.ReadSingle();
+            Values[i] = stream.ReadSingle();
         }
 
-        // Read the length of the tags array
-        int tagsLength = stream.ReadInt16();
-        short[] tags = new short[tagsLength];
+        // Read the tags array length, then create the tags
+        short tagsLength = stream.ReadInt16();
+        Tags = new short[tagsLength];
         for (int i = 0; i < tagsLength; i++)
         {
-            tags[i] = stream.ReadInt16();
+            Tags[i] = stream.ReadInt16();
         }
 
-        // Read the VectorAttributes
-        VectorAttributes attributes = new VectorAttributes(stream);
-
-        Tags = tags;
-        Id = id;
-        Values = values;
-        OriginalText = originalText;
-        Attributes = attributes;
+        Attributes = new VectorAttributes(stream);
     }
 
     public Vector(byte[] byteArray)
@@ -128,43 +115,11 @@ public partial class Vector : IEquatable<Vector>
     {
     }
 
-    public Vector(ReadOnlySpan<byte> source)
+    public Vector(ReadOnlySpan<byte> source) 
+        : this(new BinaryReader(new MemoryStream(source.ToArray())))
     {
-        var id = new Guid(source[..s_idBytesLength]);
-        var valuesLength = BitConverter.ToInt32(source[s_valuesLengthOffset..(s_valuesLengthOffset + s_valuesLengthBytesLength)]);
-        var originalTextBytesLength = BitConverter.ToInt32(source[s_originalTextLengthOffset..(s_originalTextLengthOffset + s_originalTextLengthBytesLength)]);
-
-        int valuesOffset = s_originalTextOffset + originalTextBytesLength;
-
-        var originalText = Encoding.UTF8.GetString(source[s_originalTextOffset..(s_originalTextOffset + originalTextBytesLength)]);
-        var values = new float[valuesLength];
-
-        var valuesBytesLength = valuesLength * sizeof(float);
-        var valuesSource = source[valuesOffset..(valuesOffset + valuesBytesLength)];
-        for (int i = 0; i < valuesLength; i++)
-        {
-            values[i] = BitConverter.ToSingle(valuesSource[(i * sizeof(float))..((i + 1) * sizeof(float))]);
-        }
-
-        int tagsLengthOffset = valuesOffset + valuesBytesLength;
-        int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
-        var tagsLength = BitConverter.ToInt16(source[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)]);
-        var tagsSource = source[tagsOffset..(tagsOffset + (tagsLength * sizeof(short)))];
-        var tags = new short[tagsLength];
-        for (int i = 0; i < tagsLength; i++)
-        {
-            tags[i] = BitConverter.ToInt16(tagsSource[(i * sizeof(short))..((i + 1) * sizeof(short))]);
-        }
-
-        int attributesOffset = tagsOffset + (tagsLength * sizeof(short));
-        var attributes = new VectorAttributes(new BinaryReader(new MemoryStream(source[attributesOffset..].ToArray())));
-
-        Id = id;
-        Values = values;
-        OriginalText = originalText;
-        Tags = tags;
-        Attributes = attributes;
     }
+    
 
     internal Vector(Guid id, float[] values, short[] tags, string? originalText)
     {
@@ -324,72 +279,10 @@ public partial class Vector : IEquatable<Vector>
     /// <seealso cref="Parse"/>"/>
     public byte[] ToBinary()
     {
-        byte[] attributesBytes = Attributes.ToBinary();
-        int attributesBytesLength = attributesBytes.Length;
-
-        int valuesBytesLength = Values.Length * sizeof(float);
-        int tagsBytesLength = Tags.Length * sizeof(short);
-        int originalTextBytesLength = Encoding.UTF8.GetByteCount(OriginalText);
-        int resultLength = s_idBytesLength + s_valuesLengthBytesLength + s_originalTextLengthBytesLength + originalTextBytesLength + valuesBytesLength + s_tagsLengthBytesLength + tagsBytesLength + attributesBytesLength;
-
-        int valuesOffset = s_originalTextOffset + originalTextBytesLength;
-        int tagsLengthOffset = valuesOffset + valuesBytesLength;
-        int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
-        int attributesOffset = tagsOffset + tagsBytesLength;
-
-        Span<byte> result = stackalloc byte[resultLength];
-        Span<byte> idBytes = result[..s_idBytesLength];
-        if (!Id.TryWriteBytes(idBytes))
-        {
-            throw new InvalidOperationException("Failed to write the Id to bytes");
-        }
-
-        Span<byte> valuesLengthBytes = result[s_valuesLengthOffset..(s_valuesLengthOffset + s_valuesLengthBytesLength)];
-        if (!BitConverter.TryWriteBytes(valuesLengthBytes, Values.Length))
-        {
-            throw new InvalidOperationException("Failed to write Values.Length to bytes");
-        }
-
-        Span<byte> tagsLengthBytes = result[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)];
-        if (!BitConverter.TryWriteBytes(tagsLengthBytes, (short)Tags.Length))
-        {
-            throw new InvalidOperationException("Failed to write Tags.Length to bytes");
-        }
-
-        Span<byte> originalTextLengthBytes = result[s_originalTextLengthOffset..(s_originalTextLengthOffset + s_originalTextLengthBytesLength)];
-        if (!BitConverter.TryWriteBytes(originalTextLengthBytes, originalTextBytesLength))
-        {
-            throw new InvalidOperationException("Failed to write originalTextBytesLength to bytes");
-        }
-
-        Span<byte> originalTextBytes = result[s_originalTextOffset..(s_originalTextOffset + originalTextBytesLength)];
-        if (!Encoding.UTF8.TryGetBytes(OriginalText, originalTextBytes, out int bytesWritten))
-        {
-            throw new InvalidOperationException("Failed to write OriginalText to bytes");
-        }
-
-        Span<byte> valuesBytes = result[valuesOffset..(valuesOffset + valuesBytesLength)];
-        for (int i = 0; i < Values.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(valuesBytes[(i * sizeof(float))..], Values[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
-
-        Span<byte> tagsBytes = result[tagsOffset..(tagsOffset + tagsBytesLength)];
-        for (int i = 0; i < Tags.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(tagsBytes[(i * sizeof(short))..], Tags[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
-
-        Span<byte> attributesBytesSpan = result[attributesOffset..(attributesOffset + attributesBytesLength)];
-        attributesBytes.CopyTo(attributesBytesSpan);
-
-        return result.ToArray();
+        var stream = new MemoryStream();
+        var writer = new BinaryWriter(stream);
+        this.ToBinaryStream(writer);
+        return stream.ToArray();
     }
 
     /// <inheritdoc/>
@@ -452,5 +345,28 @@ public partial class Vector : IEquatable<Vector>
         {
             throw new ArgumentException("Dimensions must match");
         }
+    }
+
+    public static IDataPersistence FromBinaryStream(BinaryReader reader)
+    {
+        throw new NotImplementedException();
+    }
+
+    public void ToBinaryStream(BinaryWriter writer)
+    {
+        writer.Write(Id.ToByteArray());
+        writer.Write(OriginalText);
+        writer.Write(Values.Length);
+        foreach (float value in Values)
+        {
+            writer.Write(value);
+        }
+        writer.Write((short)Tags.Length);
+        foreach (short tag in Tags)
+        {
+            writer.Write(tag);
+        }
+        Attributes.ToBinaryStream(writer);
+
     }
 }

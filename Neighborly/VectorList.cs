@@ -1,3 +1,4 @@
+using CsvHelper;
 using System.Collections;
 
 namespace Neighborly;
@@ -5,7 +6,7 @@ namespace Neighborly;
 /// <summary>
 /// List that stores items in memory up to a certain count, then spills over to disk.
 /// </summary>
-public class VectorList : IList<Vector>, IDisposable
+public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 {
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
@@ -24,6 +25,19 @@ public class VectorList : IList<Vector>, IDisposable
     {
         _tags = new VectorTags(this);
         // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
+        _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
+    }
+
+    public VectorList(BinaryReader reader)
+    {
+        int count = reader.ReadInt32();
+        for (int i = 0; i < count; i++)
+        {
+            Add(new Vector(reader));
+        }
+
+        _tags = new VectorTags(reader, this);
+
         _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 
@@ -302,5 +316,16 @@ public class VectorList : IList<Vector>, IDisposable
     {
         _memoryMappedList.Flush();
         return;
+    }
+
+    public void ToBinaryStream(BinaryWriter writer)
+    {
+        writer.Write(Count);
+        foreach (var vector in _memoryMappedList)
+        {
+            vector.ToBinaryStream(writer);
+        }
+
+        _tags.ToBinaryStream(writer);
     }
 }

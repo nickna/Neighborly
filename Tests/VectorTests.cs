@@ -45,7 +45,7 @@ public class VectorTests
     {
         // Arrange
         float[] floatArray = [1.0f, 2.1f, 3.2f, 4.5f, 5.7f];
-        Vector originalVector = new(floatArray, originalText);
+        Vector originalVector = new(values:floatArray, originalText: originalText);
 
         // Act
         byte[] binary = originalVector.ToBinary();

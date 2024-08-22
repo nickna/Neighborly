@@ -12,7 +12,7 @@ namespace Neighborly
     /// Each tag is assigned a unique id (short) which can be used to identify the tag.
     /// The tags are case-insensitive and are stored in lower case.
     /// </summary>
-    public class VectorTags 
+    public class VectorTags : IDataPersistence
     {
         private Dictionary<short, string> _tags = new();
         private Dictionary<short, List<Guid>> _tagMap = new();
@@ -25,6 +25,33 @@ namespace Neighborly
             this._vectorList = vectorList;
         }
 
+        public VectorTags(BinaryReader reader, VectorList vectorList)
+        {
+            this._vectorList = vectorList;
+
+            // Import the tags
+            int tagCount = reader.ReadInt32();
+            for (int i = 0; i < tagCount; i++)
+            {
+                short tagId = reader.ReadInt16();
+                string tag = reader.ReadString();
+                _tags.Add(tagId, tag);
+            }
+
+            // Import the tag map
+            int tagMapCount = reader.ReadInt32();
+            for (int i = 0; i < tagMapCount; i++)
+            {
+                short tagId = reader.ReadInt16();
+                int vectorCount = reader.ReadInt32();
+                List<Guid> vectorIds = new();
+                for (int j = 0; j < vectorCount; j++)
+                {
+                    vectorIds.Add(new Guid(reader.ReadBytes(16)));
+                }
+                _tagMap.Add(tagId, vectorIds);
+            }
+        }
         public short GetId(string tag)
         {
             var key = _tags.FirstOrDefault(pair => pair.Value == tag.Trim().ToLower()).Key;
@@ -112,21 +139,7 @@ namespace Neighborly
             }
         }
 
-        /// <summary>
-        /// Convert tags to binary data
-        /// </summary>
-        /// <returns></returns>
-        public byte[] ToBinary()
-        {
-            var bytes = new List<byte>();
-            foreach (var tag in _tags)
-            {
-                bytes.AddRange(BitConverter.GetBytes(tag.Key));
-                bytes.AddRange(BitConverter.GetBytes(tag.Value.Length));
-                bytes.AddRange(Encoding.UTF8.GetBytes(tag.Value));
-            }
-            return bytes.ToArray();
-        }
+
 
         /// <summary>
         /// Deserialize binary data to tags
@@ -213,6 +226,29 @@ namespace Neighborly
         {
             Modified?.Invoke(this, EventArgs.Empty);
             throw new NotImplementedException();
+        }
+
+        public void ToBinaryStream(BinaryWriter writer)
+        {
+            // Export the tags, starting with the number of tags
+            writer.Write(_tags.Count);
+            foreach (var tag in _tags)
+            {
+                writer.Write(tag.Key);
+                writer.Write(tag.Value);
+            }
+
+            // Export the tag map, starting with the number of tags
+            writer.Write(_tagMap.Count);
+            foreach (var tag in _tagMap)
+            {
+                writer.Write(tag.Key);
+                writer.Write(tag.Value.Count);
+                foreach (var vectorId in tag.Value)
+                {
+                    writer.Write(vectorId.ToByteArray()); // Convert Guid to byte array
+                }
+            }
         }
     }
 }

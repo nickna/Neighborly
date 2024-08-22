@@ -4,7 +4,7 @@ using System.Text;
 
 namespace Neighborly;
 
-public struct VectorAttributes
+public struct VectorAttributes : IEquatable<VectorAttributes>, IDataPersistence
 {
     public sbyte Priority { get; set; }
     public uint UserId { get; set; }
@@ -25,24 +25,21 @@ public struct VectorAttributes
 
     public byte[] ToBinary()
     {
-        int resultLength = s_priorityBytesLength + s_userIdBytesLength + s_orgIdBytesLength;
-        Span<byte> result = stackalloc byte[resultLength];
+        var stream = new MemoryStream();
+        var writer = new BinaryWriter(stream);
+        this.ToBinaryStream(writer);
+        return stream.ToArray();
+    }
 
-        Span<byte> priorityBytes = result[..s_priorityBytesLength];
-        priorityBytes[0] = (byte)Priority;
+    public void ToBinaryStream(BinaryWriter writer)
+    {
+        writer.Write(Priority);
+        writer.Write(UserId);
+        writer.Write(OrgId);
+    }
 
-        Span<byte> userIdBytes = result[s_priorityBytesLength..(s_priorityBytesLength + s_userIdBytesLength)];
-        if (!BitConverter.TryWriteBytes(userIdBytes, UserId))
-        {
-            throw new InvalidOperationException("Failed to write UserId to bytes");
-        }
-
-        Span<byte> orgIdBytes = result[(s_priorityBytesLength + s_userIdBytesLength)..];
-        if (!BitConverter.TryWriteBytes(orgIdBytes, OrgId))
-        {
-            throw new InvalidOperationException("Failed to write OrgId to bytes");
-        }
-
-        return result.ToArray();
+    public bool Equals(VectorAttributes other)
+    {
+        return Priority == other.Priority && UserId == other.UserId && OrgId == other.OrgId;
     }
 }
