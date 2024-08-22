@@ -18,7 +18,7 @@ public class KDTreeTests
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
         {
-            originalTree.ToBinaryStream(writer);
+            originalTree.Save(writer, vectors);
         }
 
         stream.Seek(0, SeekOrigin.Begin);

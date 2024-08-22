@@ -1,20 +1,20 @@
 ﻿namespace Neighborly.Search;
 
-public class BallTreeNode : IDataPersistence
+public class BallTreeNode 
 {
     public required Vector Center { get; set; }
     public double Radius { get; set; }
     public BallTreeNode? Left { get; set; }
     public BallTreeNode? Right { get; set; }
 
-    public void ToBinaryStream(BinaryWriter writer)
+    internal void WriteTo(BinaryWriter writer)
     {
         writer.Write(Center.Id.ToByteArray());
         writer.Write(Radius);
         writer.Write(Left != null);
-        Left?.ToBinaryStream(writer);
+        Left?.WriteTo(writer);
         writer.Write(Right != null);
-        Right?.ToBinaryStream(writer);
+        Right?.WriteTo(writer);
     }
 
     internal static BallTreeNode? ReadFrom(BinaryReader reader, VectorList vectors, VectorDatabase internalVectors, Span<byte> guidBuffer)
@@ -50,10 +50,5 @@ public class BallTreeNode : IDataPersistence
             other.Radius == Radius &&
             (other.Left == null && Left == null || other.Left?.Equals(Left) == true) &&
             (other.Right == null && Right == null || other.Right?.Equals(Right) == true);
-    }
-
-    public override int GetHashCode()
-    {
-        return HashCode.Combine(Center, Radius, Left, Right);
     }
 }

@@ -2,12 +2,11 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace Neighborly.Search
 {
-    public class SearchService : IDataPersistence
+    public class SearchService
     {
         /// <summary>
         /// The version of the database file format that this class writes.
@@ -244,36 +243,13 @@ namespace Neighborly.Search
             switch (method)
             {
                 case SearchAlgorithm.KDTree:
-                    _kdTree.ToBinaryStream(writer);
+                    _kdTree.Save(writer, _vectors);
                     break;
                 case SearchAlgorithm.BallTree:
                     await _ballTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
                     break;
                 default:
                     throw new InvalidOperationException("Unsupported search method");
-            }
-        }
-
-        public void ToBinaryStream(BinaryWriter writer)
-        {
-            writer.Write(s_currentFileVersion);
-
-            // Count how many indexes we actually have
-            int actualIndexCount = 0;
-            if (_kdTree != null) actualIndexCount++;
-            if (_ballTree != null) actualIndexCount++;
-
-            writer.Write(actualIndexCount); // Write the actual number of indexes
-            writer.Write(_kdTree != null);
-            if (_kdTree != null)
-            {
-                ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken: default).Wait();
-            }
-
-            writer.Write(_ballTree != null);
-            if (_ballTree != null)
-            {
-                ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken: default).Wait();
             }
         }
     }

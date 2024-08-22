@@ -60,7 +60,7 @@ if (!gRPCEnable && !RESTEnable)
 // Load Database on application start
 await vectorDatabase.LoadAsync(databasePath);
 
-// ToBinaryStream Database on application shutdown
+// Save Database on application shutdown
 lifetime.ApplicationStopping.Register(async () =>
 {
     if (!string.IsNullOrEmpty(databasePath))

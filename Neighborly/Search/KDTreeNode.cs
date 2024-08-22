@@ -1,18 +1,18 @@
 ﻿namespace Neighborly.Search;
 
-public class KDTreeNode : IDataPersistence
+public class KDTreeNode
 {
     public required Vector Vector { get; set; }
     public KDTreeNode? Left { get; set; }
     public KDTreeNode? Right { get; set; }
 
-    public void ToBinaryStream(BinaryWriter writer)
+    internal void WriteTo(BinaryWriter writer)
     {
         writer.Write(Vector.Id.ToByteArray());
         writer.Write(Left != null);
-        Left?.ToBinaryStream(writer);
+        Left?.WriteTo(writer);
         writer.Write(Right != null);
-        Right?.ToBinaryStream(writer);
+        Right?.WriteTo(writer);
     }
 
     internal static KDTreeNode? ReadFrom(BinaryReader reader, VectorList vectors, Span<byte> guidBuffer)
@@ -46,10 +46,4 @@ public class KDTreeNode : IDataPersistence
             (other.Left == null && Left == null || other.Left?.Equals(Left) == true) &&
             (other.Right == null && Right == null || other.Right?.Equals(Right) == true);
     }
-
-    public override int GetHashCode()
-    {
-        return HashCode.Combine(Vector, Left, Right);
-    }
-
 }
