@@ -214,5 +214,10 @@ public class BallTree
             }
         }
     }
+
+    public override int GetHashCode()
+    {
+        return root?.GetHashCode() ?? 0;
+    }
 }
 

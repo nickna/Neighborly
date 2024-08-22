@@ -46,4 +46,9 @@ public class KDTreeNode
             (other.Left == null && Left == null || other.Left?.Equals(Left) == true) &&
             (other.Right == null && Right == null || other.Right?.Equals(Right) == true);
     }
+
+    public override int GetHashCode()
+    {
+        return HashCode.Combine(Vector, Left, Right);
+    }
 }
