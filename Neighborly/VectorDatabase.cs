@@ -427,7 +427,7 @@ public partial class VectorDatabase : IDisposable
         // Get the current directory
         string currentDirectory = Directory.GetCurrentDirectory();
 
-        // Call the existing Save searchMethod with the current directory
+        // Call the existing ToBinaryStream searchMethod with the current directory
         await SaveAsync(currentDirectory, cancellationToken);
     }
 
@@ -471,7 +471,7 @@ public partial class VectorDatabase : IDisposable
         try
         {
             _rwLock.EnterWriteLock();
-            // Save the vectors to a binary file
+            // ToBinaryStream the vectors to a binary file
             using var outputStream = new FileStream(filePath, FileMode.Create);
             // TODO -- Experiment with other compression types. For now, GZip works.
             using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))

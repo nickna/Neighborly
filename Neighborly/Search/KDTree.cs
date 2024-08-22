@@ -7,7 +7,7 @@ namespace Neighborly.Search;
 /// <summary>
 /// K-D Tree search (see Wikipedia: https://en.wikipedia.org/wiki/K-d_tree)
 /// </summary>
-public class KDTree
+public class KDTree : IDataPersistence
 {
     /// <summary>
     /// The version of the database file format that this class writes.
@@ -42,19 +42,19 @@ public class KDTree
         }
 
         root = null;
-        Span<byte> guidBuffer = stackalloc byte[16];
-        // Read the tree starting at the root node
-        root = KDTreeNode.ReadFrom(reader, vectors, guidBuffer);
+        if (reader.ReadBoolean())
+        {
+            Span<byte> guidBuffer = stackalloc byte[16];
+            // Read the tree starting at the root node
+            root = KDTreeNode.ReadFrom(reader, vectors, guidBuffer);
+        }
     }
 
-    public void Save(BinaryWriter writer, VectorList vectors)
+    public void ToBinaryStream(BinaryWriter writer)
     {
-        ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(vectors);
-
         writer.Write(s_currentFileVersion); // Write the version number
-
-        root?.WriteTo(writer);
+        writer.Write(root != null);
+        root?.ToBinaryStream(writer);
     }
 
     private KDTreeNode? Build(IList<Vector> vectors, int depth)

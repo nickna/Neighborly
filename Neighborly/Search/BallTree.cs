@@ -1,6 +1,6 @@
 namespace Neighborly.Search;
 
-public class BallTree
+public class BallTree : IDataPersistence
 {
 
     /// <summary>
@@ -74,7 +74,7 @@ public class BallTree
         using var internalVectors = BuildInternalVectors(root);
         await internalVectors.WriteToAsync(writer, false, cancellationToken).ConfigureAwait(false);
 
-        root?.WriteTo(writer);
+        root?.ToBinaryStream(writer);
     }
 
     private static VectorDatabase BuildInternalVectors(BallTreeNode? node)
@@ -195,6 +195,11 @@ public class BallTree
         }
 
         return Equals(root, other.root);
+    }
+
+    public void ToBinaryStream(BinaryWriter writer)
+    {
+        throw new NotImplementedException();
     }
 
     private sealed class CappedDistanceSortedList(int k) : List<(float distance, Vector vector)>(k + 1)
