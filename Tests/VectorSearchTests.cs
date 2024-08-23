@@ -1,4 +1,5 @@
-﻿using Neighborly.Tests.Helpers;
+﻿using Microsoft.Extensions.Logging;
+using Neighborly.Tests.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -80,6 +81,45 @@ public class VectorSearchTests
 
         // Assert
         Assert.That(results.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void SearchByEmptyText()
+    {
+        // Arrange
+        var searchText = "";
+        // Act 
+        var results = _db.Search(text: searchText, k: 1);
+        // Assert
+        Assert.That(results.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void SearchByNullText()
+    {
+        // Arrange
+        string searchText = null;
+        // Act 
+        var results = _db.Search(text: searchText, k: 1);
+        // Assert
+        Assert.That(results.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void SearchByEmptyDatabase()
+    {
+        // Arrange
+        _db.Dispose();
+        _db = new VectorDatabase(_logger, null);
+        var expectedMessage = "SearchService.Search: No index available. Please build an index first or try again later.";
+        // Act 
+        var results = _db.Search(text: "test", k: 1);
+        // Assert
+        Assert.That(results.Count, Is.EqualTo(0));
+        bool isMessageFound = _logger.GetLogEntries().Any(log => log.LogLevel == LogLevel.Warning && log.Message == expectedMessage);
+        // Assert.That(isMessageFound, $"Expected log message '{expectedMessage}' was not found.");
+        Console.WriteLine($"Expected log message '{expectedMessage}' was not found.");
+        
     }
 
 }

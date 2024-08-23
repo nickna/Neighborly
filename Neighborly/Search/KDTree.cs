@@ -16,6 +16,14 @@ public class KDTree
 
     private KDTreeNode? root;
 
+    public bool IsEmpty
+    {
+        get
+        {
+            return root == null || root.Vector == null;
+        }
+    }
+
     public void Build(VectorList vectors)
     {
         if (vectors == null)

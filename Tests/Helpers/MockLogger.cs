@@ -1,6 +1,7 @@
 namespace Neighborly.Tests.Helpers;
 
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 internal sealed class MockLogger<TCategoryName> : ILogger<TCategoryName>
 {
@@ -9,6 +10,8 @@ internal sealed class MockLogger<TCategoryName> : ILogger<TCategoryName>
     public object? LastState { get; private set; }
     public Exception? LastException { get; private set; }
     public string? LastMessage { get; private set; }
+
+    private readonly List<(LogLevel LogLevel, EventId EventId, object State, Exception? Exception, string Message)> _logEntries = new();
 
     public IDisposable? BeginScope<TState>(TState? state) where TState : notnull => null;
 
@@ -21,5 +24,9 @@ internal sealed class MockLogger<TCategoryName> : ILogger<TCategoryName>
         LastState = state;
         LastException = exception;
         LastMessage = formatter(state, exception);
+
+        _logEntries.Add((logLevel, eventId, state, exception, LastMessage));
     }
+
+    public IEnumerable<(LogLevel LogLevel, EventId EventId, object State, Exception? Exception, string Message)> GetLogEntries() => _logEntries;
 }

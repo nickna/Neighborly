@@ -10,6 +10,14 @@ public class BallTree
 
     private BallTreeNode? root;
 
+    public bool IsEmpty
+    {
+        get
+        {
+            return root == null || (root.Left == null && root.Right == null);
+        }
+    }
+
     public void Build(VectorList vectors)
     {
         if (vectors.Count == 0)
