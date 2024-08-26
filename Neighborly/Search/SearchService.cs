@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.Design;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -13,7 +14,8 @@ namespace Neighborly.Search
         /// </summary>
         private const int s_currentFileVersion = 1;
         private const int s_numberOfStorableIndexes = 2;
-        private readonly SemaphoreSlim _loadsaveSemaphore = new(1, 1);
+        private const int _defaultLockTimeout = 5000;
+        private readonly SemaphoreSlim _loadSaveSemaphore = new(1, 1);
         private readonly SemaphoreSlim _rebuildSemaphore = new(1, 1);
 
         private readonly VectorList _vectors;
@@ -142,34 +144,52 @@ namespace Neighborly.Search
             {
                 throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
             }
-
-            IList<Vector> results;
-            switch (method)
+            
+            if (_rebuildSemaphore.Wait(millisecondsTimeout: _defaultLockTimeout))
             {
-                case SearchAlgorithm.KDTree:
-                    results = _kdTree.NearestNeighbors(query, k);
-                    break;
-                case SearchAlgorithm.BallTree:
-                    results = _ballTree.Search(query, k);
-                    break;
-                case SearchAlgorithm.Linear:
-                    results = LinearSearch.Search(_vectors, query, k);
-                    break;
-                case SearchAlgorithm.LSH:
-                    results = LSHSearch.Search(_vectors, query, k);
-                    break;
-                default:
-                    return [];  // Other SearchMethods do not support search
+                IList<Vector> results;
+                try
+                {
+                    switch (method)
+                    {
+                        case SearchAlgorithm.KDTree:
+                            results = _kdTree.NearestNeighbors(query, k);
+                            break;
+                        case SearchAlgorithm.BallTree:
+                            results = _ballTree.Search(query, k);
+                            break;
+                        case SearchAlgorithm.Linear:
+                            results = LinearSearch.Search(_vectors, query, k);
+                            break;
+                        case SearchAlgorithm.LSH:
+                            results = LSHSearch.Search(_vectors, query, k);
+                            break;
+                        default:
+                            return [];  // Other SearchMethods do not support search
+                    }
+                }
+                finally
+                {
+                    _rebuildSemaphore.Release();
+                }
+
+                // Apply similarity threshold
+                return results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
+            }
+            else
+            {
+                // Timeout waiting for the rebuild semaphore
+                return [];
+
             }
 
-            // Apply similarity threshold
-            return results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
+            
         }
 
         public async Task LoadAsync(BinaryReader reader, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(reader);
-            await _loadsaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
+            await _loadSaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
             try
             {
                 var version = reader.ReadInt32(); // Read the version number
@@ -198,14 +218,14 @@ namespace Neighborly.Search
             }
             finally
             {
-                _loadsaveSemaphore.Release();
+                _loadSaveSemaphore.Release();
             }
         }
 
         public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(writer);
-            await _loadsaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
+            await _loadSaveSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false); // Enforce singleton access to LoadAsync and SaveAsync
 
             try
             {
@@ -232,7 +252,7 @@ namespace Neighborly.Search
             }
             finally
             {
-                _loadsaveSemaphore.Release();
+                _loadSaveSemaphore.Release();
             }
         }
 
