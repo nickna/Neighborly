@@ -6,12 +6,18 @@ using System.Runtime.InteropServices;
 
 namespace Neighborly;
 
+/// <summary>
+/// Represents a list of vectors stored in memory-mapped files.
+/// </summary>
 public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 {
+    // Constants for the lengths of various parts of the index entry
     private const int s_idBytesLength = 16;
     private const int s_offsetBytesLength = sizeof(long);
     private const int s_lengthBytesLength = sizeof(int);
     private const int s_indexEntryByteLength = s_idBytesLength + s_offsetBytesLength + s_lengthBytesLength;
+
+    // Static readonly fields for tombstone values
     private static readonly Guid s_tombStone;
     private static readonly byte[] s_tombStoneBytes;
     private readonly MemoryMappedFileHolder _indexFile;
@@ -60,9 +66,18 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         s_tombStoneBytes = tombStoneBytes.ToArray();
     }
 
+    /// <summary>
+    /// Initializes a new instance of the MemoryMappedList class with the specified capacity.
+    /// </summary>
+    /// <param name="capacity">The maximum number of items in the list.</param>
     public MemoryMappedList(long capacity)
     {
+        // Here, we are estimating the maximum file size based ont he number of entries.
+        // The underlying file is marked as sparse, so it will only take up the actual space used.
+
+        // The index file is estimated to be 32 bytes per entry, and the data file is estimated to be 4096 bytes per entry.
         _indexFile = new(s_indexEntryByteLength * capacity);
+
         // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
         _dataFile = new(4096L * capacity);
     }
@@ -339,7 +354,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <summary>
     /// Calculate the fragmentation of the data file
     /// </summary>
-    /// <returns></returns>
+    /// <returns>Fragmentation range (0-100)</returns>
     /// <exception cref="InvalidOperationException"></exception>
     public long CalculateFragmentation()
     {
@@ -468,6 +483,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <summary>
     /// Defragments the data file in batches, to avoid blocking I/O for long periods
     /// </summary>
+    /// <seealso cref="CalculateFragmentation"/>
+    /// <seealso cref="_defragBatchSize"/>    
     /// <exception cref="InvalidOperationException"></exception>
     public long DefragBatch()
     {
@@ -615,50 +632,42 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public IEnumerator<Vector> GetEnumerator()
     {
-        //_rwLock.EnterReadLock();
-        try
-        {
-            _isAtEndOfIndexStream = false;
-            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-            _dataFile.Stream.Seek(0, SeekOrigin.Begin);
+        _isAtEndOfIndexStream = false;
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+        _dataFile.Stream.Seek(0, SeekOrigin.Begin);
 
-            byte[] entry = new byte[s_indexEntryByteLength];
-            int bytesRead;
-            while ((bytesRead = _indexFile.Stream.Read(entry, 0, entry.Length)) > 0)
+        byte[] entry = new byte[s_indexEntryByteLength];
+        int bytesRead;
+        while ((bytesRead = _indexFile.Stream.Read(entry, 0, entry.Length)) > 0)
+        {
+            if (bytesRead != s_indexEntryByteLength)
             {
-                if (bytesRead != s_indexEntryByteLength)
-                {
-                    throw new InvalidOperationException("Failed to read the index entry");
-                }
-
-                var entrySpan = entry.AsSpan();
-                Guid id = new(entrySpan[..s_idBytesLength]);
-                if (id.Equals(s_tombStone))
-                {
-                    continue;
-                }
-
-                if (id.Equals(Guid.Empty))
-                {
-                    _isAtEndOfIndexStream = true;
-                    ReverseIndexStreamByIdBytesLength();
-                    break;
-                }
-
-                Span<byte> offsetBytes = entrySpan[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-                Span<byte> lengthBytes = entrySpan[(s_idBytesLength + s_offsetBytesLength)..];
-                long offset = BitConverter.ToInt64(offsetBytes);
-                int length = BitConverter.ToInt32(lengthBytes);
-
-                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-                Span<byte> bytes = stackalloc byte[length];
-                _dataFile.Stream.ReadExactly(bytes);
-                yield return new Vector(bytes);
+                throw new InvalidOperationException("Failed to read the index entry");
             }
-        }
-        finally
-        {
-            //_rwLock.ExitReadLock();
+
+            var entrySpan = entry.AsSpan();
+            Guid id = new(entrySpan[..s_idBytesLength]);
+            if (id.Equals(s_tombStone))
+            {
+                continue;
+            }
+
+            if (id.Equals(Guid.Empty))
+            {
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
+                break;
+            }
+
+            Span<byte> offsetBytes = entrySpan[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+            Span<byte> lengthBytes = entrySpan[(s_idBytesLength + s_offsetBytesLength)..];
+            long offset = BitConverter.ToInt64(offsetBytes);
+            int length = BitConverter.ToInt32(lengthBytes);
+
+            _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+            Span<byte> bytes = stackalloc byte[length];
+            _dataFile.Stream.ReadExactly(bytes);
+            yield return new Vector(bytes);
         }
     }
 

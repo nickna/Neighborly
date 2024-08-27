@@ -8,8 +8,12 @@ using System.Threading.Tasks;
 
 namespace Neighborly;
 
+/// <summary>
+/// Provides services for working with memory-mapped files, including creating sparse files and retrieving file information.
+/// </summary>
 internal static class MemoryMappedFileServices
 {
+    // P/Invoke declaration for CreateFile function from kernel32.dll
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern SafeFileHandle CreateFile(
     string lpFileName,
@@ -20,6 +24,7 @@ internal static class MemoryMappedFileServices
         [MarshalAs(UnmanagedType.U4)] FileAttributes dwFlagsAndAttributes,
         IntPtr hTemplateFile);
 
+    // P/Invoke declaration for DeviceIoControl function from kernel32.dll
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool DeviceIoControl(
         SafeFileHandle hDevice,
@@ -31,6 +36,7 @@ internal static class MemoryMappedFileServices
         out uint lpBytesReturned,
         IntPtr lpOverlapped);
 
+    // Control code for setting a file as sparse
     const uint FSCTL_SET_SPARSE = 0x900C4;
 
     // Win32 P/Invoke declarations
@@ -43,6 +49,7 @@ internal static class MemoryMappedFileServices
     [DllImport("libc", EntryPoint = "stat", SetLastError = true)]
     private static extern int stat(string path, out StatBuffer statbuf);
 
+    // Struct for holding file statistics (Linux and FreeBSD)
     [StructLayout(LayoutKind.Sequential)]
     private struct StatBuffer
     {
@@ -65,11 +72,11 @@ internal static class MemoryMappedFileServices
     }
 
     /// <summary>
-    /// On Windows this function sets the sparse file attribute on the file at the given path.
+    /// On Windows, this function sets the sparse file attribute on the file at the given path.
     /// Call this function before opening the file with a MemoryMappedFile.
     /// </summary>
-    /// <param name="path"></param>
-    /// <exception cref="System.ComponentModel.Win32Exception"></exception>
+    /// <param name="path">The path of the file to set as sparse.</param>
+    /// <exception cref="System.ComponentModel.Win32Exception">Thrown when a Win32 error occurs.</exception>
     internal static void WinFileAlloc(string path)
     {
         // Only run this function on Windows
@@ -116,11 +123,14 @@ internal static class MemoryMappedFileServices
     /// <summary>
     /// Returns the actual disk space used by the Index and Data files.
     /// </summary>
+    /// <param name="indexFile">The memory-mapped file holder for the index file.</param>
+    /// <param name="dataFile">The memory-mapped file holder for the data file.</param>
     /// <returns>
-    /// [0] = bytes allocated for Index file
-    /// [1] = total (sparce) capacity of Index file
-    /// [2] = bytes allocated for Data file
-    /// [3] = total (sparce) capacity of Data file
+    /// An array containing:
+    /// [0] = bytes allocated for Index file,
+    /// [1] = total (sparse) capacity of Index file,
+    /// [2] = bytes allocated for Data file,
+    /// [3] = total (sparse) capacity of Data file.
     /// </returns>
     /// <seealso cref="ForceFlush"/>
     internal static long[] GetFileInfo(MemoryMappedFileHolder indexFile, MemoryMappedFileHolder dataFile)
@@ -134,6 +144,14 @@ internal static class MemoryMappedFileServices
         fileInfo[3] = dataFile.Capacity;
         return fileInfo;
     }
+
+    /// <summary>
+    /// Gets the actual disk space used by a file.
+    /// </summary>
+    /// <param name="fileName">The name of the file.</param>
+    /// <returns>The actual disk space used by the file in bytes.</returns>
+    /// <exception cref="System.ComponentModel.Win32Exception">Thrown when a Win32 error occurs.</exception>
+    /// <exception cref="PlatformNotSupportedException">Thrown when the operating system is not supported.</exception>
     internal static long GetActualDiskSpaceUsed(string fileName)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
