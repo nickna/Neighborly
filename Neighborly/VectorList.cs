@@ -10,7 +10,7 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 {
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
-    private readonly MemoryMappedList _memoryMappedList = new(int.MaxValue);
+    private readonly MemoryMappedList _memoryMappedList = new(Int16.MaxValue);
     private bool _disposed = false;
 
     /// <summary>
