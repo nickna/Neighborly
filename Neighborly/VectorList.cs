@@ -10,7 +10,7 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 {
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
-    private readonly MemoryMappedList _memoryMappedList = new(Int16.MaxValue);
+    private readonly MemoryMappedList _memoryMappedList;
     private bool _disposed = false;
 
     /// <summary>
@@ -18,18 +18,12 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
     /// </summary>
     public event EventHandler? Modified;
 
-    /// <summary>
-    /// Creates a new instance of DiskBackedList with a maximum in-memory count based on system memory.
-    /// </summary>
-    public VectorList()
-    {
-        _tags = new VectorTags(this);
-        // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
-        _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
-    }
+
 
     public VectorList(BinaryReader reader)
     {
+        _memoryMappedList = new(capacity: Int16.MaxValue);
+        
         int count = reader.ReadInt32();
         for (int i = 0; i < count; i++)
         {
@@ -38,6 +32,21 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 
         _tags = new VectorTags(reader, this);
 
+        // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
+        _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
+    }
+
+    public VectorList(string? basePath = null, string? dbTitle = null, FileMode fileMode = FileMode.OpenOrCreate)
+    {       
+        _memoryMappedList = new MemoryMappedList(
+            capacity: Int16.MaxValue, 
+            baseFilePath: basePath,
+            fileTitle: dbTitle, 
+            fileMode: fileMode);
+
+        _tags = new VectorTags(this);
+
+        // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
         _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 

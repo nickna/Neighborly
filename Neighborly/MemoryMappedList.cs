@@ -35,7 +35,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private long _newDataPosition;
     private const int _defragBatchSize = 100; // Number of entries to defrag in one batch, adjust based on performance needs
 
-  
+    private string _basePath;
+    private string _dbTitle;
+    private FileMode _fileMode;
+
     /// <summary>
     /// Flush the memory-mapped files to disk
     /// </summary>
@@ -70,16 +73,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// Initializes a new instance of the MemoryMappedList class with the specified capacity.
     /// </summary>
     /// <param name="capacity">The maximum number of items in the list.</param>
-    public MemoryMappedList(long capacity)
+    public MemoryMappedList(long capacity, string? baseFilePath = null, string? fileTitle = null, FileMode fileMode = FileMode.OpenOrCreate)
     {
+        if (capacity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than 0");
+        }
+
+        _dbTitle = MemoryMappedFileServices.CreateDbTitle(_dbTitle);
+        _basePath = MemoryMappedFileServices.CreateBasePath(_basePath);
+        long _capacity = MemoryMappedFileServices.CreateCapacity(capacity);
+
         // Here, we are estimating the maximum file size based ont he number of entries.
         // The underlying file is marked as sparse, so it will only take up the actual space used.
 
         // The index file is estimated to be 32 bytes per entry, and the data file is estimated to be 4096 bytes per entry.
-        _indexFile = new(s_indexEntryByteLength * capacity);
+        _indexFile = new(s_indexEntryByteLength * _capacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Index), fileMode: fileMode);
 
         // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
-        _dataFile = new(4096L * capacity);
+        _dataFile = new(4096L * _capacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Data), fileMode: fileMode);
     }
 
 
@@ -581,7 +593,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             // Detecting the end of defragmentation
             if (newIndexPosition >= _count)
             {
-                // Reset state variables for the next defragmentation cycle
+                // Start state variables for the next defragmentation cycle
                 _defragIndexPosition = 0;
                 _newDataPosition = 0;
                 return 0; // Defragmentation complete
@@ -602,9 +614,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _rwLock.EnterWriteLock();
         try
         {
-            _indexFile.DisposeStreams();
+            //_indexFile.DisposeStreams();
             _indexFile.Reset();
-            _dataFile.DisposeStreams();
+            //_dataFile.DisposeStreams();
             _dataFile.Reset();
             _count = 0;
         }

@@ -3,6 +3,7 @@ using Neighborly.ETL;
 using Neighborly.Search;
 using System.Diagnostics;
 using System.IO.Compression;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
 using static System.Net.Mime.MediaTypeNames;
 
@@ -33,6 +34,9 @@ public partial class VectorDatabase : IDisposable
     private Thread indexService;
     private CancellationTokenSource _indexServiceCancellationTokenSource;
 
+    private readonly string filePath;
+    private readonly string dbTitle;
+    private readonly FileMode fileMode;
 
     /// <summary>
     /// Last time the database was modified. This is updated when a vector is added or removed.
@@ -64,6 +68,11 @@ public partial class VectorDatabase : IDisposable
     /// </summary>
     private bool _hasOutdatedIndex = false;
 
+    /// <summary>
+    /// In the Dispose method, _disposedValue is checked to determine if the object has already been disposed. 
+    /// If it has not, the method proceeds to release resources and then sets _disposedValue to true to indicate that disposal has occurred.
+    /// </summary>
+    /// <seealso cref="Dispose(bool)"/>
     private bool _disposedValue;
 
     /// <summary>
@@ -76,28 +85,6 @@ public partial class VectorDatabase : IDisposable
         _lastModification = DateTime.UtcNow;
         _hasUnsavedChanges = true;
         _hasOutdatedIndex = true;
-    }
-
-    /// <summary>
-    /// Passes in details about how to generate embeddings.
-    /// </summary>
-    /// <seealso cref="EmbeddingGenerationInfo"/>
-    public void SetEmbeddingGenerationInfo(EmbeddingGenerationInfo embeddingGeneratorInfo)
-    {
-        ArgumentNullException.ThrowIfNull(embeddingGeneratorInfo);
-        _searchService.EmbeddingGenerator = new EmbeddingGenerator(embeddingGeneratorInfo);
-
-    }
-
-    /// <summary>
-    /// Generates a Vector class from text.
-    /// </summary>
-    /// <param name="originalText"></param>
-    /// <returns></returns>
-    public Vector GenerateVector(string originalText)
-    {
-        float[] embedding = _searchService.EmbeddingGenerator.GenerateEmbedding(originalText);
-        return new Vector(embedding, originalText);
     }
 
     /// <summary>
@@ -174,8 +161,11 @@ public partial class VectorDatabase : IDisposable
     /// </summary>
     /// <param name="logger">The logger to be used for logging.</param>
     /// <param name="instrumentation">The instrumentation to be used for metrics and tracing.</param>
+    /// <param name="dbTitle">The title of the database.</param>
+    /// <param name="fileMode">The file mode to be used for the database files.</param>
+    /// <param name="filePath">The file path to be used for the database files.</param>
     /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
-    public VectorDatabase(ILogger<VectorDatabase> logger, Instrumentation? instrumentation)
+    public VectorDatabase(ILogger<VectorDatabase> logger, Instrumentation? instrumentation = null, FileMode fileMode = FileMode.OpenOrCreate, string? filePath = null, string? dbTitle = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
@@ -198,8 +188,28 @@ public partial class VectorDatabase : IDisposable
 
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
-        _searchService = new Search.SearchService(_vectors);
-        StartIndexService();
+
+        this.filePath = String.IsNullOrEmpty(filePath) ? Directory.GetCurrentDirectory() : filePath;
+        this.dbTitle = MemoryMappedFileServices.CreateDbTitle(dbTitle);
+        this.fileMode = fileMode;
+
+        StartVectorList(newInstance: true);
+        StartIndexes(newInstance:true);
+        
+    }
+
+    private void StartVectorList(bool newInstance)
+    {
+        if (newInstance)
+        {
+            _vectors.Clear();
+            
+        }
+        else
+        {
+            //var x = new MemoryMappedList(_vectors, filePath, _dbTitle, _fileMode);
+            
+        }
     }
 
     #endregion
@@ -324,11 +334,14 @@ public partial class VectorDatabase : IDisposable
         return Task.FromResult((vectorCount, true));
     }
 
-    private void StartIndexService()
+    private void StartIndexes(bool newInstance = true)
     {
         // The index service is not supported on mobile platforms
         if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
             return;
+
+        if (newInstance)
+            _searchService = new Search.SearchService(_vectors);
 
         _indexServiceCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _indexServiceCancellationTokenSource.Token;
@@ -370,7 +383,7 @@ public partial class VectorDatabase : IDisposable
         indexService.Start();
     }
 
-    private void StopIndexService()
+    private void DisposeIndexes()
     {
         if (indexService != null && indexService.IsAlive)
         {
@@ -601,7 +614,7 @@ public partial class VectorDatabase : IDisposable
             if (disposing)
             {
                 _logger.LogInformation("Shutting down VectorDatabase.");
-                StopIndexService();
+                DisposeIndexes();
                 _searchService = null;
                 _rwLock.Dispose();
                 _vectors.Modified -= VectorList_Modified;

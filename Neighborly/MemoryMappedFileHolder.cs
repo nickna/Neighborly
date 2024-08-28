@@ -1,4 +1,6 @@
-﻿using System;
+﻿using Parquet.Schema;
+using Serilog.Core;
+using System;
 using System.Collections.Generic;
 using System.IO.MemoryMappedFiles;
 using System.Linq;
@@ -17,6 +19,8 @@ internal class MemoryMappedFileHolder : IDisposable
     private MemoryMappedViewStream _stream;
     private bool _disposedValue;
     private string _fileName;
+
+    public bool SaveOnDispose { get; set; } = true;
 
     /// <summary>
     /// Gets the name of the temporary file backing the memory-mapped file.
@@ -38,13 +42,13 @@ internal class MemoryMappedFileHolder : IDisposable
     /// Initializes a new instance of the <see cref="MemoryMappedFileHolder"/> class with the specified capacityInBytes.
     /// </summary>
     /// <param name="capacityInBytes">The capacityInBytes (in bytes) of the memory-mapped file.</param>
-#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Reset()
-    public MemoryMappedFileHolder(long capacityInBytes)
-#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Reset()
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Start()
+    public MemoryMappedFileHolder(long capacityInBytes, string? fileName = null, FileMode fileMode = FileMode.OpenOrCreate )
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable. - Done by a call to Start()
     {
         _capacity = capacityInBytes;
 
-        Reset();
+        Start(fileName);
     }
 
     /// <summary>
@@ -52,12 +56,47 @@ internal class MemoryMappedFileHolder : IDisposable
     /// </summary>
     public MemoryMappedViewStream Stream => _stream;
 
+    public void Reset()
+    {
+        Logging.Logger.Information("Resetting memory-mapped file: {FileName}", _fileName);
+        DisposeStreams();
+        Start(_fileName, fileMode: FileMode.CreateNew);
+    }
+
     /// <summary>
     /// Resets the memory-mapped file, creating a new temporary file and stream.
     /// </summary>
-    public void Reset()
+    /// <param name="fileName">The name of the temporary file to create. If null or empty, a new temporary file is created.</param>
+    /// <param name="fileMode">The file mode to use when creating the file.</param>
+    public void Start(string? fileName = null, FileMode fileMode = FileMode.OpenOrCreate)
     {
-        _fileName = Path.GetTempFileName();
+        // Create a temporary file if a filename was not specified
+        _fileName = string.IsNullOrEmpty(fileName) ? Path.GetTempFileName() : fileName;
+        
+        bool _fileExists = File.Exists(_fileName);  // Check if the file exists;
+                                                    // this will be true if the file was created by Path.GetTempFileName()
+                                                    // this should also be true if the file was previously created by this class
+
+        if (_fileExists && // If the file exists and we are creating a new file, delete the existing file
+            ( fileMode == FileMode.Create || fileMode == FileMode.CreateNew) )
+        {
+            File.Delete(_fileName);
+            Logging.Logger.Information("Deleted, recreating file: {FileName}", _fileName);
+        }
+        else if (_fileExists && fileMode == FileMode.OpenOrCreate)
+        {
+            // If the file exists and we are opening it, do nothing
+            Logging.Logger.Information("Using existing file: {FileName}", _fileName);
+        }
+        else if (!_fileExists && fileMode == FileMode.OpenOrCreate)
+        {
+            // If the file does not exist and we are opening it, create it
+            // Create the file
+            File.Create(_fileName).Dispose();
+            Logging.Logger.Information("Created new file: {FileName}", _fileName);
+            Thread.Sleep(500);  // Wait for the file to be created. This is necessary because the file may not be immediately available
+                                // TODO: Find a better way to handle this
+        }
         MemoryMappedFileServices.WinFileAlloc(_fileName);
         double capacityTiB = _capacity / (1024.0 * 1024.0 * 1024.0 * 1024.0);
         Logging.Logger.Information("Creating temporary file: {FileName}, size {capacityInBytes} TiB", _fileName, capacityTiB);
@@ -65,10 +104,11 @@ internal class MemoryMappedFileHolder : IDisposable
         {
             _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
             _stream = _file.CreateViewStream();
+
         }
         catch (System.IO.IOException ex)
         {
-            if (File.Exists(_fileName))
+            if (!_fileExists && File.Exists(_fileName)) // If the file was created and then failed to open, delete it
             {
                 File.Delete(_fileName);
                 Logging.Logger.Error($"Error occurred while trying to create file ({_fileName}). File was successfully deleted. Error: {ex.Message}");
@@ -89,24 +129,27 @@ internal class MemoryMappedFileHolder : IDisposable
     {
         if (!_disposedValue)
         {
-            if (disposing)
+            if (disposing) 
             {
                 DisposeStreams();
-                try
+                if (!SaveOnDispose)
                 {
-                    if (File.Exists(_fileName))
+                    try
                     {
-                        File.Delete(_fileName);
-                        Logging.Logger.Information("Deleted temporary file: {FileName}", _fileName);
+                        if (File.Exists(_fileName))
+                        {
+                            File.Delete(_fileName);
+                            Logging.Logger.Information("Deleted temporary file: {FileName}", _fileName);
+                        }
+                        else
+                        {
+                            Logging.Logger.Warning("Temporary file not found: {FileName}", _fileName);
+                        }
                     }
-                    else
+                    catch (Exception ex)
                     {
-                        Logging.Logger.Warning("Temporary file not found: {FileName}", _fileName);
+                        Logging.Logger.Error(ex, "Failed to delete temporary file: {FileName}", _fileName);
                     }
-                }
-                catch (Exception ex)
-                {
-                    Logging.Logger.Error(ex, "Failed to delete temporary file: {FileName}", _fileName);
                 }
             }
 

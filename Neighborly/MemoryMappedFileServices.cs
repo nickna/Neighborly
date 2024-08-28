@@ -1,4 +1,5 @@
 ﻿using Microsoft.Win32.SafeHandles;
+using Serilog.Core;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -89,7 +90,7 @@ internal static class MemoryMappedFileServices
         SafeFileHandle fileHandle = CreateFile(
             path,
             FileAccess.ReadWrite,
-            FileShare.None,
+            FileShare.ReadWrite,
             IntPtr.Zero,
             FileMode.Create,
             FileAttributes.Normal | (FileAttributes)0x200, // FILE_ATTRIBUTE_SPARSE_FILE
@@ -97,7 +98,9 @@ internal static class MemoryMappedFileServices
 
         if (fileHandle.IsInvalid)
         {
-            throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            Logging.Logger.Error("Failed while trying to set this file as sparse: {Path}. Error: {Error} ", path, Marshal.GetLastWin32Error());
+
+            // throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
         }
 
         uint bytesReturned;
@@ -180,5 +183,72 @@ internal static class MemoryMappedFileServices
         {
             throw new PlatformNotSupportedException("The operating system is not supported.");
         }
+    }
+
+
+    /// <summary>
+    /// Creates a new database title based on the current date and time.
+    /// </summary>
+    /// <param name="dbTitle"></param>
+    /// <returns>string that is usable in a filename on all supported filesystems</returns>
+    internal static string CreateDbTitle(string? dbTitle)
+    {
+        if (string.IsNullOrEmpty(dbTitle))
+        {
+            dbTitle = DateTime.Now.ToString("yyyyMMddHHmmss");
+        }
+        else
+        {
+            dbTitle = System.Text.RegularExpressions.Regex.Replace(dbTitle, @"[^a-zA-Z0-9]", "");
+        }
+        return dbTitle;
+    }
+
+    private static string _FileExtension = "nbrly";
+
+    internal enum FilePurpose
+    {
+        Index,
+        Data,
+        Text
+    }
+    internal static string CreateFileName(string? basePath, string? title, FilePurpose purpose)
+    {
+        if (string.IsNullOrEmpty(basePath))
+        {
+            // Get current working directory
+            basePath = Directory.GetCurrentDirectory();
+        }
+
+        if (string.IsNullOrEmpty(title))
+        {
+            title = DateTime.Now.ToString("yyyyMMddHHmmss");
+        }
+
+        var filePurpose = purpose switch
+        {
+            FilePurpose.Index => "index",
+            FilePurpose.Data => "data",
+            FilePurpose.Text => "text",
+            _ => throw new ArgumentException("Invalid file purpose", nameof(purpose)),
+        };
+
+        return Path.Combine(basePath, $"{title}_{filePurpose}.{_FileExtension}");
+    }
+
+    internal static string CreateBasePath(string? basePath)
+    {
+        if (string.IsNullOrEmpty(basePath))
+        {
+            // Get current working directory
+            return Directory.GetCurrentDirectory();
+        }
+        return basePath;
+    }
+
+    internal static long CreateCapacity(long capacity)
+    {
+        // TODO: Compute capacity based on system memory
+        return capacity;
     }
 }

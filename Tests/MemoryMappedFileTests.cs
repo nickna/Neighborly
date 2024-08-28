@@ -18,7 +18,13 @@ public class MemoryMappedFileTests
     [TearDown]
     public void TearDown()
     {
-        _db.Dispose();
+        try
+        {
+            _db.Dispose();
+        }
+        catch
+        {
+        }
     }
 
     [Test]

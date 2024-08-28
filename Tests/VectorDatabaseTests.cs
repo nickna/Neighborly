@@ -28,6 +28,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestAdd()
     {
+        _db.Vectors.Clear();
         float[] floatArray = [1, 2, 3];
         var vector = new Vector(floatArray);
 
@@ -41,6 +42,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemove()
     {
+        _db.Vectors.Clear();
         float[] floatArray = [1, 2, 3];
         var vector = new Vector(floatArray);
 
@@ -55,6 +57,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestUpdate()
     {
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
@@ -76,6 +79,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestAddRange()
     {
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
@@ -95,6 +99,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestRemoveRange()
     {
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
@@ -151,6 +156,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestClear()
     {
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
@@ -236,6 +242,7 @@ public class VectorDatabaseTests
     public async Task TestSearch([Values(SearchAlgorithm.BallTree, SearchAlgorithm.KDTree)] SearchAlgorithm searchAlgorithm, [Values(1, 2)] int matchingVectors)
     {
         // Arrange
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
