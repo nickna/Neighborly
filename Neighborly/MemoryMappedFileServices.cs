@@ -121,7 +121,6 @@ internal static class MemoryMappedFileServices
     /// <exception cref="System.ComponentModel.Win32Exception">Thrown when a Win32 error occurs.</exception>
     internal static void WinFileAlloc(string path)
     {
-        return; 
         // Only run this function on Windows
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
         {
