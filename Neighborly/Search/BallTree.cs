@@ -1,3 +1,5 @@
+using Serilog.Core;
+
 namespace Neighborly.Search;
 
 public class BallTree
@@ -64,7 +66,7 @@ public class BallTree
         root = null;
 
         // Read internal vectors (centers of internal nodes)
-        using var internalVectors = new VectorDatabase();
+        using var internalVectors = VectorDatabase.CreateInMemoryDatabase();
         await internalVectors.ReadFromAsync(reader, false, cancellationToken).ConfigureAwait(false);
 
         byte[] guidBuffer = new byte[16];
@@ -87,7 +89,7 @@ public class BallTree
 
     private static VectorDatabase BuildInternalVectors(BallTreeNode? node)
     {
-        return BuildInternalVectors(node, new VectorDatabase());
+        return BuildInternalVectors(node, VectorDatabase.CreateInMemoryDatabase());
     }
 
     private static VectorDatabase BuildInternalVectors(BallTreeNode? node, VectorDatabase internalVectors)

@@ -36,7 +36,7 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
         _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 
-    public VectorList(string? basePath = null, string? dbTitle = null, FileMode fileMode = FileMode.OpenOrCreate)
+    public VectorList(string? basePath = null, string? dbTitle = null, NeighborlyFileMode fileMode = NeighborlyFileMode.InMemory)
     {       
         _memoryMappedList = new MemoryMappedList(
             capacity: Int16.MaxValue, 
@@ -243,9 +243,11 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 
     public void Clear()
     {
-        _memoryMappedList.Clear();
-
-        Modified?.Invoke(this, EventArgs.Empty);
+        if (Count > 0)  // Only clear if there are items in the list -- _memoryMappedList.Clear() is expensive I/O
+        {
+            _memoryMappedList.Clear();
+            Modified?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     IEnumerator IEnumerable.GetEnumerator()
@@ -255,7 +257,7 @@ public class VectorList : IList<Vector>, IDataPersistence, IDisposable
 
     public int FindIndexById(Guid id)
     {
-        // TOOD: Fix cast with https://github.com/nickna/Neighborly/issues/33
+        // TODO: Fix cast with https://github.com/nickna/Neighborly/issues/33
         return (int)_memoryMappedList.FindIndexById(id);
     }
 

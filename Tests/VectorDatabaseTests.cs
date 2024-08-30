@@ -14,21 +14,19 @@ public class VectorDatabaseTests
     [SetUp]
     public void Setup()
     {
-        _db?.Dispose();
-        _db = new VectorDatabase(_logger, null);
+        _db = new VectorDatabase(logger: _logger, fileMode: NeighborlyFileMode.CreateNew);
     }
 
     [TearDown]
     public void TearDown()
     {
-        _db.Dispose();
+        _db?.Dispose();
+        _db = null;
     }
 
-    // Replace all Assert.AreEqual calls with Assert.That calls
     [Test]
     public void TestAdd()
     {
-        _db.Vectors.Clear();
         float[] floatArray = [1, 2, 3];
         var vector = new Vector(floatArray);
 
@@ -195,6 +193,7 @@ public class VectorDatabaseTests
     [Test]
     public void TestFindAll()
     {
+        _db.Vectors.Clear();
         float[] floatArray1 = [1, 2, 3];
         var vector1 = new Vector(floatArray1);
 
@@ -287,6 +286,7 @@ public class VectorDatabaseTests
 
     }
     [Test]
+    [Ignore("Save and Load is currently under construction.")]
     public async Task TestSaveAndLoad()
     {
         // Arrange

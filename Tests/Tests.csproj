@@ -15,7 +15,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.0" />
-    <PackageReference Include="NUnit" Version="4.2.0" />
+    <PackageReference Include="NUnit" Version="4.2.1" />
     <PackageReference Include="NUnit.Analyzers" Version="4.3.0">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -26,7 +26,7 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.65.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.65.0" PrivateAssets="All" />
+    <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="All" />
     <ProtoBuf Include="..\API.gRPC\Protos\Vector.proto" GrpcServices="Client" Link="Protos\Vector.proto" />
   </ItemGroup>
 

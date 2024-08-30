@@ -14,13 +14,13 @@ public class LoggingTests
     public void Setup()
     {
         _logger = new MockLogger<VectorDatabase>();
-        _db = new VectorDatabase(_logger, null);
+        _db = VectorDatabase.CreateInMemoryDatabase(_logger);
     }
 
     [TearDown]
     public void TearDown()
     {
-        _db.Dispose();
+        _db?.Dispose();
     }
 
     [Test]

@@ -1,4 +1,5 @@
 using Microsoft.Win32.SafeHandles;
+using Parquet.Schema;
 using System.Buffers;
 using System.Collections;
 using System.IO.MemoryMappedFiles;
@@ -37,7 +38,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private string _basePath;
     private string _dbTitle;
-    private FileMode _fileMode;
+    private NeighborlyFileMode _fileMode;
 
     /// <summary>
     /// Flush the memory-mapped files to disk
@@ -73,25 +74,64 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// Initializes a new instance of the MemoryMappedList class with the specified capacity.
     /// </summary>
     /// <param name="capacity">The maximum number of items in the list.</param>
-    public MemoryMappedList(long capacity, string? baseFilePath = null, string? fileTitle = null, FileMode fileMode = FileMode.OpenOrCreate)
+    public MemoryMappedList(long capacity, string? baseFilePath = null, string? fileTitle = null, NeighborlyFileMode fileMode = NeighborlyFileMode.OpenOrCreate)
     {
         if (capacity <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than 0");
+            throw new ArgumentOutOfRangeException(nameof(capacity), "MML.ctor Capacity must be greater than 0");
         }
 
-        _dbTitle = MemoryMappedFileServices.CreateDbTitle(_dbTitle);
+
+        _dbTitle = MemoryMappedFileServices.CreateDbTitle(fileTitle);
         _basePath = MemoryMappedFileServices.CreateBasePath(_basePath);
         long _capacity = MemoryMappedFileServices.CreateCapacity(capacity);
+        Logging.Logger.Information("MML.ctor: Initializing MemoryMappedList with capacity {Capacity}", capacity);
 
         // Here, we are estimating the maximum file size based ont he number of entries.
         // The underlying file is marked as sparse, so it will only take up the actual space used.
-
         // The index file is estimated to be 32 bytes per entry, and the data file is estimated to be 4096 bytes per entry.
-        _indexFile = new(s_indexEntryByteLength * _capacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Index), fileMode: fileMode);
+        long _indexFileCapacity = _capacity * s_indexEntryByteLength;
+        long _dataFileCapacity = _capacity * 4096; // 4096 bytes per entry is a rough estimate based on Llama 3.1 embedding dimensions (2024-06)
 
-        // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
-        _dataFile = new(4096L * _capacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Data), fileMode: fileMode);
+        // If the file mode is OpenOrCreate or CreateNew, and no base path or file title is provided, attempt to find the last used database files
+        // and use them if found. Otherwise, create new files.
+        if ((fileMode == NeighborlyFileMode.OpenOrCreate || fileMode == NeighborlyFileMode.CreateNew ) 
+            && baseFilePath == null 
+            && fileTitle == null)
+        {
+            // Attempt to find the last used Index and Data files
+            var lastFoundDbFiles = MemoryMappedFileServices.FindLastDatabase();
+
+            // If last used database files are found, use them
+            if (lastFoundDbFiles?.Length == 2)
+            {
+                _indexFileCapacity = new FileInfo(lastFoundDbFiles[1]).Length;  // Index file capacity is the actual size of the existing file
+                _indexFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Index, _indexFileCapacity, fileName: lastFoundDbFiles[1], fileMode: fileMode);
+
+                _dataFileCapacity = new FileInfo(lastFoundDbFiles[0]).Length;  // Data file capacity is the actual size of the existing file
+                _dataFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Data, _dataFileCapacity, lastFoundDbFiles[0], fileMode: fileMode);
+            }
+            else  // If no last used database files are found, create new ones
+            {
+                // The index file is estimated to be 32 bytes per entry, and the data file is estimated to be 4096 bytes per entry.
+                _indexFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Index, _indexFileCapacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Index), fileMode: fileMode);
+
+                // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
+                _dataFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Data, _dataFileCapacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Data), fileMode: fileMode);
+            }
+
+        }
+        else if (fileMode == NeighborlyFileMode.InMemory)
+        {
+            _indexFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Index, _indexFileCapacity, fileName: null, fileMode: NeighborlyFileMode.InMemory);
+            _dataFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Data, _dataFileCapacity, fileName: null, fileMode: NeighborlyFileMode.InMemory);
+        }
+        else
+        {
+            _indexFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Index, _indexFileCapacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Index), fileMode: fileMode);
+            _dataFile = new(filePurpose: MemoryMappedFileServices.FilePurpose.Data, _dataFileCapacity, MemoryMappedFileServices.CreateFileName(basePath: _basePath, title: _dbTitle, purpose: MemoryMappedFileServices.FilePurpose.Data), fileMode: fileMode);
+        }
+
     }
 
 
@@ -433,6 +473,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// <exception cref="InvalidOperationException"></exception>
     public void Defrag()
     {
+        Logging.Logger.Information("Defragmenting MemoryMappedList");
         _rwLock.EnterWriteLock();
         try
         {
@@ -614,9 +655,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _rwLock.EnterWriteLock();
         try
         {
-            //_indexFile.DisposeStreams();
             _indexFile.Reset();
-            //_dataFile.DisposeStreams();
             _dataFile.Reset();
             _count = 0;
         }

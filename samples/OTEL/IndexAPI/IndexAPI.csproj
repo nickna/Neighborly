@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.1" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
   </ItemGroup>
 
   <ItemGroup Label="OpenTelemetry">
@@ -22,7 +22,7 @@
 
   <ItemGroup Label="Protobuf">
     <PackageReference Include="Grpc.AspNetCore" Version="2.65.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.65.0" PrivateAssets="all" />
+    <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="all" />
     <ProtoBuf Include="..\..\..\API.gRPC\Protos\Vector.proto" GrpcServices="Client" Link="Protos\Vector.proto" />
   </ItemGroup>
 

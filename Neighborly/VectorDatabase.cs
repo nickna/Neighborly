@@ -26,7 +26,7 @@ public partial class VectorDatabase : IDisposable
     /// </summary>
     private readonly Guid _id = Guid.NewGuid();
     private readonly IEnumerable<KeyValuePair<string, object?>>? _defaultTags;
-    private readonly VectorList _vectors = new();
+    private VectorList _vectors;
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
     private Search.SearchService _searchService;
@@ -36,7 +36,7 @@ public partial class VectorDatabase : IDisposable
 
     private readonly string filePath;
     private readonly string dbTitle;
-    private readonly FileMode fileMode;
+    // private readonly FileMode fileMode;
 
     /// <summary>
     /// Last time the database was modified. This is updated when a vector is added or removed.
@@ -147,7 +147,23 @@ public partial class VectorDatabase : IDisposable
     Message = "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")]
     private partial void CouldNotFindVectorInDb(Vector query, int k, Exception ex);
 
-    #region Constructors
+    #region Constructors & Factory methods
+
+    public static VectorDatabase CreateNewDatabase(string filePath, string dbTitle, NeighborlyFileMode fileMode, ILogger<VectorDatabase>? logger = null)
+    {
+        logger = logger ?? Logging.LoggerFactory.CreateLogger<VectorDatabase>();
+        return new VectorDatabase(logger, null, fileMode, filePath, dbTitle);
+    }
+    public static VectorDatabase CreateInMemoryDatabase(ILogger<VectorDatabase>? logger = null)
+    {
+        logger = logger ?? Logging.LoggerFactory.CreateLogger<VectorDatabase>();
+        return new VectorDatabase(logger, null, NeighborlyFileMode.InMemory);
+    }
+
+    public VectorDatabase(NeighborlyFileMode fileMode) : this(Logging.LoggerFactory.CreateLogger<VectorDatabase>(), null, fileMode)
+    {
+    }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="VectorDatabase"/> class.
     /// </summary>
@@ -165,7 +181,12 @@ public partial class VectorDatabase : IDisposable
     /// <param name="fileMode">The file mode to be used for the database files.</param>
     /// <param name="filePath">The file path to be used for the database files.</param>
     /// <exception cref="ArgumentNullException">Thrown when the logger is null.</exception>
-    public VectorDatabase(ILogger<VectorDatabase> logger, Instrumentation? instrumentation = null, FileMode fileMode = FileMode.OpenOrCreate, string? filePath = null, string? dbTitle = null)
+    public VectorDatabase(ILogger<VectorDatabase> logger, 
+        Instrumentation? instrumentation = null,
+        NeighborlyFileMode fileMode = NeighborlyFileMode.OpenOrCreate, 
+        string? filePath = null, 
+        string? dbTitle = null
+        )
     {
         ArgumentNullException.ThrowIfNull(logger);
         _logger = logger;
@@ -186,30 +207,24 @@ public partial class VectorDatabase : IDisposable
         );
         _defaultTags = [new("db.system", "neighborly"), new("db.namespace", _id)];
 
+        _vectors = new VectorList(basePath: filePath, dbTitle: dbTitle, fileMode: fileMode);
+
+        // Cancel the existing index service if it exists
+        if (indexService != null && _indexServiceCancellationTokenSource != null && indexService.IsAlive)
+        {
+            _logger.LogInformation("VD.ctor: Index restart requested. Stopping old thread before starting new one. ");
+            _indexServiceCancellationTokenSource.Cancel();
+            _indexServiceCancellationTokenSource.Dispose();
+        }
+        
+        StartIndexes(newInstance: true);
+
         // Wire up the event handler for the VectorList.Modified event
         _vectors.Modified += VectorList_Modified;
 
-        this.filePath = String.IsNullOrEmpty(filePath) ? Directory.GetCurrentDirectory() : filePath;
-        this.dbTitle = MemoryMappedFileServices.CreateDbTitle(dbTitle);
-        this.fileMode = fileMode;
 
-        StartVectorList(newInstance: true);
-        StartIndexes(newInstance:true);
-        
-    }
 
-    private void StartVectorList(bool newInstance)
-    {
-        if (newInstance)
-        {
-            _vectors.Clear();
-            
-        }
-        else
-        {
-            //var x = new MemoryMappedList(_vectors, filePath, _dbTitle, _fileMode);
-            
-        }
+
     }
 
     #endregion
@@ -341,7 +356,9 @@ public partial class VectorDatabase : IDisposable
             return;
 
         if (newInstance)
+        {
             _searchService = new Search.SearchService(_vectors);
+        }
 
         _indexServiceCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _indexServiceCancellationTokenSource.Token;
@@ -349,9 +366,9 @@ public partial class VectorDatabase : IDisposable
         // Create a new thread that will react when _hasOutdatedIndex is set to true
         indexService = new Thread(async () =>
         {
-            _logger.LogInformation("Indexing Thread: Started.");
+            _logger.LogInformation("VD-idx: started thread.");
 
-            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
+            while (_vectors != null && !_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
             {
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
                 if (_hasOutdatedIndex &&
@@ -359,11 +376,11 @@ public partial class VectorDatabase : IDisposable
                     DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
                     Stopwatch sw = Stopwatch.StartNew(); // Track Time for index to complete
-                    _logger.LogInformation("Indexing Thread: Rebuilding Tags and Search.");
+                    _logger.LogInformation("VD-idx: Rebuilding Tags and Search.");
                     await RebuildTagsAsync().ConfigureAwait(false);
                     await RebuildSearchIndexesAsync().ConfigureAwait(false);
                     sw.Stop();
-                    _logger.LogInformation("Indexing Thread: Rebuilt Tags and Search in {ElapsedMilliseconds} ms.", sw.ElapsedMilliseconds);
+                    _logger.LogInformation("VD-idx: Rebuilt Tags and Search in {ElapsedMilliseconds} ms.", sw.ElapsedMilliseconds);
                     _indexRebuildCounter.Add(1);
                 }
                 try
@@ -372,12 +389,12 @@ public partial class VectorDatabase : IDisposable
                 }
                 catch (TaskCanceledException)
                 {
-                    _logger.LogInformation("Indexing Thread: Cancelling...");
+                    _logger.LogInformation("VD-idx: Cancelling thread...");
                     break;
                 }
             }
 
-            _logger.LogInformation("Indexing Thread: Stopped.");
+            _logger.LogInformation("VD-idx: thread stopped.");
         });
         indexService.Priority = ThreadPriority.Lowest;
         indexService.Start();
@@ -387,7 +404,7 @@ public partial class VectorDatabase : IDisposable
     {
         if (indexService != null && indexService.IsAlive)
         {
-            _logger.LogInformation("Indexing Thread: Stop requested.");
+            _logger.LogInformation("VD.DisposeIndexes: Stop requested.");
             _indexServiceCancellationTokenSource.Cancel();
             _indexServiceCancellationTokenSource.Dispose();
         }
@@ -474,7 +491,7 @@ public partial class VectorDatabase : IDisposable
         {
             if (File.Exists(oldFilePath))
             {
-                File.Delete(oldFilePath);
+                MemoryMappedFileServices.DeleteFile(oldFilePath);
                 _logger.LogInformation("The file {oldFilePath} exists and is deleted.", oldFilePath);
             }
             File.Move(filePath, oldFilePath, true);
@@ -613,12 +630,11 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
-                _logger.LogInformation("Shutting down VectorDatabase.");
+                _logger.LogInformation("VD.Dispose: shutting down VectorDatabase.");
                 DisposeIndexes();
-                _searchService = null;
-                _rwLock.Dispose();
+                _rwLock?.Dispose();
                 _vectors.Modified -= VectorList_Modified;
-                _vectors.Dispose();
+                _vectors?.Dispose();
             }
 
             _disposedValue = true;

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Neighborly;
@@ -14,6 +15,26 @@ namespace Neighborly;
 /// </summary>
 internal static class MemoryMappedFileServices
 {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BY_HANDLE_FILE_INFORMATION
+    {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    private const uint FILE_ATTRIBUTE_SPARSE_FILE = 0x00000200;
+
     // P/Invoke declaration for CreateFile function from kernel32.dll
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern SafeFileHandle CreateFile(
@@ -72,6 +93,26 @@ internal static class MemoryMappedFileServices
         public long st_ctime_nsec;
     }
 
+    public static bool IsFileSparse(string filePath)
+    {
+        using (SafeFileHandle fileHandle = CreateFile(filePath, FileAccess.Read, FileShare.ReadWrite, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero))
+        {
+            if (fileHandle.IsInvalid)
+            {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            if (GetFileInformationByHandle(fileHandle, out BY_HANDLE_FILE_INFORMATION fileInfo))
+            {
+                return (fileInfo.FileAttributes & FILE_ATTRIBUTE_SPARSE_FILE) != 0;
+            }
+            else
+            {
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+    }
+
     /// <summary>
     /// On Windows, this function sets the sparse file attribute on the file at the given path.
     /// Call this function before opening the file with a MemoryMappedFile.
@@ -80,9 +121,16 @@ internal static class MemoryMappedFileServices
     /// <exception cref="System.ComponentModel.Win32Exception">Thrown when a Win32 error occurs.</exception>
     internal static void WinFileAlloc(string path)
     {
+        return; 
         // Only run this function on Windows
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) == false)
         {
+            return;
+        }
+
+        if (IsFileSparse(path))
+        {
+            Logging.Logger.Information("File is already sparse: {Path}", path);
             return;
         }
 
@@ -92,7 +140,7 @@ internal static class MemoryMappedFileServices
             FileAccess.ReadWrite,
             FileShare.ReadWrite,
             IntPtr.Zero,
-            FileMode.Create,
+            FileMode.OpenOrCreate,
             FileAttributes.Normal | (FileAttributes)0x200, // FILE_ATTRIBUTE_SPARSE_FILE
             IntPtr.Zero);
 
@@ -195,7 +243,7 @@ internal static class MemoryMappedFileServices
     {
         if (string.IsNullOrEmpty(dbTitle))
         {
-            dbTitle = DateTime.Now.ToString("yyyyMMddHHmmss");
+            dbTitle = "Neighborly"; //DateTime.Now.ToString("yyyyMMddHHmmss");
         }
         else
         {
@@ -251,4 +299,90 @@ internal static class MemoryMappedFileServices
         // TODO: Compute capacity based on system memory
         return capacity;
     }
+
+    
+    public static string[] FindLastDatabase()
+    {
+        List<string> filePaths = Directory.GetFiles(Directory.GetCurrentDirectory(), $"*.{_FileExtension}").ToList();
+
+        Regex regex = new Regex(@"(?<dbtitle>.*)_(?<type>index|data).nbrly");
+        Dictionary<string, List<string>> dbTitleFiles = new Dictionary<string, List<string>>();
+
+        foreach (var filePath in filePaths)
+        {
+            string fileName = Path.GetFileName(filePath);
+            Match match = regex.Match(fileName);
+
+            if (match.Success)
+            {
+                string dbTitle = match.Groups["dbtitle"].Value;
+                string type = match.Groups["type"].Value;
+
+                if (!dbTitleFiles.ContainsKey(dbTitle))
+                {
+                    dbTitleFiles[dbTitle] = new List<string>();
+                }
+
+                dbTitleFiles[dbTitle].Add(filePath);
+            }
+        }
+
+        List<string> recentFiles = new List<string>();
+
+        foreach (var entry in dbTitleFiles)
+        {
+            if (entry.Value.Count(file => file.Contains("_index.nbrly")) > 0 &&
+                entry.Value.Count(file => file.Contains("_data.nbrly")) > 0)
+            {
+                recentFiles.AddRange(entry.Value);
+            }
+        }
+
+        // Sort the files by creation time and take the most recent two
+        var sortedRecentFiles = recentFiles
+            .Select(file => new { File = file, CreationTime = File.GetCreationTime(file) })
+            .OrderByDescending(file => file.CreationTime)
+            .Take(2)
+            .Select(file => file.File)
+            .ToArray();
+
+        return sortedRecentFiles;
+    }
+
+    public static bool DeleteFile(string filePath)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            throw new ArgumentNullException(nameof(filePath));
+        }
+
+        if (!File.Exists(filePath))
+        {
+            return true;
+        }
+
+        for (int i = 1; i < 6; i++)
+        {
+            try
+            {
+                File.Delete(filePath);
+                Logging.Logger.Information("MMFS.Delete: Deleted file {FilePath}", filePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Thread.Sleep(100 * i);
+            }
+        }
+        Logging.Logger.Error("MMFS.Delete: Failed to delete file {FilePath}", filePath);
+        return false;
+    }
+}
+
+
+public enum NeighborlyFileMode
+{
+    OpenOrCreate = 1,
+    CreateNew = 2,
+    InMemory = 5
 }
