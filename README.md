@@ -4,6 +4,7 @@
 [![CodeQL](https://github.com/nickna/Neighborly/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/nickna/Neighborly/actions/workflows/github-code-scanning/codeql)
 [![Dependabot Updates](https://github.com/nickna/Neighborly/actions/workflows/dependabot/dependabot-updates/badge.svg)](https://github.com/nickna/Neighborly/actions/workflows/dependabot/dependabot-updates)
 [![CodeFactor](https://www.codefactor.io/repository/github/nickna/neighborly/badge)](https://www.codefactor.io/repository/github/nickna/neighborly)
+[![Mutable.ai Auto Wiki](https://img.shields.io/badge/Auto_Wiki-Mutable.ai-blue)](https://wiki.mutable.ai/nickna/Neighborly)
 
 ![neighborly-header](https://github.com/nickna/Neighborly/assets/4017153/2dd8a22d-511d-4457-bde5-ac4ceaecf166)
 
