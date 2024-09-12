@@ -3,13 +3,15 @@
 namespace Neighborly.Tests;
 
 [TestFixture]
-public class MemoryMappedFileTests
+public class MemoryMappedFile_NewFile_Tests
 {
     private VectorDatabase _db;
+    private bool _FirstRun = true;
 
     [SetUp]
     public void Setup()
     {
+        if (_FirstRun) ClearDatabaseFiles();
         _db = new VectorDatabase(fileMode: NeighborlyFileMode.CreateNew);
     }
 
@@ -17,6 +19,19 @@ public class MemoryMappedFileTests
     public void TearDown()
     {
         _db?.Dispose();
+        ClearDatabaseFiles();
+        _FirstRun = false;
+
+    }
+
+    private void ClearDatabaseFiles()
+    {
+        // Delete all .nrbly files created during the test
+        var files = Directory.GetFiles(Directory.GetCurrentDirectory(), "*.nrbly");
+        foreach (var file in files)
+        {
+            File.Delete(file);
+        }
     }
 
     [Test]
