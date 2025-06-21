@@ -25,68 +25,39 @@ public sealed class Parquet : EtlBase
     protected override async Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken)
     {
         using var fs = CreateReadStream(path);
-        using ParquetReader reader = await ParquetReader.CreateAsync(fs, cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        var table = await reader.ReadAsTableAsync();
-        if (table is null)
-        {
-            return;
-        }
-
-        int idFieldIndex = -1;
-        int tagsFieldIndex = -1;
-        int originalTextFieldIndex = -1;
-        int valuesFieldIndex = -1;
-        var dataFields = reader.Schema.GetDataFields();
-        for (var i = 0; i < dataFields.Length; i++)
-        {
-            var currentField = dataFields[i];
-            if (currentField.ClrType == typeof(Guid))
-            {
-                idFieldIndex = i;
-            }
-            else if (currentField.ClrType == typeof(short[]))
-            {
-                tagsFieldIndex = i;
-            }
-            else if (currentField.ClrType == typeof(string) && currentField.Name == "OriginalText")
-            {
-                originalTextFieldIndex = i;
-            }
-            else if (currentField.ClrType == typeof(float))
-            {
-                valuesFieldIndex = i;
-            }
-        }
-
-        if (valuesFieldIndex == -1)
-        {
-            return;
-        }
-
-        foreach (var row in table)
+        var records = await ParquetSerializer.DeserializeAsync<VectorRecord>(fs, cancellationToken: cancellationToken).ConfigureAwait(false);
+        
+        foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
-
-            var idCell = idFieldIndex >= 0 ? row[idFieldIndex] : null;
-            var tagsCell = tagsFieldIndex >= 0 ? row[tagsFieldIndex] : null;
-            var originalTextCell = originalTextFieldIndex >= 0 ? row[originalTextFieldIndex] : null;
-
-            var valuesCell = row[valuesFieldIndex];
-            if (valuesCell is object[] valuesCellData)
-            {
-                var vector = new Vector(
-                    id: idCell is null ? Guid.NewGuid() : (Guid)idCell,
-                    values: valuesCellData.OfType<float>().ToArray(),
-                    tags: tagsCell is null ? [] : ((short[])tagsCell),
-                    originalText: originalTextCell as string
-                );
-                vectors.Add(vector);
-            }
+            
+            var vector = new Vector(
+                id: record.Id,
+                values: record.Values,
+                tags: record.Tags ?? [],
+                originalText: record.OriginalText
+            );
+            vectors.Add(vector);
         }
     }
 
     private static VectorRecord ConvertToRecord(Vector vector) => new(vector.Id, vector.Values, vector.Tags, vector.OriginalText);
 
-    private record class VectorRecord(Guid Id, float[] Values, short[] Tags, string? OriginalText);
+    private class VectorRecord
+    {
+        public Guid Id { get; set; }
+        public float[] Values { get; set; } = [];
+        public short[] Tags { get; set; } = [];
+        public string? OriginalText { get; set; }
+        
+        public VectorRecord() { }
+        
+        public VectorRecord(Guid id, float[] values, short[] tags, string? originalText)
+        {
+            Id = id;
+            Values = values;
+            Tags = tags;
+            OriginalText = originalText;
+        }
+    }
 }
