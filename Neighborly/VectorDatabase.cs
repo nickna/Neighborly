@@ -28,10 +28,10 @@ public partial class VectorDatabase : IDisposable
     private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
-    private Search.SearchService _searchService;
+    private Search.SearchService _searchService = null!;
     private ReaderWriterLockSlim _rwLock = new();
-    private Thread indexService;
-    private CancellationTokenSource _indexServiceCancellationTokenSource;
+    private Thread? indexService;
+    private CancellationTokenSource? _indexServiceCancellationTokenSource;
 
 
     /// <summary>
@@ -84,9 +84,7 @@ public partial class VectorDatabase : IDisposable
     /// <seealso cref="EmbeddingGenerationInfo"/>
     public void SetEmbeddingGenerationInfo(EmbeddingGenerationInfo embeddingGeneratorInfo)
     {
-        ArgumentNullException.ThrowIfNull(embeddingGeneratorInfo);
         _searchService.EmbeddingGenerator = new EmbeddingGenerator(embeddingGeneratorInfo);
-
     }
 
     /// <summary>
@@ -369,8 +367,8 @@ public partial class VectorDatabase : IDisposable
     {
         if (indexService != null && indexService.IsAlive)
         {
-            _indexServiceCancellationTokenSource.Cancel();
-            _indexServiceCancellationTokenSource.Dispose();
+            _indexServiceCancellationTokenSource?.Cancel();
+            _indexServiceCancellationTokenSource?.Dispose();
             _logger.LogInformation("Indexing stop requested.");
         }
     }
@@ -597,7 +595,6 @@ public partial class VectorDatabase : IDisposable
             {
                 _logger.LogInformation("Shutting down VectorDatabase.");
                 StopIndexService();
-                _searchService = null;
                 _rwLock.Dispose();
                 _vectors.Modified -= VectorList_Modified;
                 _vectors.Dispose();

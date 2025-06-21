@@ -31,7 +31,7 @@ public class LoggingTests
         {
             await _db.LoadAsync(path: "nonexistent-file-path", createOnNew: false);
         }
-        catch (FileNotFoundException ex)
+        catch (FileNotFoundException)
         {
             // This is excepted behavior
         }

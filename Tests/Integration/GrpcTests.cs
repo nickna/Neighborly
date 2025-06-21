@@ -3,6 +3,7 @@ using Grpc.Net.Client;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Neighborly.API.Protos;
 using static Neighborly.API.Protos.Vector;
+using CoreVector = Neighborly.Vector;
 
 namespace Neighborly.Tests.Integration;
 
@@ -24,7 +25,7 @@ public class GrpcTests
 
         VectorClient grpcClient = new(channel);
 
-        Vector vector = new([1f, 2f, 3f]);
+        CoreVector vector = new([1f, 2f, 3f]);
 
         // Act 1: Add a vector
         var addVectorResponse = await grpcClient.AddVectorAsync(new AddVectorRequest()
@@ -49,7 +50,7 @@ public class GrpcTests
         Assert.That(vectorFromResponse, Is.EqualTo(vector), "Vector was not found");
 
         // Arrange 3: Prepare updated vector
-        var updatedVector = new Vector(vector.ToBinary());
+        var updatedVector = new CoreVector(vector.ToBinary());
         updatedVector.Values[0] = 4f;
 
         // Act 3: Update the vector

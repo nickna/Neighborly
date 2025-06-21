@@ -49,10 +49,12 @@ public static class FpZipLib
         {
             if (RuntimeInformation.IsOSPlatform(platform.Key))
             {
-                if (platform.Value.TryGetValue(RuntimeInformation.ProcessArchitecture, out string libName))
+                if (platform.Value.TryGetValue(RuntimeInformation.ProcessArchitecture, out string? libName))
                 {
                     // Search path is fpzip_runtimes/{os}/{cpu}/
-                    var path = $"./fpzip_runtimes/{platform.Key}/{RuntimeInformation.ProcessArchitecture}/{libName}";
+                    var osName = platform.Key.ToString().ToLowerInvariant();
+                    var archName = RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant();
+                    var path = $"./fpzip_runtimes/{osName}/{archName}/{libName}";
                     return NativeLibrary.Load(path, assembly, searchPath);
 
                     //return NativeLibrary.Load(libName, assembly, searchPath);

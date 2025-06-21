@@ -12,71 +12,83 @@ public static class RestServices
 {
     public static void MapVectorRoutes(WebApplication app, VectorMapper vectorMapper)
     {
-        app.MapPost("/vector", (VectorDatabase db, VectorDto vector) =>
+        app.MapPost("/vector", async (VectorDatabase db, VectorDto vector, HttpContext context) =>
         {
             db.Vectors.Add(vectorMapper.Map(vector));
-            return Results.Created($"/vector/{vector.Id}", vector);
+            context.Response.StatusCode = 201;
+            context.Response.Headers["Location"] = $"/vector/{vector.Id}";
+            context.Response.ContentType = "application/json";
+            var json = System.Text.Json.JsonSerializer.Serialize(vector);
+            await context.Response.WriteAsync(json);
         });
 
-        app.MapGet("/vector/{id}", (VectorDatabase db, Guid id) =>
+        app.MapGet("/vector/{id}", async (VectorDatabase db, Guid id, HttpContext context) =>
         {
             var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
 
             if (vector == null)
             {
-                return Results.NotFound();
+                context.Response.StatusCode = 404;
             }
             else
             {
-                return Results.Ok(vectorMapper.Map(vector));
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                var json = System.Text.Json.JsonSerializer.Serialize(vectorMapper.Map(vector));
+                await context.Response.WriteAsync(json);
             }
         });
 
-        app.MapPut("/vector/{id}", (VectorDatabase db, Guid Id, VectorDto vector) =>
+        app.MapPut("/vector/{id}", async (VectorDatabase db, Guid Id, VectorDto vector, HttpContext context) =>
         {
             if (db.Vectors.Update(Id, vectorMapper.Map(vector)))
             {
-                return Results.Ok(vector);
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                var json = System.Text.Json.JsonSerializer.Serialize(vector);
+                await context.Response.WriteAsync(json);
             }
             else
             {
-                return Results.NotFound();
+                context.Response.StatusCode = 404;
             }
         });
 
-        app.MapDelete("/vector/{id}", (VectorDatabase db, Guid id) =>
+        app.MapDelete("/vector/{id}", (VectorDatabase db, Guid id, HttpContext context) =>
         {
             var vector = db.Vectors.FirstOrDefault(v => v.Id == id);
 
             if (vector == null)
             {
-                return Results.NotFound();
+                context.Response.StatusCode = 404;
             }
             else
             {
                 db.Vectors.RemoveById(id);
+                context.Response.StatusCode = 204;
             }
-
-            return Results.NoContent();
         });
 
-        app.MapPost("/vectors/searchNearest", ([FromServices] VectorDatabase db, [FromBody] VectorDto query, [FromQuery] int k) =>
+        app.MapPost("/vectors/searchNearest", async ([FromServices] VectorDatabase db, [FromBody] VectorDto query, [FromQuery] int k, HttpContext context) =>
         {
             var vectors = db.Search(vectorMapper.Map(query), k);
             if (vectors == null)
             {
-                return Results.NotFound();
+                context.Response.StatusCode = 404;
             }
             else
             {
-                return Results.Ok(vectors);
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                var json = System.Text.Json.JsonSerializer.Serialize(vectors);
+                await context.Response.WriteAsync(json);
             }
         });
 
-        app.MapDelete("/db/clear", (VectorDatabase db) =>
+        app.MapDelete("/db/clear", (VectorDatabase db, HttpContext context) =>
         {
             db.Vectors.Clear();
-            return Results.NoContent();
+            context.Response.StatusCode = 204;
         });
     }
 }

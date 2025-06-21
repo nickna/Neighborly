@@ -1,6 +1,6 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableSystemTextJsonSourceGeneration>true</EnableSystemTextJsonSourceGeneration>
@@ -12,7 +12,8 @@
     <Description>Neighborly is an open-source vector database that efficiently stores and retrieves vector data. Built with .NET, it provides functionality for handling high-dimensional vectors, making it ideal for machine learning, data science applications, and more.</Description>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64;android-x64</RuntimeIdentifiers>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-x64</RuntimeIdentifiers>
+    <NoWarn>$(NoWarn);NU5104</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

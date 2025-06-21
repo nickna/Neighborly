@@ -151,4 +151,9 @@ public class KDTree
         return Equals(root, other.root);
     }
 
+    public override int GetHashCode()
+    {
+        return root?.GetHashCode() ?? 0;
+    }
+
 }

@@ -72,15 +72,15 @@ public sealed class Csv : EtlBase
         {
             private const char s_separator = ',';
 
-            public override object? ConvertFromString(string text, IReaderRow row, MemberMapData memberMapData)
+            public override object? ConvertFromString(string? text, IReaderRow row, MemberMapData memberMapData)
                 => text?.Split(s_separator)
                 .Where(static s => !string.IsNullOrWhiteSpace(s))
                 .Select(static s => (T?)System.ComponentModel.TypeDescriptor.GetConverter(typeof(T)).ConvertFromString(s))
                 .Where(static v => v != null)
                 .ToArray();
 
-            public override string ConvertToString(object value, IWriterRow row, MemberMapData memberMapData)
-                => string.Join(s_separator, ((IEnumerable<T>)value).Select(static v => v?.ToString()));
+            public override string ConvertToString(object? value, IWriterRow row, MemberMapData memberMapData)
+                => string.Join(s_separator, ((IEnumerable<T>)value!).Select(static v => v?.ToString()));
         }
     }
 }

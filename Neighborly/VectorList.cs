@@ -213,7 +213,12 @@ public class VectorList : IList<Vector>, IDisposable
 
     public bool Remove(Vector item)
     {
-        return _memoryMappedList.Remove(item);
+        bool removed = _memoryMappedList.Remove(item);
+        if (removed)
+        {
+            Modified?.Invoke(this, EventArgs.Empty);
+        }
+        return removed;
     }
 
     public int Count => (int)_memoryMappedList.Count;

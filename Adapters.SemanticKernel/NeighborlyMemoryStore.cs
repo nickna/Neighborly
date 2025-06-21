@@ -44,7 +44,7 @@ namespace NeighborlyMemory
             return Task.CompletedTask;
         }
 
-        public Task<MemoryRecord> GetAsync(string key)
+        public Task<MemoryRecord?> GetAsync(string key)
         {
             Guid guidKey;
             if (!Guid.TryParse(key, out guidKey))
@@ -55,7 +55,7 @@ namespace NeighborlyMemory
             var vector = _vectorDatabase.Vectors.Find(v => v.Id == guidKey);
             if (vector == null)
             {
-                return Task.FromResult<MemoryRecord>(null);
+                return Task.FromResult<MemoryRecord?>(null);
             }
 
             var m = new MemoryRecordMetadata(true, vector.Id.ToString(), vector.OriginalText, string.Empty, string.Empty, string.Empty);
@@ -66,7 +66,7 @@ namespace NeighborlyMemory
                 timestamp: null
                 );
 
-            return Task.FromResult(record);
+            return Task.FromResult<MemoryRecord?>(record);
         }
 
         public Task RemoveAsync(string key)

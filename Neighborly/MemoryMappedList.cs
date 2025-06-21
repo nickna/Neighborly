@@ -24,7 +24,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// </summary>
     private bool _isAtEndOfIndexStream = true;
     private bool _disposedValue;
+    #pragma warning disable CS0414 // Field assigned but never used - reserved for future defragmentation
     private long _defragPosition = 0; // Tracks the current position in the index file for defragmentation
+    #pragma warning restore CS0414
     private long _defragIndexPosition;
     private long _newDataPosition;
     private const int _defragBatchSize = 100; // Number of entries to defrag in one batch, adjust based on performance needs
@@ -537,7 +539,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 {
                     // Read data from old position
                     _dataFile.Stream.Seek(update.oldOffset, SeekOrigin.Begin);
-                    _dataFile.Stream.Read(sharedBuffer, 0, update.length);
+                    _dataFile.Stream.ReadExactly(sharedBuffer, 0, update.length);
 
                     // Write data to new position
                     _dataFile.Stream.Seek(update.newOffset, SeekOrigin.Begin);

@@ -197,6 +197,11 @@ public class BallTree
         return Equals(root, other.root);
     }
 
+    public override int GetHashCode()
+    {
+        return root?.GetHashCode() ?? 0;
+    }
+
     private sealed class CappedDistanceSortedList(int k) : List<(float distance, Vector vector)>(k + 1)
     {
         private readonly int _k = k;

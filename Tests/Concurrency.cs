@@ -180,7 +180,7 @@ public class VectorDatabaseConcurrencyTests
         return new Vector(values, Path.GetRandomFileName().Replace(".", ""));
     }
 
-    private Vector GetRandomVector(VectorDatabase db)
+    private Vector? GetRandomVector(VectorDatabase db)
     {
         int maxAttempts = 10;
         for (int i = 0; i < maxAttempts; i++)

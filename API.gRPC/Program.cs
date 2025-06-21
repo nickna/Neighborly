@@ -14,6 +14,14 @@ builder.Services.AddGrpc();
 builder.Services.AddSingleton<VectorDatabase>();
 builder.Services.AddSingleton<VectorMapper>();
 
+// Configure JSON options to avoid .NET 9 PipeWriter compatibility issues
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    // Configure JSON options to work with .NET 9
+    options.SerializerOptions.WriteIndented = false;
+    options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
+
 builder.Services.AddOpenTelemetry()
     .ConfigureResource(resource => resource.AddService(serviceName: "Neighborly"))
     .WithTracing(builder =>
