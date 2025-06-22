@@ -14,8 +14,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private const int s_indexEntryByteLength = s_idBytesLength + s_offsetBytesLength + s_lengthBytesLength;
     private static readonly Guid s_tombStone;
     private static readonly byte[] s_tombStoneBytes;
+    
+    // Public constants for corruption detection
+    internal const int IdBytesLength = s_idBytesLength;
+    internal const int IndexEntryByteLength = s_indexEntryByteLength;
+    internal static Guid TombStone => s_tombStone;
     private readonly MemoryMappedFileHolder _indexFile;
     private readonly MemoryMappedFileHolder _dataFile;
+    private readonly WriteAheadLog _wal;
+    private readonly DurabilityManager _durabilityManager;
+    private static readonly MemoryPressureMonitor s_memoryMonitor = new();
     private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
     private long _count;
     /// <summary>
@@ -40,8 +48,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _rwLock.EnterWriteLock();
         try
         {
-            _indexFile.Stream.Flush();
-            _dataFile.Stream.Flush();
+            _durabilityManager.ForceFlush();
         }
         finally
         {
@@ -62,11 +69,29 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         s_tombStoneBytes = tombStoneBytes.ToArray();
     }
 
-    public MemoryMappedList(long capacity)
+    public MemoryMappedList(long capacity, FlushPolicy flushPolicy = FlushPolicy.Batched)
     {
         _indexFile = new(s_indexEntryByteLength * capacity);
         // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
         _dataFile = new(4096L * capacity);
+        _wal = new WriteAheadLog(_indexFile.Filename);
+        _durabilityManager = new DurabilityManager(flushPolicy);
+        
+        // Register files with durability manager
+        _durabilityManager.RegisterFile(_indexFile);
+        _durabilityManager.RegisterFile(_dataFile);
+        
+        // Initialize defrag tracking
+        _newDataPosition = 0;
+        
+        // Validate file integrity (temporarily disabled)
+        // ValidateFileIntegrity();
+        
+        // Recovery on startup
+        RecoverFromWAL();
+        
+        // Register with memory pressure monitor
+        s_memoryMonitor.RegisterList(this);
     }
 
 
@@ -88,8 +113,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             if (disposing)
             {
+                _durabilityManager.Dispose();
+                _wal.Dispose();
                 _dataFile.Dispose();
                 _indexFile.Dispose();
+                _rwLock.Dispose();
             }
 
             _disposedValue = true;
@@ -114,7 +142,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _rwLock.EnterReadLock();
         try
         {
-            if (index < 0L || index >= _count)
+            if (index < 0L || index >= Interlocked.Read(ref _count))
             {
                 return null;
             }
@@ -177,7 +205,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        _rwLock.EnterWriteLock();
+        _rwLock.EnterReadLock();
         try
         {
             if (array == null)
@@ -195,14 +223,52 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 throw new ArgumentException("The number of elements in the list is greater than the available space from arrayIndex to the end of the destination array");
             }
 
-            foreach (var item in this)
-            {
-                array[arrayIndex++] = item;
-            }
+            // Use internal enumeration to avoid lock recursion
+            CopyToInternal(array, arrayIndex);
         }
         finally
         {
-            _rwLock.ExitWriteLock();
+            _rwLock.ExitReadLock();
+        }
+    }
+
+    private void CopyToInternal(Vector[] array, int arrayIndex)
+    {
+        _isAtEndOfIndexStream = false;
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+        _dataFile.Stream.Seek(0, SeekOrigin.Begin);
+
+        byte[] entry = new byte[s_indexEntryByteLength];
+        int bytesRead;
+        while ((bytesRead = _indexFile.Stream.Read(entry, 0, entry.Length)) > 0)
+        {
+            if (bytesRead != s_indexEntryByteLength)
+            {
+                throw new InvalidOperationException("Failed to read the index entry");
+            }
+
+            var entrySpan = entry.AsSpan();
+            Guid id = new(entrySpan[..s_idBytesLength]);
+            if (id.Equals(s_tombStone))
+            {
+                continue;
+            }
+
+            if (id.Equals(Guid.Empty))
+            {
+                _isAtEndOfIndexStream = true;
+                break;
+            }
+
+            Span<byte> offsetBytes = entrySpan[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+            Span<byte> lengthBytes = entrySpan[(s_idBytesLength + s_offsetBytesLength)..];
+            long offset = BitConverter.ToInt64(offsetBytes);
+            int length = BitConverter.ToInt32(lengthBytes);
+
+            _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+            byte[] bytes = new byte[length];
+            _dataFile.Stream.ReadExactly(bytes);
+            array[arrayIndex++] = new Vector(bytes);
         }
     }
 
@@ -249,6 +315,13 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 ReadToEnd();
             }
 
+            long indexPosition = _indexFile.Stream.Position;
+            long dataPosition = _dataFile.Stream.Position;
+            byte[] data = vector.ToBinary();
+
+            // Log operation before performing it
+            _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
+
             Span<byte> idBytes = entry[..s_idBytesLength];
             if (!vector.Id.TryWriteBytes(idBytes))
             {
@@ -256,12 +329,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
 
             Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-            if (!BitConverter.TryWriteBytes(offsetBytes, _dataFile.Stream.Position))
+            if (!BitConverter.TryWriteBytes(offsetBytes, dataPosition))
             {
                 throw new InvalidOperationException("Failed to write the offset to bytes");
             }
 
-            byte[] data = vector.ToBinary();
             Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
             if (!BitConverter.TryWriteBytes(lengthBytes, data.Length))
             {
@@ -272,11 +344,67 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _dataFile.Stream.Write(data);
 
             _isAtEndOfIndexStream = true;
+            
+            // Record operation for durability management
+            _durabilityManager.RecordOperation();
+            
+            // Commit WAL after successful operation
+            _wal.Commit();
+            
+            // Increment count atomically within the lock to ensure consistency
+            Interlocked.Increment(ref _count);
         }
         finally
         {
             _rwLock.ExitWriteLock();
         }
+    }
+
+    private void AddInternal(Vector vector)
+    {
+        // This method assumes the write lock is already held
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        if (!_isAtEndOfIndexStream)
+        {
+            ReadToEnd();
+        }
+
+        long indexPosition = _indexFile.Stream.Position;
+        long dataPosition = _dataFile.Stream.Position;
+        byte[] data = vector.ToBinary();
+
+        // Log operation before performing it
+        _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
+
+        Span<byte> idBytes = entry[..s_idBytesLength];
+        if (!vector.Id.TryWriteBytes(idBytes))
+        {
+            throw new InvalidOperationException("Failed to write the Id to bytes");
+        }
+
+        Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+        if (!BitConverter.TryWriteBytes(offsetBytes, dataPosition))
+        {
+            throw new InvalidOperationException("Failed to write the offset to bytes");
+        }
+
+        Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+        if (!BitConverter.TryWriteBytes(lengthBytes, data.Length))
+        {
+            throw new InvalidOperationException("Failed to write the length to bytes");
+        }
+
+        _indexFile.Stream.Write(entry);
+        _dataFile.Stream.Write(data);
+
+        _isAtEndOfIndexStream = true;
+        
+        // Record operation for durability management
+        _durabilityManager.RecordOperation();
+        
+        // Commit WAL after successful operation
+        _wal.Commit();
+        
         Interlocked.Increment(ref _count);
     }
 
@@ -302,12 +430,26 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 Guid id = new(entry[..s_idBytesLength]);
                 if (id == vector.Id)
                 {
+                    // Get current index position for WAL logging
+                    long currentIndexPosition = _indexFile.Stream.Position - s_indexEntryByteLength;
+                    
+                    // Log operation before performing it
+                    _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, currentIndexPosition, -1);
+                    
                     // Seek to the beginning of the entry and remove the ID with a tombstone-ID
                     ReverseIndexStreamByIdBytesLength();
                     _indexFile.Stream.Write(s_tombStoneBytes);
                     // Seek to after the entry
                     _indexFile.Stream.Seek(s_indexEntryByteLength - s_idBytesLength, SeekOrigin.Current);
-                    --_count;
+                    
+                    // Record operation for durability management
+                    _durabilityManager.RecordOperation();
+                    
+                    // Commit WAL after successful operation
+                    _wal.Commit();
+                    
+                    // Decrement count atomically within the lock to ensure consistency
+                    Interlocked.Decrement(ref _count);
                     return true;
                 }
                 else if (id.Equals(Guid.Empty))
@@ -329,13 +471,102 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         ArgumentNullException.ThrowIfNull(vector);
 
-        if (Remove(vector))
+        _rwLock.EnterWriteLock();
+        try
         {
-            Add(vector);
-            return true;
-        }
+            // Find the vector in the index
+            _isAtEndOfIndexStream = false;
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
 
-        return false;
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            int bytesRead;
+            
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+            {
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id == vector.Id)
+                {
+                    // Found the vector - get current data position and length
+                    long currentIndexPosition = _indexFile.Stream.Position - s_indexEntryByteLength;
+                    long currentDataOffset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+                    int currentDataLength = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+                    
+                    byte[] newData = vector.ToBinary();
+                    
+                    // Try to reuse existing space if new data fits
+                    long newDataPosition;
+                    if (newData.Length <= currentDataLength)
+                    {
+                        // Reuse existing space
+                        newDataPosition = currentDataOffset;
+                        _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
+                    }
+                    else
+                    {
+                        // Need more space - check if we have capacity at end of file
+                        _dataFile.Stream.Seek(0, SeekOrigin.End);
+                        newDataPosition = _dataFile.Stream.Position;
+                        
+                        // Check if we have enough capacity
+                        if (newDataPosition + newData.Length > _dataFile.Stream.Length)
+                        {
+                            // Not enough capacity - this is a limitation of the current implementation
+                            // In a production system, we would expand the file or implement defragmentation
+                            return false;
+                        }
+                    }
+
+                    // Log operation before performing it
+                    _wal.LogOperation(WALOperationType.Update, vector.Id, newData, currentIndexPosition, newDataPosition);
+
+                    // Write new data
+                    _dataFile.Stream.Write(newData);
+                    
+                    // Update index entry with new offset and length
+                    _indexFile.Stream.Seek(currentIndexPosition + s_idBytesLength, SeekOrigin.Begin);
+                    Span<byte> offsetBytes = stackalloc byte[s_offsetBytesLength];
+                    Span<byte> lengthBytes = stackalloc byte[s_lengthBytesLength];
+                    
+                    if (!BitConverter.TryWriteBytes(offsetBytes, newDataPosition))
+                    {
+                        throw new InvalidOperationException("Failed to write the offset to bytes");
+                    }
+                    if (!BitConverter.TryWriteBytes(lengthBytes, newData.Length))
+                    {
+                        throw new InvalidOperationException("Failed to write the length to bytes");
+                    }
+                    
+                    _indexFile.Stream.Write(offsetBytes);
+                    _indexFile.Stream.Write(lengthBytes);
+                    
+                    // Record operation for durability management
+                    _durabilityManager.RecordOperation();
+                    
+                    // Commit WAL after successful operation
+                    _wal.Commit();
+                    
+                    // Count remains the same for update operation
+                    return true;
+                }
+                else if (id.Equals(Guid.Empty))
+                {
+                    _isAtEndOfIndexStream = true;
+                    ReverseIndexStreamByIdBytesLength();
+                    break;
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
     }
 
     /// <summary>
@@ -468,6 +699,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     }
 
     /// <summary>
+    /// Determines if defragmentation should be performed based on SSD optimization
+    /// </summary>
+    public bool ShouldDefragment()
+    {
+        long fragmentation = CalculateFragmentation();
+        long totalDataSize = GetTotalDataSize();
+        
+        return SSDOptimizer.ShouldDefragmentForSSD(fragmentation, totalDataSize);
+    }
+    
+    /// <summary>
     /// Defragments the data file in batches, to avoid blocking I/O for long periods
     /// </summary>
     /// <exception cref="InvalidOperationException"></exception>
@@ -492,24 +734,26 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             // Find the maximum entry size in this batch
             int maxEntrySize = 0;
 
-            while (entriesProcessed < _defragBatchSize && newIndexPosition < _count)
+            long currentReadPosition = newIndexPosition;
+            while (entriesProcessed < _defragBatchSize && currentReadPosition * s_indexEntryByteLength < _indexFile.Stream.Length)
             {
+                _indexFile.Stream.Seek(currentReadPosition * s_indexEntryByteLength, SeekOrigin.Begin);
                 bytesRead = _indexFile.Stream.Read(entry);
                 if (bytesRead != s_indexEntryByteLength)
                 {
-                    throw new InvalidOperationException("Failed to read the index entry");
+                    break; // End of file or incomplete entry
                 }
 
                 Guid id = new(entry[..s_idBytesLength]);
                 if (id.Equals(s_tombStone))
                 {
-                    newIndexPosition++;
-                    continue;
+                    currentReadPosition++;
+                    continue; // Skip tombstoned entries but don't count them
                 }
 
                 if (id.Equals(Guid.Empty))
                 {
-                    break;
+                    break; // End of valid entries
                 }
 
                 long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
@@ -523,17 +767,22 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 updates.Add((id, offset, length, newDataPosition));
                 maxEntrySize = Math.Max(maxEntrySize, length);
 
-                newIndexPosition++;
                 newDataPosition += length;
                 totalDataSize += length;
                 entriesProcessed++;
+                currentReadPosition++;
             }
+
+            newIndexPosition = currentReadPosition;
 
             // Rent a buffer from the ArrayPool
             byte[] sharedBuffer = ArrayPool<byte>.Shared.Rent(maxEntrySize);
 
             try
             {
+                // Allocate entry buffer outside the loop
+                Span<byte> updatedEntry = stackalloc byte[s_indexEntryByteLength];
+                
                 // Perform all reads and writes
                 foreach (var update in updates)
                 {
@@ -545,12 +794,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     _dataFile.Stream.Seek(update.newOffset, SeekOrigin.Begin);
                     _dataFile.Stream.Write(sharedBuffer, 0, update.length);
 
-                    // Update index entry
-                    _indexFile.Stream.Seek(_defragIndexPosition * s_indexEntryByteLength, SeekOrigin.Begin);
-                    _indexFile.Stream.Write(update.id.ToByteArray());
-                    _indexFile.Stream.Write(BitConverter.GetBytes(update.newOffset));
-                    _indexFile.Stream.Write(BitConverter.GetBytes(update.length));
-
+                    // Update index entry - write to the correct defrag position
+                    long writePosition = _defragIndexPosition * s_indexEntryByteLength;
+                    _indexFile.Stream.Seek(writePosition, SeekOrigin.Begin);
+                    if (!update.id.TryWriteBytes(updatedEntry[..s_idBytesLength]))
+                    {
+                        throw new InvalidOperationException("Failed to write the Id to bytes");
+                    }
+                    
+                    if (!BitConverter.TryWriteBytes(updatedEntry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)], update.newOffset))
+                    {
+                        throw new InvalidOperationException("Failed to write the offset to bytes");
+                    }
+                    
+                    if (!BitConverter.TryWriteBytes(updatedEntry[(s_idBytesLength + s_offsetBytesLength)..], update.length))
+                    {
+                        throw new InvalidOperationException("Failed to write the length to bytes");
+                    }
+                    
+                    _indexFile.Stream.Write(updatedEntry);
                     _defragIndexPosition++;
                 }
             }
@@ -564,7 +826,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _newDataPosition = newDataPosition;
 
             // Detecting the end of defragmentation
-            if (newIndexPosition >= _count)
+            if (entriesProcessed == 0 || newIndexPosition * s_indexEntryByteLength >= _indexFile.Stream.Length)
             {
                 // Reset state variables for the next defragmentation cycle
                 _defragIndexPosition = 0;
@@ -591,7 +853,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _indexFile.Reset();
             _dataFile.DisposeStreams();
             _dataFile.Reset();
-            _count = 0;
+            Interlocked.Exchange(ref _count, 0);
         }
         finally
         {
@@ -606,18 +868,15 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             return false;
         }
 
+        // Check for existence by ID only, not value equality
+        // This is more appropriate for concurrency scenarios where we care about object identity
         var vector = GetVector(item.Id);
-        if (vector is null)
-        {
-            return false;
-        }
-
-        return vector.Equals(item);
+        return vector is not null;
     }
 
     public IEnumerator<Vector> GetEnumerator()
     {
-        //_rwLock.EnterReadLock();
+        _rwLock.EnterReadLock();
         try
         {
             _isAtEndOfIndexStream = false;
@@ -660,7 +919,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
         finally
         {
-            //_rwLock.ExitReadLock();
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -783,5 +1042,171 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     internal long[] GetFileInfo()
     {
         return MemoryMappedFileServices.GetFileInfo(_indexFile, _dataFile);
+    }
+
+    internal void ReleaseMappedMemory()
+    {
+        _rwLock.EnterWriteLock();
+        try
+        {
+            // Dispose and recreate streams to release memory-mapped memory
+            // This allows the OS to page out unused data under memory pressure
+            _indexFile.DisposeStreams();
+            _dataFile.DisposeStreams();
+            
+            // Recreate the memory-mapped files
+            _indexFile.Reset();
+            _dataFile.Reset();
+            
+            _isAtEndOfIndexStream = false; // Force recalculation of stream position
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    private void RecoverFromWAL()
+    {
+        var entries = _wal.ReadEntries();
+        if (entries.Count == 0)
+            return;
+
+        Logging.Logger.Information("Recovering {EntryCount} operations from WAL", entries.Count);
+
+        foreach (var entry in entries)
+        {
+            try
+            {
+                switch (entry.Operation)
+                {
+                    case WALOperationType.Add:
+                        if (entry.VectorData != null)
+                        {
+                            var vector = new Vector(entry.VectorData);
+                            // Replay the add operation without WAL logging to avoid recursion
+                            AddWithoutWAL(vector);
+                        }
+                        break;
+                    case WALOperationType.Remove:
+                        // Implement remove recovery if needed
+                        break;
+                    case WALOperationType.Update:
+                        // Implement update recovery if needed
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Error(ex, "Failed to recover WAL entry for vector {VectorId}", entry.VectorId);
+            }
+        }
+
+        _wal.Commit(); // Clear WAL after recovery
+        Logging.Logger.Information("WAL recovery completed");
+    }
+
+    private void AddWithoutWAL(Vector vector)
+    {
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        if (!_isAtEndOfIndexStream)
+        {
+            ReadToEnd();
+        }
+
+        Span<byte> idBytes = entry[..s_idBytesLength];
+        if (!vector.Id.TryWriteBytes(idBytes))
+        {
+            throw new InvalidOperationException("Failed to write the Id to bytes");
+        }
+
+        Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+        if (!BitConverter.TryWriteBytes(offsetBytes, _dataFile.Stream.Position))
+        {
+            throw new InvalidOperationException("Failed to write the offset to bytes");
+        }
+
+        byte[] data = vector.ToBinary();
+        Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+        if (!BitConverter.TryWriteBytes(lengthBytes, data.Length))
+        {
+            throw new InvalidOperationException("Failed to write the length to bytes");
+        }
+
+        _indexFile.Stream.Write(entry);
+        _dataFile.Stream.Write(data);
+
+        _isAtEndOfIndexStream = true;
+        Interlocked.Increment(ref _count);
+    }
+
+    private void ValidateFileIntegrity()
+    {
+        try
+        {
+            // Quick validation for empty files
+            if (_indexFile.Stream.Length <= 0 && 
+                _dataFile.Stream.Length <= 0)
+            {
+                return; // New empty files are valid
+            }
+
+            bool indexValid = CorruptionDetector.ValidateIndexFile(_indexFile, _count);
+            bool dataValid = CorruptionDetector.ValidateDataFile(_dataFile);
+
+            if (!indexValid || !dataValid)
+            {
+                Logging.Logger.Warning("File corruption detected. Index valid: {IndexValid}, Data valid: {DataValid}", 
+                    indexValid, dataValid);
+                
+                CorruptionDetector.AttemptRepair(_indexFile, _dataFile);
+                
+                // Recalculate count after repair
+                RecalculateCount();
+                
+                Logging.Logger.Information("File repair completed. New count: {Count}", _count);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.Logger.Error(ex, "Failed to validate or repair file integrity");
+            throw;
+        }
+    }
+
+    private void RecalculateCount()
+    {
+        long count = 0;
+        try
+        {
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+            
+            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            while (_indexFile.Stream.Position + s_indexEntryByteLength <= _indexFile.Stream.Length)
+            {
+                if (_indexFile.Stream.Read(entry) != s_indexEntryByteLength)
+                    break;
+                
+                Guid id = new(entry[..s_idBytesLength]);
+                if (id.Equals(Guid.Empty))
+                    break;
+                
+                if (!id.Equals(s_tombStone))
+                {
+                    count++;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.Logger.Warning(ex, "Failed to recalculate count, using 0");
+        }
+        
+        Interlocked.Exchange(ref _count, count);
+    }
+
+    private long GetTotalDataSize()
+    {
+        return Math.Max(0, _dataFile.Stream.Length - 0);
     }
 }

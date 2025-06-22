@@ -368,8 +368,16 @@ public partial class VectorDatabase : IDisposable
         if (indexService != null && indexService.IsAlive)
         {
             _indexServiceCancellationTokenSource?.Cancel();
-            _indexServiceCancellationTokenSource?.Dispose();
             _logger.LogInformation("Indexing stop requested.");
+            
+            // Wait for the indexing thread to actually stop before continuing
+            // This prevents lock disposal issues when the thread is still running
+            if (!indexService.Join(TimeSpan.FromSeconds(5)))
+            {
+                _logger.LogWarning("Indexing thread did not stop within 5 seconds.");
+            }
+            
+            _indexServiceCancellationTokenSource?.Dispose();
         }
     }
 
@@ -493,7 +501,10 @@ public partial class VectorDatabase : IDisposable
         }
         finally
         {
-            _rwLock.ExitWriteLock();
+            if (_rwLock.IsWriteLockHeld)
+            {
+                _rwLock.ExitWriteLock();
+            }
         }
     }
 

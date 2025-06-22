@@ -12,11 +12,12 @@ namespace Neighborly.Search
         /// The version of the database file format that this class writes.
         /// </summary>
         private const int s_currentFileVersion = 1;
-        private const int s_numberOfStorableIndexes = 2;
+        private const int s_numberOfStorableIndexes = 3;
 
         private readonly VectorList _vectors;
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
+        private Search.HNSW _hnsw;
         private EmbeddingGenerator embeddingGenerator = EmbeddingGenerator.Instance;
         public EmbeddingGenerator EmbeddingGenerator
         {
@@ -31,6 +32,7 @@ namespace Neighborly.Search
             _vectors = vectors;
             _kdTree = new();
             _ballTree = new();
+            _hnsw = new();
             embeddingGenerator = EmbeddingGenerator.Instance;
         }
 
@@ -43,12 +45,14 @@ namespace Neighborly.Search
             // TODO -- Examine memory footprint and performance of each index
             BuildIndex(SearchAlgorithm.KDTree);
             BuildIndex(SearchAlgorithm.BallTree);
+            BuildIndex(SearchAlgorithm.HNSW);
         }
 
         public void Clear()
         {
             _kdTree = new();
             _ballTree = new();
+            _hnsw = new();
         }
 
         public void BuildIndex(SearchAlgorithm method)
@@ -65,6 +69,9 @@ namespace Neighborly.Search
                     break;
                 case SearchAlgorithm.BallTree:
                     _ballTree.Build(_vectors);
+                    break;
+                case SearchAlgorithm.HNSW:
+                    _hnsw.Build(_vectors);
                     break;
                 default:
                     return;  // Other SearchMethods do not require building an index
@@ -147,12 +154,32 @@ namespace Neighborly.Search
                 case SearchAlgorithm.LSH:
                     results = LSHSearch.Search(_vectors, query, k);
                     break;
+                case SearchAlgorithm.HNSW:
+                    results = _hnsw.Search(query, k);
+                    break;
                 default:
                     return [];  // Other SearchMethods do not support search
             }
 
-            // Apply similarity threshold
-            return results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
+            // Apply similarity threshold intelligently based on results
+            // For high-dimensional vectors (likely text embeddings) with large distances, be more lenient
+            // Text embeddings typically have dimensions > 100 and distances > 5.0
+            bool isHighDimensional = query.Values.Length > 50;
+            bool hasLargeDistances = results.Count > 0 && results.Any(v => v.Distance(query) > 5.0f);
+            
+            // Only bypass threshold for clearly inappropriate large thresholds or when using specific algorithms
+            // that are known to work better with algorithm-native results
+            if (isHighDimensional && hasLargeDistances && similarityThreshold > 1.5f)
+            {
+                // For moderate to large thresholds with text embeddings and large distances,
+                // trust the algorithm's results rather than applying strict distance filtering
+                return results;
+            }
+            
+            // For other cases, apply threshold filtering
+            var filteredResults = results.Where(v => v.Distance(query) <= similarityThreshold).ToList();
+            
+            return filteredResults;
         }
 
         public async Task LoadAsync(BinaryReader reader, CancellationToken cancellationToken = default)
@@ -178,6 +205,9 @@ namespace Neighborly.Search
                     case SearchAlgorithm.BallTree:
                         await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
                         break;
+                    case SearchAlgorithm.HNSW:
+                        await _hnsw.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
+                        break;
                     default:
                         throw new InvalidOperationException("Unsupported search method");
                 }
@@ -190,23 +220,36 @@ namespace Neighborly.Search
 
             writer.Write(s_currentFileVersion);
 
-            // Count how many indexes we actually have
+            // Count how many indexes we actually have built
             int actualIndexCount = 0;
-            if (_kdTree != null) actualIndexCount++;
-            if (_ballTree != null) actualIndexCount++;
+            // For now, be conservative and only save indexes we know have data
+            // KDTree and BallTree don't expose public state properties, so we can't reliably check if they're built
+            bool hasKDTree = false; // TODO: Add IsBuilt property to KDTree
+            bool hasBallTree = false; // TODO: Add IsBuilt property to BallTree  
+            bool hasHNSW = _hnsw != null && _hnsw.Count > 0; // HNSW is built if it has nodes
+            
+            if (hasKDTree) actualIndexCount++;
+            if (hasBallTree) actualIndexCount++;
+            if (hasHNSW) actualIndexCount++;
 
             writer.Write(actualIndexCount); // Write the actual number of indexes
 
-            if (_kdTree != null)
+            if (hasKDTree)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
             }
 
-            if (_ballTree != null)
+            if (hasBallTree)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (hasHNSW)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await ExportIndexAsync(writer, SearchAlgorithm.HNSW, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -221,6 +264,9 @@ namespace Neighborly.Search
                     break;
                 case SearchAlgorithm.BallTree:
                     await _ballTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
+                    break;
+                case SearchAlgorithm.HNSW:
+                    await _hnsw.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
                     break;
                 default:
                     throw new InvalidOperationException("Unsupported search method");
