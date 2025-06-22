@@ -391,3 +391,6 @@ FodyWeavers.xsd
 /.aider.tags.cache.v3
 /.aider.chat.history.md
 /.aider.input.history
+
+# Internal research and documentation
+/docs/local/

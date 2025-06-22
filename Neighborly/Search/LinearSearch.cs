@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace Neighborly.Search;
 
 /// <summary>
@@ -15,18 +17,28 @@ public class LinearSearch
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
         }
 
-        List<Vector> results = new List<Vector>(k);
-
-        for (int i = 0; i < vectors.Count; i++)
+        if (vectors.Count == 0)
         {
-            if (results.Count >= k)
-                break;
-
-            if (vectors[i].Equals(query))
-                results.Add(vectors[i]);
+            return new List<Vector>();
         }
 
-        return results;
+        // Calculate distances for all vectors and sort by distance
+        var vectorDistances = new List<(Vector vector, float distance)>();
+        
+        for (int i = 0; i < vectors.Count; i++)
+        {
+            float distance = vectors[i].Distance(query);
+            vectorDistances.Add((vectors[i], distance));
+        }
+
+        // Sort by distance (ascending) and take the k nearest neighbors
+        var sortedResults = vectorDistances
+            .OrderBy(vd => vd.distance)
+            .Take(k)
+            .Select(vd => vd.vector)
+            .ToList();
+
+        return sortedResults;
     }
 }
 

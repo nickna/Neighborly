@@ -45,6 +45,9 @@ internal class MemoryMappedFileHolder : IDisposable
         {
             _file = MemoryMappedFile.CreateFromFile(_fileName, FileMode.OpenOrCreate, null, _capacity);
             _stream = _file.CreateViewStream();
+            
+            // Apply SSD optimizations
+            SSDOptimizer.OptimizeFileForSSD(_fileName);
         }
         catch (System.IO.IOException ex)
         {
@@ -107,5 +110,11 @@ internal class MemoryMappedFileHolder : IDisposable
     {
         _stream?.Dispose();
         _file?.Dispose();
+    }
+
+
+    public long GetDataStartPosition()
+    {
+        return 0;
     }
 }
