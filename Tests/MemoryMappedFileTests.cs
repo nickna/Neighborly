@@ -171,12 +171,28 @@ public class MemoryMappedFileTests
         long fragmentation;
         int iterationCount = 0;
         int maxIterations = 1000; // Adjust as needed
+        var timeout = TimeSpan.FromSeconds(10); // Additional timeout safety
+        var stopwatch = Stopwatch.StartNew();
+        
         do
         {
             fragmentation = _db.Vectors.DefragBatch();
-            Console.WriteLine($"Iteration {iterationCount}: Fragmentation = {fragmentation}");
             iterationCount++;
+            
+            // Only log every 100 iterations to reduce console spam
+            if (iterationCount % 100 == 0 || fragmentation <= 0)
+            {
+                Console.WriteLine($"Iteration {iterationCount}: Fragmentation = {fragmentation}");
+            }
+            
+            // Safety check for infinite loops
+            if (stopwatch.Elapsed > timeout)
+            {
+                Assert.Fail($"Defragmentation timed out after {timeout.TotalSeconds} seconds. Iterations: {iterationCount}, Last fragmentation: {fragmentation}");
+            }
         } while (fragmentation > 0 && iterationCount < maxIterations);
+        
+        stopwatch.Stop();
 
         int countAfterDefrag = _db.Vectors.Count;
         Console.WriteLine($"Count after defrag: {countAfterDefrag}");
@@ -226,15 +242,29 @@ public class MemoryMappedFileTests
         // Act
         var stopwatch = Stopwatch.StartNew();
         long fragmentation;
+        int iterationCount = 0;
+        int maxIterations = 1000; // Prevent infinite loops
+        var timeout = TimeSpan.FromSeconds(10); // Additional timeout safety
+        
         do
         {
             fragmentation = _db.Vectors.DefragBatch();
-        } while (fragmentation > 0);
+            iterationCount++;
+            
+            // Safety check for infinite loops
+            if (stopwatch.Elapsed > timeout)
+            {
+                Assert.Fail($"Defragmentation timed out after {timeout.TotalSeconds} seconds. Iterations: {iterationCount}, Last fragmentation: {fragmentation}");
+            }
+        } while (fragmentation > 0 && iterationCount < maxIterations);
         stopwatch.Stop();
 
         // Assert
         var maxAcceptableTime = TimeSpan.FromMilliseconds(300); // Adjust the threshold as needed
-        Assert.That(stopwatch.Elapsed, Is.LessThan(maxAcceptableTime), $"Defragmentation should complete within {maxAcceptableTime.TotalSeconds} seconds.");
+        Assert.That(stopwatch.Elapsed, Is.LessThan(maxAcceptableTime), $"Defragmentation should complete within {maxAcceptableTime.TotalSeconds} seconds. Actual: {stopwatch.Elapsed.TotalSeconds}s, Iterations: {iterationCount}");
+        
+        // Ensure we didn't hit the iteration limit due to a bug
+        Assert.That(iterationCount, Is.LessThan(maxIterations), $"Defragmentation hit the maximum iteration limit ({maxIterations}), which may indicate an infinite loop bug. Last fragmentation value: {fragmentation}");
     }
 
     [Test]
