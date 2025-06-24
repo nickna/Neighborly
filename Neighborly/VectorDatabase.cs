@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Neighborly.ETL;
 using Neighborly.Search;
+using Neighborly.Distance;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -151,6 +152,85 @@ public partial class VectorDatabase : IDisposable
             return new List<Vector>();
         }
     }
+
+    /// <summary>
+    /// Searches for all vectors within a specified radius of the given text in the database.
+    /// This text is first converted into an embedding using the EmbeddingGenerator.
+    /// </summary>
+    /// <param name="text">The text to search for</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="searchMethod">Search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
+    /// <returns>Vectors that are within the specified radius</returns>
+    /// <seealso cref="EmbeddingGenerator"/>
+    public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        try
+        {
+            var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        catch (ArgumentException)
+        {
+            // Re-throw validation exceptions so tests can catch them
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
+        }
+    }
+
+    /// <summary>
+    /// Searches for all vectors within a specified radius of the given query vector in the database.
+    /// </summary>
+    /// <param name="query">The query vector</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="searchMethod">Search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
+    /// <returns>Vectors that are within the specified radius</returns>
+    public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        try
+        {
+            var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        catch (ArgumentException)
+        {
+            // Re-throw validation exceptions so tests can catch them
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
+        }
+        catch (Exception ex)
+        {
+            CouldNotPerformRangeSearchInDb(query, radius, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
+        }
+    }
+
+    [LoggerMessage(
+    EventId = 1,
+    Level = LogLevel.Error,
+    Message = "Could not perform range search for vector `{Query}` with radius {Radius} in the database.")]
+    private partial void CouldNotPerformRangeSearchInDb(Vector query, float radius, Exception ex);
 
     [LoggerMessage(
     EventId = 0,

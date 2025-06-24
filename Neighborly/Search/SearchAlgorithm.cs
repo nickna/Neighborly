@@ -12,6 +12,7 @@ namespace Neighborly.Search
         KDTree,
         Linear,
         LSH,
-        HNSW
+        HNSW,
+        Range
     }
 }
