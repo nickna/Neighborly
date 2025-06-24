@@ -29,6 +29,84 @@ public partial class VectorDatabase : IDisposable
     private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
+
+    /// <summary>
+    /// Thread-safe method to add a vector to the database.
+    /// </summary>
+    /// <param name="vector">The vector to add</param>
+    public void AddVector(Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            _vectors.Add(vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to update a vector in the database.
+    /// </summary>
+    /// <param name="id">The ID of the vector to update</param>
+    /// <param name="vector">The new vector data</param>
+    /// <returns>True if the vector was updated, false if not found</returns>
+    public bool UpdateVector(Guid id, Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            return _vectors.Update(id, vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to remove a vector from the database.
+    /// </summary>
+    /// <param name="vector">The vector to remove</param>
+    /// <returns>True if the vector was removed, false if not found</returns>
+    public bool RemoveVector(Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            return _vectors.Remove(vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to get a vector by ID.
+    /// </summary>
+    /// <param name="id">The ID of the vector to retrieve</param>
+    /// <returns>The vector if found, null otherwise</returns>
+    public Vector? GetVector(Guid id)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            return _vectors.GetById(id);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
     private Search.SearchService _searchService = null!;
     private ReaderWriterLockSlim _rwLock = new();
     private Thread? indexService;

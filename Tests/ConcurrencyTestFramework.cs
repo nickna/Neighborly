@@ -239,24 +239,49 @@ public class ConcurrencyTestRunner
                 switch (action.Operation)
                 {
                     case ConcurrencyTestAction.OperationType.Add:
-                        database.Vectors.Add(action.Vector);
+                        database.AddVector(action.Vector);
                         success = true;
                         break;
 
                     case ConcurrencyTestAction.OperationType.Update:
                         if (action.TargetId.HasValue)
                         {
-                            success = database.Vectors.Update(action.TargetId.Value, action.Vector);
+                            // Check if vector exists before update
+                            var existingVector = database.GetVector(action.TargetId.Value);
+                            if (existingVector != null)
+                            {
+                                Console.WriteLine($"Found vector {action.TargetId.Value} with values [{string.Join(", ", existingVector.Values)}] before update");
+                                success = database.UpdateVector(action.TargetId.Value, action.Vector);
+                                if (!success)
+                                {
+                                    Console.WriteLine($"Update failed for vector {action.TargetId.Value}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"Update succeeded for vector {action.TargetId.Value}");
+                                    // Verify update by reading back
+                                    var updatedVector = database.GetVector(action.TargetId.Value);
+                                    if (updatedVector != null)
+                                    {
+                                        Console.WriteLine($"After update, vector {action.TargetId.Value} has values [{string.Join(", ", updatedVector.Values)}]");
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"Vector {action.TargetId.Value} not found before update attempt");
+                                success = false;
+                            }
                         }
                         break;
 
                     case ConcurrencyTestAction.OperationType.Remove:
                         if (action.TargetId.HasValue)
                         {
-                            var vectorToRemove = database.Vectors.FirstOrDefault(v => v.Id == action.TargetId.Value);
+                            var vectorToRemove = database.GetVector(action.TargetId.Value);
                             if (vectorToRemove != null)
                             {
-                                success = database.Vectors.Remove(vectorToRemove);
+                                success = database.RemoveVector(vectorToRemove);
                             }
                         }
                         break;
