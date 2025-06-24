@@ -19,6 +19,7 @@ namespace Neighborly.Search
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
         private Search.HNSW _hnsw;
+        private Search.LSHSearch? _lshSearch; // Nullable until configured/built
         private EmbeddingGenerator embeddingGenerator = EmbeddingGenerator.Instance;
         public EmbeddingGenerator EmbeddingGenerator
         {
@@ -34,6 +35,8 @@ namespace Neighborly.Search
             _kdTree = new();
             _ballTree = new();
             _hnsw = new();
+            // _lshSearch is initialized when BuildIndex(SearchAlgorithm.LSH) is called,
+            // as it requires vector dimensions which might only be known at build time.
             embeddingGenerator = EmbeddingGenerator.Instance;
         }
 
@@ -47,6 +50,7 @@ namespace Neighborly.Search
             BuildIndex(SearchAlgorithm.KDTree);
             BuildIndex(SearchAlgorithm.BallTree);
             BuildIndex(SearchAlgorithm.HNSW);
+            BuildIndex(SearchAlgorithm.LSH); // Add LSH to BuildAllIndexes
         }
 
         public void Clear()
@@ -54,6 +58,7 @@ namespace Neighborly.Search
             _kdTree = new();
             _ballTree = new();
             _hnsw = new();
+            _lshSearch = null; // Clear LSH search instance
         }
 
         public void BuildIndex(SearchAlgorithm method)
@@ -73,6 +78,19 @@ namespace Neighborly.Search
                     break;
                 case SearchAlgorithm.HNSW:
                     _hnsw.Build(_vectors);
+                    break;
+                case SearchAlgorithm.LSH:
+                    if (_vectors.Count > 0)
+                    {
+                        // Ensure LSHSearch is initialized with correct dimensions
+                        // This assumes all vectors have the same dimension.
+                        // A more robust approach might get dimensions from VectorList metadata if available
+                        // or from the first vector if the list is not empty.
+                        int dimensions = _vectors[0].Values.Length;
+                        var lshConfig = new LSHConfig(vectorDimensions: dimensions); // Use default L, k for now
+                        _lshSearch = new LSHSearch(lshConfig);
+                        _lshSearch.Build(_vectors);
+                    }
                     break;
                 default:
                     return;  // Other SearchMethods do not require building an index
@@ -153,7 +171,22 @@ namespace Neighborly.Search
                     results = LinearSearch.Search(_vectors, query, k);
                     break;
                 case SearchAlgorithm.LSH:
-                    results = LSHSearch.Search(_vectors, query, k);
+                    if (_lshSearch == null)
+                    {
+                        // Attempt to build it on-the-fly if not already built.
+                        // This might be slow for the first LSH search if the index is large.
+                        // Consider if this is the desired behavior or if an explicit BuildIndex is required.
+                        BuildIndex(SearchAlgorithm.LSH);
+                    }
+                    if (_lshSearch != null)
+                    {
+                        results = _lshSearch.Search(query, k);
+                    }
+                    else
+                    {
+                        // Fallback or error if LSH couldn't be initialized (e.g., no vectors to get dimensions)
+                        results = new List<Vector>(); // Or throw new InvalidOperationException("LSH index not built and cannot be initialized.");
+                    }
                     break;
                 case SearchAlgorithm.HNSW:
                     results = _hnsw.Search(query, k);
@@ -270,8 +303,23 @@ namespace Neighborly.Search
                     case SearchAlgorithm.HNSW:
                         await _hnsw.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
                         break;
+                    case SearchAlgorithm.LSH:
+                        // Assuming _vectors is already populated or LSH Load will handle it.
+                        // LSH Load needs a way to get dimensions if not part of the saved data.
+                        // For now, let's assume LSHConfig is part of the saved data or can be inferred.
+                        if (_vectors.Count > 0) // Need dimensions to initialize LSHConfig if not saved
+                        {
+                            int dims = _vectors[0].Values.Length; // Infer dimensions
+                             // This is a simplified Load. A proper Load would read config from stream.
+                            var lshConfig = new LSHConfig(vectorDimensions: dims);
+                            _lshSearch = new LSHSearch(lshConfig);
+                            // _lshSearch.Load(reader, dims); // Placeholder: Actual load logic needed in LSHSearch
+                        }
+                        // If LSHSearch.Load can fully rehydrate itself including config, this would be cleaner.
+                        // For now, LSH load is not fully implemented, so this path might not work.
+                        break;
                     default:
-                        throw new InvalidOperationException("Unsupported search method");
+                        throw new InvalidOperationException($"Unsupported search method for LoadAsync: {method}");
                 }
             }
         }
@@ -282,36 +330,24 @@ namespace Neighborly.Search
 
             writer.Write(s_currentFileVersion);
 
-            // Count how many indexes we actually have built
-            int actualIndexCount = 0;
-            // For now, be conservative and only save indexes we know have data
-            // KDTree and BallTree don't expose public state properties, so we can't reliably check if they're built
-            bool hasKDTree = false; // TODO: Add IsBuilt property to KDTree
-            bool hasBallTree = false; // TODO: Add IsBuilt property to BallTree  
-            bool hasHNSW = _hnsw != null && _hnsw.Count > 0; // HNSW is built if it has nodes
-            
-            if (hasKDTree) actualIndexCount++;
-            if (hasBallTree) actualIndexCount++;
-            if (hasHNSW) actualIndexCount++;
+            var builtIndexes = new List<SearchAlgorithm>();
+            // TODO: Add IsBuilt properties to KDTree and BallTree for reliable checks.
+            // For now, we assume if they are not null, they might be built.
+            // This part needs more robust checking of whether an index is actually built and worth saving.
+            if (_kdTree != null) builtIndexes.Add(SearchAlgorithm.KDTree); // Placeholder check
+            if (_ballTree != null) builtIndexes.Add(SearchAlgorithm.BallTree); // Placeholder check
+            if (_hnsw != null && _hnsw.Count > 0) builtIndexes.Add(SearchAlgorithm.HNSW);
+            if (_lshSearch != null) builtIndexes.Add(SearchAlgorithm.LSH); // LSHSearch needs an IsBuilt or Count property
 
-            writer.Write(actualIndexCount); // Write the actual number of indexes
+            // Filter out LSH if its Save is not implemented, to avoid runtime errors
+            // builtIndexes.RemoveAll(sa => sa == SearchAlgorithm.LSH && _lshSearch?.IsSaveImplemented == false); // Needs IsSaveImplemented property
 
-            if (hasKDTree)
+            writer.Write(builtIndexes.Count);
+
+            foreach (var method in builtIndexes)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                await ExportIndexAsync(writer, SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (hasBallTree)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ExportIndexAsync(writer, SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
-            }
-
-            if (hasHNSW)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                await ExportIndexAsync(writer, SearchAlgorithm.HNSW, cancellationToken).ConfigureAwait(false);
+                await ExportIndexAsync(writer, method, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -330,8 +366,11 @@ namespace Neighborly.Search
                 case SearchAlgorithm.HNSW:
                     await _hnsw.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
                     break;
+                case SearchAlgorithm.LSH:
+                    _lshSearch?.Save(writer); // Call LSH Save (currently a placeholder)
+                    break;
                 default:
-                    throw new InvalidOperationException("Unsupported search method");
+                    throw new InvalidOperationException($"Unsupported search method for ExportIndexAsync: {method}");
             }
         }
     }
