@@ -13,6 +13,8 @@ namespace Neighborly.Search
         Linear,
         LSH,
         HNSW,
-        Range
+        Range,
+        BinaryQuantization,
+        ProductQuantization
     }
 }

@@ -158,6 +158,12 @@ namespace Neighborly.Search
                 case SearchAlgorithm.HNSW:
                     results = _hnsw.Search(query, k);
                     break;
+                case SearchAlgorithm.BinaryQuantization:
+                    results = BinaryQuantization.Search(_vectors, query, k);
+                    break;
+                case SearchAlgorithm.ProductQuantization:
+                    results = ProductQuantization.Search(_vectors, query, k);
+                    break;
                 default:
                     return [];  // Other SearchMethods do not support search
             }
