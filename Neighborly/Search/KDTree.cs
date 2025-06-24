@@ -16,6 +16,70 @@ public class KDTree
 
     private KDTreeNode? root;
 
+    /// <summary>
+    /// Bounded priority queue that efficiently maintains the k best candidates
+    /// Uses a max-heap to keep the worst element at the top for easy removal
+    /// </summary>
+    private sealed class BoundedPriorityQueue
+    {
+        private readonly int _capacity;
+        private readonly PriorityQueue<Vector, float> _heap;
+
+        public BoundedPriorityQueue(int capacity)
+        {
+            _capacity = capacity;
+            _heap = new PriorityQueue<Vector, float>();
+        }
+
+        public bool IsFull => _heap.Count >= _capacity;
+
+        public float WorstDistance
+        {
+            get
+            {
+                if (_heap.Count == 0)
+                    return float.MaxValue;
+                
+                _heap.TryPeek(out _, out var priority);
+                return -priority; // Convert back from negated value
+            }
+        }
+
+        public void TryAdd(Vector vector, float distance)
+        {
+            if (_heap.Count < _capacity)
+            {
+                // Use negative distance to create max-heap behavior (worst at top)
+                _heap.Enqueue(vector, -distance);
+            }
+            else if (_heap.TryPeek(out _, out var worstPriority) && distance < -worstPriority)
+            {
+                _heap.Dequeue(); // Remove worst
+                _heap.Enqueue(vector, -distance);
+            }
+        }
+
+        public IList<Vector> GetResults()
+        {
+            var results = new List<Vector>(_heap.Count);
+            var tempQueue = new PriorityQueue<Vector, float>();
+            
+            // Extract all elements and re-negate to get correct distances for sorting
+            while (_heap.TryDequeue(out var vector, out var priority))
+            {
+                tempQueue.Enqueue(vector, priority); // Keep negative for min-heap ordering
+            }
+            
+            // Dequeue in ascending distance order (best first)
+            while (tempQueue.TryDequeue(out var vector, out _))
+            {
+                results.Add(vector);
+            }
+            
+            return results;
+        }
+    }
+
     public void Build(VectorList vectors)
     {
         if (vectors == null)
@@ -94,43 +158,36 @@ public class KDTree
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
         }
 
-        return NearestNeighbors(root, query, k, 0)?
-            .OrderBy(t => (t.Item1 - query).Magnitude)
-            .Select(t => t.Item1)
-            .ToList() ?? new List<Vector>();
-
-
+        var candidates = new BoundedPriorityQueue(k);
+        NearestNeighbors(root, query, k, 0, candidates);
+        
+        return candidates.GetResults();
     }
 
-    private List<Tuple<Vector, double>>? NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth)
+    private void NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth, BoundedPriorityQueue candidates)
     {
-        if (node == null || node.Vector == null)
-            return new List<Tuple<Vector, double>>();
-
+        if (node?.Vector == null)
+            return;
 
         var axis = depth % query.Dimensions;
-        var next = node.Vector[axis] > query[axis] ? node.Left : node.Right;
-        var others = node.Vector[axis] > query[axis] ? node.Right : node.Left;
+        var distance = (node.Vector - query).Magnitude;
+        
+        // Add current node to candidates
+        candidates.TryAdd(node.Vector, distance);
 
-        var best = NearestNeighbors(next, query, k, depth + 1) ?? new List<Tuple<Vector, double>>();
+        // Determine which child to search first
+        var nearChild = query[axis] <= node.Vector[axis] ? node.Left : node.Right;
+        var farChild = query[axis] <= node.Vector[axis] ? node.Right : node.Left;
 
-        if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
+        // Search the near child first
+        NearestNeighbors(nearChild, query, k, depth + 1, candidates);
+
+        // Check if we need to search the far child (pruning condition)
+        var axisDistance = Math.Abs(query[axis] - node.Vector[axis]);
+        if (!candidates.IsFull || axisDistance < candidates.WorstDistance)
         {
-            var distance = (node.Vector - query).Magnitude;
-            best.Add(Tuple.Create(node.Vector, (double)distance));
-            best = best.OrderBy(t => t.Item2).Take(k).ToList();
-
-            if (best.Count < k || Math.Abs(node.Vector[axis] - query[axis]) < best.Last().Item2)
-            {
-
-                best = best.Concat(NearestNeighbors(others, query, k, depth + 1) ?? new List<Tuple<Vector, double>>())
-                    .OrderBy(t => t.Item2)
-                    .Take(k)
-                    .ToList();
-            }
+            NearestNeighbors(farChild, query, k, depth + 1, candidates);
         }
-
-        return best;
     }
 
     public IList<Vector> Search(Vector query, int k)
