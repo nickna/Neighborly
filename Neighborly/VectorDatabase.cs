@@ -144,6 +144,8 @@ public partial class VectorDatabase : IDisposable
     private bool _hasOutdatedIndex = false;
 
     private bool _disposedValue;
+    private volatile bool _isDisposing;
+    private readonly CancellationTokenSource _disposalCancellationTokenSource = new();
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
@@ -369,6 +371,8 @@ public partial class VectorDatabase : IDisposable
     public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
         using var activity = StartActivity(name: "LoadVectors");
+        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposalCancellationTokenSource.Token);
+        var combinedToken = combinedCts.Token;
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
@@ -386,29 +390,44 @@ public partial class VectorDatabase : IDisposable
         }
         else
         {
+            bool indexesAreDirty;
+            
+            // Load data without holding lock for the entire operation
             _rwLock.EnterWriteLock();
             try
             {
-                bool indexesAreDirty;
-
                 using (var inputStream = new FileStream(filePath, FileMode.Open))
                 using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
                 using (var reader = new BinaryReader(decompressionStream))
                 {
                     _vectors.Clear();
-                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, cancellationToken).ConfigureAwait(false);
+                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, combinedToken).ConfigureAwait(false);
                     _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
                 }
-
-                if (indexesAreDirty)
+            }
+            finally
+            {
+                if (_rwLock.IsWriteLockHeld)
                 {
-                    await RebuildSearchIndexesAsync().ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+                    _rwLock.ExitWriteLock();
                 }
+            }
 
+            // Rebuild indexes outside the write lock to reduce lock contention
+            if (indexesAreDirty && !_isDisposing)
+            {
+                // Check for disposal/cancellation before rebuilding indexes
+                combinedToken.ThrowIfCancellationRequested();
+                await RebuildSearchIndexesAsync(combinedToken).ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+            }
+
+            // Update state flags with minimal lock time
+            _rwLock.EnterWriteLock();
+            try
+            {
                 _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
                 _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
-
                 activity?.SetStatus(ActivityStatusCode.Ok);
             }
             finally
@@ -493,7 +512,7 @@ public partial class VectorDatabase : IDisposable
         {
             _logger.LogInformation("Indexing thread started.");
 
-            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
+            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
             {
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
                 if (_hasOutdatedIndex &&
@@ -501,7 +520,7 @@ public partial class VectorDatabase : IDisposable
                     DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
                     await RebuildTagsAsync();
-                    await RebuildSearchIndexesAsync();
+                    await RebuildSearchIndexesAsync(cancellationToken);
                     _indexRebuildCounter.Add(1);
                 }
                 try
@@ -523,19 +542,58 @@ public partial class VectorDatabase : IDisposable
 
     private void StopIndexService()
     {
-        if (indexService != null && indexService.IsAlive)
+        try
         {
-            _indexServiceCancellationTokenSource?.Cancel();
-            _logger.LogInformation("Indexing stop requested.");
+            _logger.LogInformation($"StopIndexService called. IndexService exists: {indexService != null}, IsAlive: {indexService?.IsAlive}, CancellationSource exists: {_indexServiceCancellationTokenSource != null}");
             
-            // Wait for the indexing thread to actually stop before continuing
-            // This prevents lock disposal issues when the thread is still running
-            if (!indexService.Join(TimeSpan.FromSeconds(5)))
+            if (indexService != null && indexService.IsAlive)
             {
-                _logger.LogWarning("Indexing thread did not stop within 5 seconds.");
+                _indexServiceCancellationTokenSource?.Cancel();
+                _logger.LogInformation("Indexing stop requested.");
+                
+                // Wait for the indexing thread to actually stop before continuing
+                // This prevents lock disposal issues when the thread is still running
+                if (!indexService.Join(TimeSpan.FromSeconds(5)))
+                {
+                    _logger.LogWarning("Indexing thread did not stop within 5 seconds, waiting longer...");
+                    
+                    // Try waiting longer for graceful shutdown
+                    if (!indexService.Join(TimeSpan.FromSeconds(10)))
+                    {
+                        _logger.LogError("Indexing thread did not stop within 15 seconds total. This may cause disposal issues.");
+                        
+                        // As a last resort, we'll proceed but the thread might still be running
+                        // In production, consider Thread.Abort() here, but it's deprecated and dangerous
+                    }
+                    else
+                    {
+                        _logger.LogInformation("Indexing thread stopped after extended wait.");
+                    }
+                }
+                else
+                {
+                    _logger.LogInformation("Indexing thread stopped gracefully.");
+                }
+                
+                _indexServiceCancellationTokenSource?.Dispose();
+                _indexServiceCancellationTokenSource = null;
+                indexService = null;
             }
-            
-            _indexServiceCancellationTokenSource?.Dispose();
+            else if (indexService != null)
+            {
+                _logger.LogInformation("IndexService exists but is not alive - cleaning up.");
+                _indexServiceCancellationTokenSource?.Dispose();
+                _indexServiceCancellationTokenSource = null;
+                indexService = null;
+            }
+            else
+            {
+                _logger.LogInformation("No indexing service to stop.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred while stopping index service.");
         }
     }
 
@@ -559,14 +617,15 @@ public partial class VectorDatabase : IDisposable
     }
 
     // This is an async function
-    public async Task RebuildSearchIndexesAsync()
+    public async Task RebuildSearchIndexesAsync(CancellationToken cancellationToken = default)
     {
         await Task.Run(() =>
         {
             using var activity = StartActivity(name: "BuildAllSearchIndexes");
+            cancellationToken.ThrowIfCancellationRequested();
             _searchService.BuildAllIndexes();
             activity?.SetStatus(ActivityStatusCode.Ok);
-        });
+        }, cancellationToken);
     }
     public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
@@ -762,11 +821,34 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
+                // Signal that disposal is starting to stop the indexing thread quickly
+                _isDisposing = true;
+                
+                // Cancel all ongoing operations immediately
+                _disposalCancellationTokenSource.Cancel();
+                
                 _logger.LogInformation("Shutting down VectorDatabase.");
                 StopIndexService();
+                
+                // Safety check: ensure no locks are held before disposal
+                var maxRetries = 50; // Wait up to 5 seconds (50 * 100ms)
+                var retryCount = 0;
+                while (((_rwLock.IsReadLockHeld || _rwLock.IsWriteLockHeld) && retryCount < maxRetries))
+                {
+                    _logger.LogWarning($"Lock is still held during disposal (Read: {_rwLock.IsReadLockHeld}, Write: {_rwLock.IsWriteLockHeld}). Waiting... ({retryCount + 1}/{maxRetries})");
+                    Thread.Sleep(100);
+                    retryCount++;
+                }
+                
+                if (_rwLock.IsReadLockHeld || _rwLock.IsWriteLockHeld)
+                {
+                    _logger.LogError($"Lock is still held after waiting 5 seconds (Read: {_rwLock.IsReadLockHeld}, Write: {_rwLock.IsWriteLockHeld}). Proceeding with disposal anyway.");
+                }
+                
                 _rwLock.Dispose();
                 _vectors.Modified -= VectorList_Modified;
                 _vectors.Dispose();
+                _disposalCancellationTokenSource.Dispose();
             }
 
             _disposedValue = true;
