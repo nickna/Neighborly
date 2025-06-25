@@ -378,9 +378,10 @@ public class KDTree
         var results = new List<(Vector vector, float distance)>();
         RangeNeighbors(root, query, radius, 0, distanceCalculator, results);
         
-        // Sort by distance and return just the vectors
+        // Sort by distance, then by vector ID for consistent ordering when distances are equal
         return results
             .OrderBy(r => r.distance)
+            .ThenBy(r => r.vector.Id)
             .Select(r => r.vector)
             .ToList();
     }
@@ -404,9 +405,10 @@ public class KDTree
         var results = new ConcurrentBag<(Vector vector, float distance)>();
         RangeNeighborsParallel(root, query, radius, 0, distanceCalculator, results);
         
-        // Sort by distance and return just the vectors
+        // Sort by distance, then by vector ID for consistent ordering when distances are equal
         return results
             .OrderBy(r => r.distance)
+            .ThenBy(r => r.vector.Id)
             .Select(r => r.vector)
             .ToList();
     }
