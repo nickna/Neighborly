@@ -149,31 +149,57 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
             _isAtEndOfIndexStream = false;
 
-            // Seek to the first possible position of the index entry
-            _indexFile.Stream.Seek(index * s_indexEntryByteLength, SeekOrigin.Begin);
+            // Start from the beginning and count non-tombstone entries
+            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-
-            Guid? vectorId = null;
-            // Skip over tombstoned entries
-            while (vectorId is null || vectorId.Equals(Guid.Empty) || vectorId.Equals(s_tombStone))
+            
+            long currentLogicalIndex = 0;
+            int bytesRead;
+            
+            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
             {
-                _indexFile.Stream.ReadExactly(entry);
-                vectorId = new(entry[..s_idBytesLength]);
-            }
+                if (bytesRead != s_indexEntryByteLength)
+                {
+                    throw new InvalidOperationException("Failed to read the index entry");
+                }
+                
+                Guid vectorId = new(entry[..s_idBytesLength]);
+                
+                // If we hit an empty entry, we've reached the end
+                if (vectorId.Equals(Guid.Empty))
+                {
+                    return null;
+                }
+                
+                // Skip tombstones
+                if (vectorId.Equals(s_tombStone))
+                {
+                    continue;
+                }
+                
+                // Check if this is the index we're looking for
+                if (currentLogicalIndex == index)
+                {
+                    Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                    Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                    long offset = BitConverter.ToInt64(offsetBytes);
+                    int length = BitConverter.ToInt32(lengthBytes);
+                    
+                    if (offset < 0L || length <= 0)
+                    {
+                        return null;
+                    }
 
-            Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-            Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
-            long offset = BitConverter.ToInt64(offsetBytes);
-            int length = BitConverter.ToInt32(lengthBytes);
-            if (offset < 0L || length <= 0)
-            {
-                return null;
+                    _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
+                    Span<byte> bytes = stackalloc byte[length];
+                    _dataFile.Stream.ReadExactly(bytes);
+                    return new Vector(bytes);
+                }
+                
+                currentLogicalIndex++;
             }
-
-            _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-            Span<byte> bytes = stackalloc byte[length];
-            _dataFile.Stream.ReadExactly(bytes);
-            return new Vector(bytes);
+            
+            return null;
         }
         finally
         {

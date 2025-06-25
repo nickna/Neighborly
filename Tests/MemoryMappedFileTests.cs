@@ -368,27 +368,27 @@ public class MemoryMappedFileTests
         indexOfThird = _db.Vectors.IndexOf(vector3);
         Assert.That(indexOfThird, Is.EqualTo(1), "IndexOf should return the correct index for the third vector.");
 
-        // Update the 2nd vector - this will affect the index, as updates are not in-place
+        // Update the 2nd vector - this is done in-place, so it maintains its position
         var updatedVector2 = new Vector(new float[] { 42, 69, 420 });
         var updated = _db.Vectors.Update(vector2.Id, updatedVector2);
         Assert.That(updated, Is.True, "Update should return true when the vector is updated.");
 
         var indexOfUpdatedSecond = _db.Vectors.IndexOf(updatedVector2);
-        Assert.That(indexOfUpdatedSecond, Is.EqualTo(1), "IndexOf should return the correct index for the updated second vector.");
+        Assert.That(indexOfUpdatedSecond, Is.EqualTo(0), "IndexOf should return the correct index for the updated second vector.");
 
-        // Check that the index of the 2nd and 3rd vectors are still correct after removing the first vector and after th updates
+        // Check that the index of the 2nd and 3rd vectors are still correct after removing the first vector and after the update
         int alsoIndexOfFirst = _db.Vectors.IndexOf(vector1);
         Assert.That(alsoIndexOfFirst, Is.EqualTo(-1), "IndexOf should return -1 for the first vector after it is removed.");
 
         int alsoIndexOfThird = _db.Vectors.IndexOf(vector3);
-        Assert.That(alsoIndexOfThird, Is.EqualTo(0), "IndexOf should return 0 for the third vector after all the updates.");
+        Assert.That(alsoIndexOfThird, Is.EqualTo(1), "IndexOf should return 1 for the third vector after all the updates.");
 
         // Ensure that IndexById works as expected
         int indexOfThirdById = _db.Vectors.FindIndexById(vector3.Id);
-        Assert.That(indexOfThirdById, Is.EqualTo(0), "FindIndexById should return the correct index for the third vector.");
+        Assert.That(indexOfThirdById, Is.EqualTo(1), "FindIndexById should return the correct index for the third vector.");
 
         int indexOfUpdatedSecondById = _db.Vectors.FindIndexById(updatedVector2.Id);
-        Assert.That(indexOfUpdatedSecondById, Is.EqualTo(1), "FindIndexById should return the correct index for the updated second vector.");
+        Assert.That(indexOfUpdatedSecondById, Is.EqualTo(0), "FindIndexById should return the correct index for the updated second vector.");
 
         int inddexOfFirstById = _db.Vectors.FindIndexById(vector1.Id);
         Assert.That(inddexOfFirstById, Is.EqualTo(-1), "FindIndexById should return -1 for the first vector after it is removed.");
