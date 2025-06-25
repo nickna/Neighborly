@@ -255,7 +255,7 @@ public class DeterministicConcurrencyTests
         // Thread 3: Remove vectors 15-19
         for (int i = 15; i < 20; i++)
         {
-            actions.Add(new ConcurrencyTestAction(ConcurrencyTestAction.OperationType.Remove, 3, i - 15, vectors[i], vectors[i].Id, 5));
+            actions.Add(new ConcurrencyTestAction(ConcurrencyTestAction.OperationType.Remove, 3, i - 15, vectors[i], vectors[i].Id, 50));
         }
 
         // Calculate expected state: vectors 0-4 updated, vectors 5-14 original, vectors 15-19 removed

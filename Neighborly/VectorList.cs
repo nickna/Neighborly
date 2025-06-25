@@ -9,7 +9,7 @@ public class VectorList : IList<Vector>, IDisposable
 {
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
-    private readonly MemoryMappedList _memoryMappedList = new(int.MaxValue);
+    private readonly MemoryMappedList _memoryMappedList = new(50_000);
     private bool _disposed = false;
 
     /// <summary>

@@ -318,6 +318,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             long indexPosition = _indexFile.Stream.Position;
             long dataPosition = _dataFile.Stream.Position;
             byte[] data = vector.ToBinary();
+            
 
             // Log operation before performing it
             _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
@@ -508,15 +509,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     }
                     else
                     {
-                        // Need more space - check if we have capacity at end of file
-                        _dataFile.Stream.Seek(0, SeekOrigin.End);
-                        newDataPosition = _dataFile.Stream.Position;
+                        // Need more space - find the actual end of used data (not end of file)
+                        newDataPosition = FindActualEndOfData();
+                        _dataFile.Stream.Seek(newDataPosition, SeekOrigin.Begin);
                         
                         // Check if we have enough capacity
                         if (newDataPosition + newData.Length > _dataFile.Stream.Length)
                         {
-                            // Not enough capacity - this is a limitation of the current implementation
-                            // In a production system, we would expand the file or implement defragmentation
+                            // Log detailed capacity information for debugging
+                            var actualUsedSpace = newDataPosition;
+                            var totalSpace = _dataFile.Stream.Length;
+                            var requestedSpace = newData.Length;
+                            
+                            // Insufficient capacity - return false to indicate failure
                             return false;
                         }
                     }
@@ -1042,6 +1047,43 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     internal long[] GetFileInfo()
     {
         return MemoryMappedFileServices.GetFileInfo(_indexFile, _dataFile);
+    }
+
+    /// <summary>
+    /// Finds the actual end of used data by scanning the index for the maximum offset + length
+    /// </summary>
+    private long FindActualEndOfData()
+    {
+        long maxEndPosition = 0;
+        long currentIndexPosition = _indexFile.Stream.Position; // Save current position
+        
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        
+        while (_indexFile.Stream.Read(entry) == s_indexEntryByteLength)
+        {
+            Guid id = new(entry[..s_idBytesLength]);
+            
+            // Skip tombstones and empty entries
+            if (id.Equals(s_tombStone) || id.Equals(Guid.Empty))
+            {
+                if (id.Equals(Guid.Empty))
+                    break; // End of valid entries
+                continue;
+            }
+            
+            long offset = BitConverter.ToInt64(entry.Slice(s_idBytesLength, s_offsetBytesLength));
+            int length = BitConverter.ToInt32(entry.Slice(s_idBytesLength + s_offsetBytesLength, s_lengthBytesLength));
+            
+            long endPosition = offset + length;
+            if (endPosition > maxEndPosition)
+            {
+                maxEndPosition = endPosition;
+            }
+        }
+        
+        _indexFile.Stream.Seek(currentIndexPosition, SeekOrigin.Begin); // Restore position
+        return maxEndPosition;
     }
 
     internal void ReleaseMappedMemory()
