@@ -280,7 +280,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 continue;
             }
 
-            if (id.Equals(Guid.Empty))
+            if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
             {
                 _isAtEndOfIndexStream = true;
                 break;
@@ -336,13 +336,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         try
         {
             Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-            if (!_isAtEndOfIndexStream)
-            {
-                ReadToEnd();
-            }
+            
+            // Always determine the correct positions within the lock to ensure consistency
+            DetermineAppendPositions(out long indexPosition, out long dataPosition);
 
-            long indexPosition = _indexFile.Stream.Position;
-            long dataPosition = _dataFile.Stream.Position;
             byte[] data = vector.ToBinary();
             
 
@@ -367,6 +364,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 throw new InvalidOperationException("Failed to write the length to bytes");
             }
 
+            // Ensure we're at the correct positions before writing
+            _indexFile.Stream.Seek(indexPosition, SeekOrigin.Begin);
+            _dataFile.Stream.Seek(dataPosition, SeekOrigin.Begin);
+            
             _indexFile.Stream.Write(entry);
             _dataFile.Stream.Write(data);
 
@@ -479,7 +480,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     Interlocked.Decrement(ref _count);
                     return true;
                 }
-                else if (id.Equals(Guid.Empty))
+                else if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
                 {
                     _isAtEndOfIndexStream = true;
                     ReverseIndexStreamByIdBytesLength();
@@ -584,7 +585,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     // Count remains the same for update operation
                     return true;
                 }
-                else if (id.Equals(Guid.Empty))
+                else if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
                 {
                     _isAtEndOfIndexStream = true;
                     ReverseIndexStreamByIdBytesLength();
@@ -930,7 +931,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     continue;
                 }
 
-                if (id.Equals(Guid.Empty))
+                if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
                 {
                     _isAtEndOfIndexStream = true;
                     ReverseIndexStreamByIdBytesLength();
@@ -958,43 +959,44 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private (long index, long offset, int length) SearchVectorInIndex(Guid id)
     {
-        
+        _isAtEndOfIndexStream = false;
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        int bytesRead;
+        long index = 0L;
+        while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
         {
-            _isAtEndOfIndexStream = false;
-            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-
-            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-            int bytesRead;
-            long index = 0L;
-            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+            if (bytesRead != s_indexEntryByteLength)
             {
-                if (bytesRead != s_indexEntryByteLength)
-                {
-                    throw new InvalidOperationException("Failed to read the index entry");
-                }
+                throw new InvalidOperationException("Failed to read the index entry");
+            }
 
-                Guid vectorId = new(entry[..s_idBytesLength]);
-                if (id == vectorId)
-                {
-                    Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-                    Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
-                    long offset = BitConverter.ToInt64(offsetBytes);
-                    int length = BitConverter.ToInt32(lengthBytes);
-
-                    return (index, offset, length);
-                }
-                else if (vectorId.Equals(Guid.Empty))
-                {
-                    _isAtEndOfIndexStream = true;
-                    ReverseIndexStreamByIdBytesLength();
-                    break;
-                }
-
-            if (vectorId != s_tombStone)
+            Guid vectorId = new(entry[..s_idBytesLength]);
+            if (id == vectorId)
             {
-                    ++index;
+                Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                long offset = BitConverter.ToInt64(offsetBytes);
+                int length = BitConverter.ToInt32(lengthBytes);
+
+                return (index, offset, length);
             }
+            else if (vectorId.Equals(Guid.Empty))
+            {
+                // Hit the end of actual entries, stop searching
+                _isAtEndOfIndexStream = true;
+                ReverseIndexStreamByIdBytesLength();
+                break;
             }
+            else if (vectorId.Equals(s_tombStone))
+            {
+                // Skip tombstones but continue searching
+                ++index;
+                continue;
+            }
+
+            ++index;
         }
 
         return (-1L, -1L, -1);
@@ -1004,6 +1006,76 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// Reads the index file and the data file to the last entry,
     /// so that new data can be appended safely.
     /// </summary>
+    /// <summary>
+    /// Determines the correct positions for appending new data to both index and data files.
+    /// This method is thread-safe and should be called within a write lock.
+    /// </summary>
+    /// <param name="indexPosition">The position in the index file where the new entry should be written</param>
+    /// <param name="dataPosition">The position in the data file where the new vector data should be written</param>
+    private void DetermineAppendPositions(out long indexPosition, out long dataPosition)
+    {
+        // Find the end of the index file by scanning for the first empty or tombstone entry
+        _indexFile.Stream.Seek(0, SeekOrigin.Begin);
+        
+        long maxDataOffset = -1L;
+        int lengthAtMaxOffset = -1;
+        indexPosition = 0; // Initialize to start of file
+        dataPosition = 0;  // Initialize to start of file
+
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        int bytesRead;
+        bool foundEmptySlot = false;
+        
+        while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
+        {
+            if (bytesRead != s_indexEntryByteLength)
+            {
+                throw new InvalidOperationException("Failed to read the index entry");
+            }
+
+            long currentIndexPos = _indexFile.Stream.Position - s_indexEntryByteLength;
+            Guid vectorId = new(entry[..s_idBytesLength]);
+            
+            if (vectorId.Equals(Guid.Empty) || vectorId.Equals(s_tombStone))
+            {
+                // Found end of valid entries or a reusable tombstone slot
+                if (!foundEmptySlot || vectorId.Equals(Guid.Empty))
+                {
+                    indexPosition = currentIndexPos;
+                    foundEmptySlot = true;
+                    if (vectorId.Equals(Guid.Empty))
+                    {
+                        // Hit the actual end, stop scanning
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                // This is a valid entry, track the highest data position
+                Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
+                Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
+                long offset = BitConverter.ToInt64(offsetBytes);
+                int length = BitConverter.ToInt32(lengthBytes);
+
+                if (offset > maxDataOffset || (offset == maxDataOffset && length > lengthAtMaxOffset))
+                {
+                    maxDataOffset = offset;
+                    lengthAtMaxOffset = length;
+                }
+            }
+        }
+        
+        // If we didn't find any empty slot during the scan, append at the end
+        if (!foundEmptySlot)
+        {
+            indexPosition = _indexFile.Stream.Position;
+        }
+        
+        // Data position is after the last written data
+        dataPosition = maxDataOffset == -1L ? 0L : maxDataOffset + lengthAtMaxOffset;
+    }
+
     private void ReadToEnd()
     {
         _indexFile.Stream.Seek(0, SeekOrigin.Begin);
@@ -1025,7 +1097,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
 
             Guid vectorId = new(entry[..s_idBytesLength]);
-            if (!vectorId.Equals(Guid.Empty))
+            if (!vectorId.Equals(Guid.Empty) && !vectorId.Equals(s_tombStone))
             {
                 Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
                 Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
