@@ -3,7 +3,7 @@
 /// <summary>
 /// Calculates distance metric using Cosine similarity
 /// </summary>
-public sealed class CosineSimilarityCalculator : AbstractDistanceCalculator
+public sealed class CosineSimilarityCalculator : AbstractBatchDistanceCalculator
 {
     protected override float CalculateDistanceCore(Vector vector1, Vector vector2)
     {

@@ -3,7 +3,7 @@
 /// <summary>
 /// Calculates distance metric using Minkowski distance
 /// </summary>
-public sealed class MinkowskiDistanceCalculator : AbstractDistanceCalculator
+public sealed class MinkowskiDistanceCalculator : AbstractBatchDistanceCalculator
 {
     protected override float CalculateDistanceCore(Vector vector1, Vector vector2)
     {
