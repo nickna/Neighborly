@@ -3,7 +3,7 @@
 /// <summary>
 /// Calculate distance metric using Manhattan distance
 /// </summary>
-public sealed class ManhattanDistanceCalculator : AbstractDistanceCalculator
+public sealed class ManhattanDistanceCalculator : AbstractBatchDistanceCalculator
 {
     protected override float CalculateDistanceCore(Vector vector1, Vector vector2)
     {

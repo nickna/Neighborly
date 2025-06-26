@@ -3,7 +3,7 @@
 /// <summary>
 /// Calculates distance metric using Chebyshev distance
 /// </summary>
-public sealed class ChebyshevDistanceCalculator : AbstractDistanceCalculator
+public sealed class ChebyshevDistanceCalculator : AbstractBatchDistanceCalculator
 {
     protected override float CalculateDistanceCore(Vector vector1, Vector vector2)
     {

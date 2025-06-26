@@ -15,7 +15,7 @@ namespace Neighborly.Search
         private const int s_currentFileVersion = 1;
         private const int s_numberOfStorableIndexes = 3;
 
-        private readonly VectorList _vectors;
+        protected readonly VectorList _vectors;
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
         private Search.HNSW _hnsw;
@@ -101,7 +101,7 @@ namespace Neighborly.Search
             }
         }
 
-        public IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
+        public virtual IList<Vector> Search(string text, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -129,7 +129,7 @@ namespace Neighborly.Search
             return results;
 
         }
-        public IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+        public virtual IList<Vector> Search(Vector query, int k, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
         {
             if (query == null)
             {
@@ -198,7 +198,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
         /// <returns>A list of vectors within the specified radius, ordered by distance</returns>
-        public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        public virtual IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -220,7 +220,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
         /// <returns>A list of vectors within the specified radius, ordered by distance</returns>
-        public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        public virtual IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
         {
             if (query == null)
             {

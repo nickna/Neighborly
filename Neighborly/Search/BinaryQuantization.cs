@@ -195,6 +195,55 @@ public class BinaryQuantization
     }
 
     /// <summary>
+    /// Gets candidate vectors from binary quantization without calculating exact distances.
+    /// Used for batch optimization where distances are calculated separately.
+    /// </summary>
+    public static IList<Vector> GetCandidates(VectorList vectors, Vector query, float threshold = 0.0f, int? maxHammingDistance = null)
+    {
+        if (vectors.Count == 0)
+            return new List<Vector>();
+
+        // Quantize all vectors
+        var binaryVectors = new List<BinaryVector>(vectors.Count);
+        for (int i = 0; i < vectors.Count; i++)
+        {
+            var quantized = Quantize(vectors[i], threshold);
+            binaryVectors.Add(quantized);
+        }
+
+        // Quantize the query
+        var queryBinary = Quantize(query, threshold);
+
+        // Calculate default max Hamming distance if not provided
+        int maxHamming = maxHammingDistance ?? Math.Min(query.Values.Length / 4, 64);
+
+        // Find candidates using Hamming distance
+        var candidates = new List<Vector>();
+        
+        foreach (var binaryVec in binaryVectors)
+        {
+            int hammingDist = queryBinary.HammingDistance(binaryVec);
+            if (hammingDist <= maxHamming)
+            {
+                candidates.Add(binaryVec.OriginalVector);
+            }
+        }
+
+        // If no candidates within Hamming distance, return closest by Hamming distance
+        if (candidates.Count == 0)
+        {
+            candidates = binaryVectors
+                .Select(bv => (bv, queryBinary.HammingDistance(bv)))
+                .OrderBy(x => x.Item2)
+                .Take(Math.Min(100, binaryVectors.Count)) // Return reasonable number of candidates
+                .Select(x => x.bv.OriginalVector)
+                .ToList();
+        }
+
+        return candidates;
+    }
+    
+    /// <summary>
     /// Gets the compression ratio achieved by binary quantization
     /// </summary>
     public float GetCompressionRatio()

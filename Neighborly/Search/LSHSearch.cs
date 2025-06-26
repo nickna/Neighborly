@@ -218,6 +218,50 @@ public class LSHSearch
     }
 
     /// <summary>
+    /// Gets candidate vectors from LSH hash tables without calculating distances.
+    /// Used for batch optimization where distances are calculated separately.
+    /// </summary>
+    public static IList<Vector> GetCandidates(VectorList vectors, Vector query)
+    {
+        if (vectors.Count == 0) return new List<Vector>();
+        
+        // Build LSH tables
+        int dimensions = vectors[0].Values.Length;
+        int tableCount = Math.Min(20, Math.Max(8, dimensions / 20));
+        int projectionCount = Math.Min(12, Math.Max(4, dimensions / 50));
+        var random = new Random(42); // Fixed seed for consistency
+        
+        var hashTables = new List<HashTable>();
+        for (int i = 0; i < tableCount; i++)
+        {
+            hashTables.Add(new HashTable(dimensions, projectionCount, random));
+        }
+        
+        // Add all vectors to hash tables
+        for (int i = 0; i < vectors.Count; i++)
+        {
+            foreach (var table in hashTables)
+            {
+                table.Insert(vectors[i], i);
+            }
+        }
+        
+        // Get candidates from all tables
+        var candidateSet = new HashSet<int>();
+        foreach (var table in hashTables)
+        {
+            var candidates = table.GetCandidates(query);
+            foreach (var candidate in candidates)
+            {
+                candidateSet.Add(candidate);
+            }
+        }
+        
+        // Convert indices to vectors
+        return candidateSet.Select(i => vectors[i]).ToList();
+    }
+    
+    /// <summary>
     /// Static method for backward compatibility with existing SearchService
     /// </summary>
     public static IList<Vector> Search(VectorList vectors, Vector query, int k)
