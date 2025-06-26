@@ -28,7 +28,7 @@
 
   <ItemGroup>
     <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="All" />
+    <PackageReference Include="Grpc.Tools" Version="2.72.0" PrivateAssets="All" />
     <Protobuf Include="..\API.gRPC\Protos\Vector.proto" GrpcServices="Client" Link="Protos\Vector.proto" />
   </ItemGroup>
 
