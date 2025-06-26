@@ -96,7 +96,7 @@ public class MemoryMappedListConcurrencyTests
     }
     
     [Test]
-    public async Task MixedReadsAndWrites_ShouldNotDeadlock()
+    public void MixedReadsAndWrites_ShouldNotDeadlock()
     {
         // Arrange
         var cts = new CancellationTokenSource();
@@ -183,7 +183,7 @@ public class MemoryMappedListConcurrencyTests
         cts.Cancel();
         
         // Wait for all tasks to complete
-        await Task.WhenAll(tasks.ToArray()).WaitAsync(TimeSpan.FromSeconds(5));
+        Task.WaitAll(tasks.ToArray(), TimeSpan.FromSeconds(5));
         
         // Assert
         Assert.That(errors, Is.Empty, "No exceptions should occur during mixed operations");

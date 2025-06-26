@@ -192,7 +192,6 @@ public partial class VectorDatabase : IDisposable
     public IList<Vector> Search(string text, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
-        _rwLock.EnterReadLock();
         try
         {
             var result = _searchService.Search(text, k, searchMethod, similarityThreshold);
@@ -200,9 +199,11 @@ public partial class VectorDatabase : IDisposable
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        finally
+        catch (Exception ex)
         {
-            _rwLock.ExitReadLock();
+            // CouldNotFindVectorInDb(text, k, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
         }
     }
 
@@ -219,20 +220,18 @@ public partial class VectorDatabase : IDisposable
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(query: query, k, searchMethod, similarityThreshold: similarityThreshold);
+            var result = _searchService.Search(query:query, k, searchMethod, similarityThreshold: similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).", query, k);
+            CouldNotFindVectorInDb(query, k, ex);
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return new List<Vector>();
         }
     }
-
-    
 
     /// <summary>
     /// Searches for all vectors within a specified radius of the given text in the database.
@@ -246,18 +245,28 @@ public partial class VectorDatabase : IDisposable
     /// <seealso cref="EmbeddingGenerator"/>
     public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
-        _rwLock.EnterReadLock();
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        finally
+        catch (ArgumentException)
         {
-            _rwLock.ExitReadLock();
+            // Re-throw validation exceptions so tests can catch them
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
         }
     }
 
@@ -271,122 +280,29 @@ public partial class VectorDatabase : IDisposable
     /// <returns>Vectors that are within the specified radius</returns>
     public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
-        _rwLock.EnterReadLock();
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        finally
+        catch (ArgumentException)
         {
-            _rwLock.ExitReadLock();
+            // Re-throw validation exceptions so tests can catch them
+            throw;
         }
-    }
-
-    /// <summary>
-    /// Performs text search with metadata filtering support.
-    /// </summary>
-    /// <param name="text">The text to search for</param>
-    /// <param name="k">Number of nearest neighbors to return</param>
-    /// <param name="metadataFilter">Metadata filter to apply</param>
-    /// <param name="searchMethod">The search algorithm to use</param>
-    /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
-    /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
-    public IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float? similarityThreshold = null)
-    {
-        _rwLock.EnterReadLock();
-        try
+        catch (NotSupportedException)
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
-            var result = _searchService.SearchWithMetadata(text, k, metadataFilter, searchMethod, similarityThreshold);
-            activity?.AddTag("search.result.count", result.Count);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return result;
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
         }
-        finally
+        catch (Exception ex)
         {
-            _rwLock.ExitReadLock();
-        }
-    }
-
-    /// <summary>
-    /// Performs vector search with metadata filtering support.
-    /// </summary>
-    /// <param name="query">The query vector</param>
-    /// <param name="k">Number of nearest neighbors to return</param>
-    /// <param name="metadataFilter">Metadata filter to apply</param>
-    /// <param name="searchMethod">The search algorithm to use</param>
-    /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
-    /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
-    public IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
-    {
-        _rwLock.EnterReadLock();
-        try
-        {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
-            var result = _searchService.SearchWithMetadata(query, k, metadataFilter, searchMethod, similarityThreshold);
-            activity?.AddTag("search.result.count", result.Count);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return result;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
-        }
-    }
-
-    /// <summary>
-    /// Performs range search with metadata filtering support.
-    /// </summary>
-    /// <param name="text">The text to search for</param>
-    /// <param name="radius">The maximum distance from the query</param>
-    /// <param name="metadataFilter">Metadata filter to apply</param>
-    /// <param name="searchMethod">The search algorithm to use</param>
-    /// <param name="distanceCalculator">The distance calculator to use</param>
-    /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
-    public IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
-    {
-        _rwLock.EnterReadLock();
-        try
-        {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
-            var result = _searchService.RangeSearchWithMetadata(text, radius, metadataFilter, searchMethod, distanceCalculator);
-            activity?.AddTag("search.result.count", result.Count);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return result;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
-        }
-    }
-
-    /// <summary>
-    /// Performs range search with metadata filtering support.
-    /// </summary>
-    /// <param name="query">The query vector</param>
-    /// <param name="radius">The maximum distance from the query</param>
-    /// <param name="metadataFilter">Metadata filter to apply</param>
-    /// <param name="searchMethod">The search algorithm to use</param>
-    /// <param name="distanceCalculator">The distance calculator to use</param>
-    /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
-    public IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
-    {
-        _rwLock.EnterReadLock();
-        try
-        {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
-            var result = _searchService.RangeSearchWithMetadata(query, radius, metadataFilter, searchMethod, distanceCalculator);
-            activity?.AddTag("search.result.count", result.Count);
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            return result;
-        }
-        finally
-        {
-            _rwLock.ExitReadLock();
+            CouldNotPerformRangeSearchInDb(query, radius, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
         }
     }
 
@@ -582,58 +498,6 @@ public partial class VectorDatabase : IDisposable
         return Task.FromResult((vectorCount, true));
     }
 
-    private void IndexingThreadWorker(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Indexing thread started.");
-
-        while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
-        {
-            bool rebuildIndexes = false;
-            
-            // Check if rebuild is needed without holding a lock
-            // These are volatile reads, so we get the latest values
-            if (_hasOutdatedIndex &&
-                _vectors.Count > 0 &&
-                DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
-            {
-                rebuildIndexes = true;
-            }
-
-            if (rebuildIndexes)
-            {
-                try
-                {
-                    // Use ConfigureAwait(false) to avoid deadlocks in background thread context
-                    RebuildTagsAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
-                    RebuildSearchIndexesAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
-                    _indexRebuildCounter.Add(1);
-                }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
-                {
-                    _logger.LogError(ex, "Error during background index rebuild");
-                }
-            }
-            
-            try
-            {
-                // Use cancellation token-aware sleep for faster shutdown
-                Task.Delay(5000, cancellationToken).Wait();
-            }
-            catch (AggregateException ex) when (ex.InnerException is TaskCanceledException)
-            {
-                _logger.LogInformation("Indexing thread was canceled.");
-                break;
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Indexing thread was canceled.");
-                break;
-            }
-        }
-
-        _logger.LogInformation("Indexing thread stopping.");
-    }
-
     private void StartIndexService()
     {
         // The index service is not supported on mobile platforms
@@ -643,9 +507,33 @@ public partial class VectorDatabase : IDisposable
         _indexServiceCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _indexServiceCancellationTokenSource.Token;
 
-        indexService = new Thread(() =>
+        indexService = new Thread(async () =>
         {
-            IndexingThreadWorker(cancellationToken);
+            _logger.LogInformation("Indexing thread started.");
+
+            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
+            {
+                // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
+                if (_hasOutdatedIndex &&
+                    _vectors.Count > 0 &&
+                    DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
+                {
+                    await RebuildTagsAsync();
+                    await RebuildSearchIndexesAsync(cancellationToken);
+                    _indexRebuildCounter.Add(1);
+                }
+                try
+                {
+                    await Task.Delay(5000, cancellationToken);
+                }
+                catch (TaskCanceledException)
+                {
+                    _logger.LogInformation("Indexing thread was canceled.");
+                    break;
+                }
+            }
+
+            _logger.LogInformation("Indexing thread stopping.");
         });
         indexService.Priority = ThreadPriority.Lowest;
         indexService.Start();
@@ -664,26 +552,11 @@ public partial class VectorDatabase : IDisposable
                 
                 // Wait for the indexing thread to actually stop before continuing
                 // This prevents lock disposal issues when the thread is still running
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var maxWaitTime = TimeSpan.FromSeconds(10); // Maximum 10 seconds wait
-                
-                while (indexService.IsAlive && stopwatch.Elapsed < maxWaitTime)
+                while (indexService.IsAlive)
                 {
                     if (!indexService.Join(TimeSpan.FromSeconds(1)))
                     {
                         _logger.LogWarning("Indexing thread is still running...");
-                    }
-                }
-                
-                if (indexService.IsAlive)
-                {
-                    _logger.LogError("Indexing thread did not stop within timeout, forcefully aborting");
-                    indexService.Interrupt();
-                    
-                    // Give it one more chance to stop gracefully
-                    if (!indexService.Join(TimeSpan.FromSeconds(2)))
-                    {
-                        _logger.LogError("Indexing thread still alive after interrupt, this may cause resource leaks");
                     }
                 }
                 
@@ -713,36 +586,40 @@ public partial class VectorDatabase : IDisposable
     /// Creates a new kd-tree index for the vectors and a map of tags to vector IDs.
     /// (This searchMethod is eventually calls when the database is modified.)
     /// </summary>
-    public Task RebuildTagsAsync(CancellationToken cancellationToken = default)
+    public async Task RebuildTagsAsync()
     {
         if (!_hasOutdatedIndex || _vectors == null || _vectors.Count == 0)
         {
-            return Task.CompletedTask;
+            return;
         }
-        
-        cancellationToken.ThrowIfCancellationRequested();
-        
-        using var activity = StartActivity(name: "RebuildTags");
-        _vectors.Tags.BuildMap();
-        activity?.SetStatus(ActivityStatusCode.Ok);
+        await Task.Run(() =>
+        {
+            using var activity = StartActivity(name: "RebuildTags");
+            _vectors.Tags.BuildMap();
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        });
         _hasOutdatedIndex = false;
-        
-        return Task.CompletedTask;
     }
 
     // This is an async function
     public async Task RebuildSearchIndexesAsync(CancellationToken cancellationToken = default)
     {
-        using var activity = StartActivity(name: "BuildAllSearchIndexes");
-        cancellationToken.ThrowIfCancellationRequested();
-        await _searchService.BuildAllIndexes(cancellationToken).ConfigureAwait(false);
-        activity?.SetStatus(ActivityStatusCode.Ok);
+        await Task.Run(() =>
+        {
+            using var activity = StartActivity(name: "BuildAllSearchIndexes");
+            cancellationToken.ThrowIfCancellationRequested();
+            _searchService.BuildAllIndexes();
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        }, cancellationToken);
     }
-    public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, CancellationToken cancellationToken = default)
+    public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
-        using var activity = StartActivity(name: "BuildSearchIndex");
-        await _searchService.BuildIndexes(searchMethod, cancellationToken).ConfigureAwait(false);
-        activity?.SetStatus(ActivityStatusCode.Ok);
+        await Task.Run(() =>
+        {
+            using var activity = StartActivity(name: "BuildSearchIndex");
+            _searchService.BuildIndex(searchMethod);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        });
     }
 
     /// <summary>
