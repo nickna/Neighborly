@@ -34,13 +34,14 @@ public class VectorDatabaseConcurrencyTests
         int operationCount = 10000;
         int threadCount = 8;
         var operationLog = new ConcurrentDictionary<Guid, ConcurrentQueue<(DateTime Timestamp, string Operation, Vector Vector)>>();
+        var lockObject = new object();
 
         // Act
         var stopwatch = Stopwatch.StartNew();
         var tasks = new List<Task>();
         for (int i = 0; i < threadCount; i++)
         {
-            tasks.Add(Task.Run(() => PerformRandomOperations(_db, operationCount / threadCount, operationLog)));
+            tasks.Add(Task.Run(() => PerformRandomOperations(_db, operationCount / threadCount, operationLog, lockObject)));
         }
 
         await Task.WhenAll(tasks);
@@ -51,39 +52,51 @@ public class VectorDatabaseConcurrencyTests
         VerifyDatabaseIntegrity(_db, operationLog);
     }
 
-    private void PerformRandomOperations(VectorDatabase db, int count, ConcurrentDictionary<Guid, ConcurrentQueue<(DateTime, string, Vector)>> operationLog)
+    private void PerformRandomOperations(VectorDatabase db, int count, ConcurrentDictionary<Guid, ConcurrentQueue<(DateTime, string, Vector)>> operationLog, object lockObject)
     {
-        var random = new Random();
+        var random = new Random(Thread.CurrentThread.ManagedThreadId);
         for (int i = 0; i < count; i++)
         {
             switch (random.Next(4))
             {
                 case 0:
-                    var newVector = CreateRandomVector();
-                    db.Vectors.Add(newVector);
-                    LogOperation(operationLog, newVector.Id, "Add", newVector);
+                    var newVector = CreateRandomVector(random);
+                    lock (lockObject)
+                    {
+                        db.Vectors.Add(newVector);
+                        LogOperation(operationLog, newVector.Id, "Add", newVector);
+                    }
                     break;
                 case 1:
-                    var vectorToRemove = GetRandomVector(db);
-                    if (vectorToRemove != null && db.Vectors.Remove(vectorToRemove))
+                    var vectorToRemove = GetRandomVector(db, random);
+                    if (vectorToRemove != null)
                     {
-                        LogOperation(operationLog, vectorToRemove.Id, "Remove", vectorToRemove);
+                        lock (lockObject)
+                        {
+                            if (db.Vectors.Remove(vectorToRemove))
+                            {
+                                LogOperation(operationLog, vectorToRemove.Id, "Remove", vectorToRemove);
+                            }
+                        }
                     }
                     break;
                 case 2:
-                    var vectorToUpdate = GetRandomVector(db);
+                    var vectorToUpdate = GetRandomVector(db, random);
                     if (vectorToUpdate != null)
                     {
-                        var updatedVector = CreateRandomVector();
+                        var updatedVector = CreateRandomVector(random);
                         updatedVector.Id = vectorToUpdate.Id; // Keep the same ID
-                        if (db.Vectors.Update(vectorToUpdate.Id, updatedVector))
+                        lock (lockObject)
                         {
-                            LogOperation(operationLog, updatedVector.Id, "Update", updatedVector);
+                            if (db.Vectors.Update(vectorToUpdate.Id, updatedVector))
+                            {
+                                LogOperation(operationLog, updatedVector.Id, "Update", updatedVector);
+                            }
                         }
                     }
                     break;
                 case 3:
-                    db.Search(CreateRandomVector(), 5);
+                    db.Search(CreateRandomVector(random), 5);
                     break;
             }
         }
@@ -169,9 +182,8 @@ public class VectorDatabaseConcurrencyTests
         Assert.That(inconsistentVectors, Is.Empty, "There should be no inconsistencies between the operation log and the database state.");
     }
 
-    private Vector CreateRandomVector()
+    private Vector CreateRandomVector(Random random)
     {
-        var random = new Random();
         float[] values = new float[3];
         for (int i = 0; i < 3; i++)
         {
@@ -180,20 +192,19 @@ public class VectorDatabaseConcurrencyTests
         return new Vector(values, Path.GetRandomFileName().Replace(".", ""));
     }
 
-    private Vector? GetRandomVector(VectorDatabase db)
+    private Vector? GetRandomVector(VectorDatabase db, Random random)
     {
         int maxAttempts = 10;
         for (int i = 0; i < maxAttempts; i++)
         {
             try
             {
-                var vectors = db.Vectors.ToList(); // Create a snapshot of the current state
-                if (vectors.Count == 0)
+                var keys = db.Vectors.GetIds();
+                if (keys.Count == 0)
                 {
                     return null;
                 }
-                var random = new Random();
-                return vectors[random.Next(vectors.Count)];
+                return db.Vectors.GetById(keys[random.Next(keys.Count)]);
             }
             catch (Exception)
             {

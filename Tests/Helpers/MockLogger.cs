@@ -24,7 +24,7 @@ internal sealed class MockLogger<TCategoryName> : ILogger<TCategoryName>
         LastException = exception;
         LastMessage = formatter(state, exception);
 
-        _logEntries.Add((logLevel, eventId, state, exception, LastMessage));
+        _logEntries.Add((logLevel, eventId, state!, exception, LastMessage!));
     }
 
     public IEnumerable<(LogLevel LogLevel, EventId EventId, object State, Exception? Exception, string Message)> GetLogEntries() => _logEntries;

@@ -39,6 +39,28 @@ public class BallTreeNode
         };
     }
 
+    internal static BallTreeNode? ReadFrom(BinaryReader reader, VectorList vectors, VectorList internalVectors, Span<byte> guidBuffer)
+    {
+        var centerId = reader.ReadGuid(guidBuffer);
+        var center = internalVectors.GetById(centerId) ?? vectors.GetById(centerId);
+        if (center is null)
+        {
+            return null;
+        }
+
+        var radius = reader.ReadDouble();
+        var left = reader.ReadBoolean() ? ReadFrom(reader, vectors, internalVectors, guidBuffer) : null;
+        var right = reader.ReadBoolean() ? ReadFrom(reader, vectors, internalVectors, guidBuffer) : null;
+
+        return new BallTreeNode
+        {
+            Center = center,
+            Radius = radius,
+            Left = left,
+            Right = right
+        };
+    }
+
     public override bool Equals(object? obj)
     {
         if (obj is not BallTreeNode other)

@@ -12,6 +12,9 @@ namespace Neighborly.Search
         KDTree,
         Linear,
         LSH,
-        HNSW
+        HNSW,
+        Range,
+        BinaryQuantization,
+        ProductQuantization
     }
 }

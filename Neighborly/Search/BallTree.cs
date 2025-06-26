@@ -55,13 +55,37 @@ public class BallTree
 
         root = null;
 
-        // Read internal vectors (centers of internal nodes)
-        using var internalVectors = new VectorDatabase();
-        await internalVectors.ReadFromAsync(reader, false, cancellationToken).ConfigureAwait(false);
+        // Read internal vectors (centers of internal nodes) directly without creating nested VectorDatabase
+        var internalVectors = await ReadInternalVectorsAsync(reader, cancellationToken).ConfigureAwait(false);
 
         byte[] guidBuffer = new byte[16];
         // Read the tree starting at the root node
         root = BallTreeNode.ReadFrom(reader, vectors, internalVectors, guidBuffer);
+    }
+
+    private static Task<VectorList> ReadInternalVectorsAsync(BinaryReader reader, CancellationToken cancellationToken = default)
+    {
+        return Task.Run(() =>
+        {
+            var internalVectors = new VectorList();
+            
+            // Read the file version (skip it as it's already been read by the calling method in a VectorDatabase context)
+            var fileVersion = reader.ReadInt32();
+            
+            // Read vector count
+            var vectorCount = reader.ReadInt32();
+            
+            // Read vectors directly into VectorList without creating VectorDatabase
+            for (int i = 0; i < vectorCount; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var nextVector = reader.ReadInt32();    // File offset of the next Vector
+                var vector = new Vector(reader.ReadBytes(nextVector));
+                internalVectors.Add(vector);
+            }
+            
+            return internalVectors;
+        }, cancellationToken);
     }
 
     public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)

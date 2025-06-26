@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Neighborly.ETL;
 using Neighborly.Search;
+using Neighborly.Distance;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -28,6 +29,84 @@ public partial class VectorDatabase : IDisposable
     private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;
+
+    /// <summary>
+    /// Thread-safe method to add a vector to the database.
+    /// </summary>
+    /// <param name="vector">The vector to add</param>
+    public void AddVector(Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            _vectors.Add(vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to update a vector in the database.
+    /// </summary>
+    /// <param name="id">The ID of the vector to update</param>
+    /// <param name="vector">The new vector data</param>
+    /// <returns>True if the vector was updated, false if not found</returns>
+    public bool UpdateVector(Guid id, Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            return _vectors.Update(id, vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to remove a vector from the database.
+    /// </summary>
+    /// <param name="vector">The vector to remove</param>
+    /// <returns>True if the vector was removed, false if not found</returns>
+    public bool RemoveVector(Vector vector)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        
+        _rwLock.EnterWriteLock();
+        try
+        {
+            return _vectors.Remove(vector);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    /// <summary>
+    /// Thread-safe method to get a vector by ID.
+    /// </summary>
+    /// <param name="id">The ID of the vector to retrieve</param>
+    /// <returns>The vector if found, null otherwise</returns>
+    public Vector? GetVector(Guid id)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            return _vectors.GetById(id);
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
     private Search.SearchService _searchService = null!;
     private ReaderWriterLockSlim _rwLock = new();
     private Thread? indexService;
@@ -65,6 +144,8 @@ public partial class VectorDatabase : IDisposable
     private bool _hasOutdatedIndex = false;
 
     private bool _disposedValue;
+    private volatile bool _isDisposing;
+    private readonly CancellationTokenSource _disposalCancellationTokenSource = new();
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
@@ -152,6 +233,85 @@ public partial class VectorDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Searches for all vectors within a specified radius of the given text in the database.
+    /// This text is first converted into an embedding using the EmbeddingGenerator.
+    /// </summary>
+    /// <param name="text">The text to search for</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="searchMethod">Search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
+    /// <returns>Vectors that are within the specified radius</returns>
+    /// <seealso cref="EmbeddingGenerator"/>
+    public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        try
+        {
+            var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        catch (ArgumentException)
+        {
+            // Re-throw validation exceptions so tests can catch them
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
+        }
+    }
+
+    /// <summary>
+    /// Searches for all vectors within a specified radius of the given query vector in the database.
+    /// </summary>
+    /// <param name="query">The query vector</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="searchMethod">Search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use (defaults to Euclidean)</param>
+    /// <returns>Vectors that are within the specified radius</returns>
+    public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        try
+        {
+            var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        catch (ArgumentException)
+        {
+            // Re-throw validation exceptions so tests can catch them
+            throw;
+        }
+        catch (NotSupportedException)
+        {
+            // Re-throw unsupported operation exceptions so tests can catch them
+            throw;
+        }
+        catch (Exception ex)
+        {
+            CouldNotPerformRangeSearchInDb(query, radius, ex);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            return new List<Vector>();
+        }
+    }
+
+    [LoggerMessage(
+    EventId = 1,
+    Level = LogLevel.Error,
+    Message = "Could not perform range search for vector `{Query}` with radius {Radius} in the database.")]
+    private partial void CouldNotPerformRangeSearchInDb(Vector query, float radius, Exception ex);
+
     [LoggerMessage(
     EventId = 0,
     Level = LogLevel.Error,
@@ -211,6 +371,8 @@ public partial class VectorDatabase : IDisposable
     public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
         using var activity = StartActivity(name: "LoadVectors");
+        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposalCancellationTokenSource.Token);
+        var combinedToken = combinedCts.Token;
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
         if (!createOnNew && !fileExists)
@@ -228,29 +390,44 @@ public partial class VectorDatabase : IDisposable
         }
         else
         {
+            bool indexesAreDirty;
+            
+            // Load data without holding lock for the entire operation
             _rwLock.EnterWriteLock();
             try
             {
-                bool indexesAreDirty;
-
                 using (var inputStream = new FileStream(filePath, FileMode.Open))
                 using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
                 using (var reader = new BinaryReader(decompressionStream))
                 {
                     _vectors.Clear();
-                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, cancellationToken).ConfigureAwait(false);
+                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, combinedToken).ConfigureAwait(false);
                     _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
                 }
-
-                if (indexesAreDirty)
+            }
+            finally
+            {
+                if (_rwLock.IsWriteLockHeld)
                 {
-                    await RebuildSearchIndexesAsync().ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+                    _rwLock.ExitWriteLock();
                 }
+            }
 
+            // Rebuild indexes outside the write lock to reduce lock contention
+            if (indexesAreDirty && !_isDisposing)
+            {
+                // Check for disposal/cancellation before rebuilding indexes
+                combinedToken.ThrowIfCancellationRequested();
+                await RebuildSearchIndexesAsync(combinedToken).ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+            }
+
+            // Update state flags with minimal lock time
+            _rwLock.EnterWriteLock();
+            try
+            {
                 _vectors.Tags.BuildMap();   // Rebuild the tag map
                 _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
                 _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
-
                 activity?.SetStatus(ActivityStatusCode.Ok);
             }
             finally
@@ -330,12 +507,11 @@ public partial class VectorDatabase : IDisposable
         _indexServiceCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _indexServiceCancellationTokenSource.Token;
 
-        // Create a new thread that will react when _hasOutdatedIndex is set to true
         indexService = new Thread(async () =>
         {
             _logger.LogInformation("Indexing thread started.");
 
-            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested)
+            while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
             {
                 // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
                 if (_hasOutdatedIndex &&
@@ -343,7 +519,7 @@ public partial class VectorDatabase : IDisposable
                     DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
                     await RebuildTagsAsync();
-                    await RebuildSearchIndexesAsync();
+                    await RebuildSearchIndexesAsync(cancellationToken);
                     _indexRebuildCounter.Add(1);
                 }
                 try
@@ -365,19 +541,44 @@ public partial class VectorDatabase : IDisposable
 
     private void StopIndexService()
     {
-        if (indexService != null && indexService.IsAlive)
+        try
         {
-            _indexServiceCancellationTokenSource?.Cancel();
-            _logger.LogInformation("Indexing stop requested.");
+            _logger.LogInformation($"StopIndexService called. IndexService exists: {indexService != null}, IsAlive: {indexService?.IsAlive}, CancellationSource exists: {_indexServiceCancellationTokenSource != null}");
             
-            // Wait for the indexing thread to actually stop before continuing
-            // This prevents lock disposal issues when the thread is still running
-            if (!indexService.Join(TimeSpan.FromSeconds(5)))
+            if (indexService != null && indexService.IsAlive)
             {
-                _logger.LogWarning("Indexing thread did not stop within 5 seconds.");
+                _indexServiceCancellationTokenSource?.Cancel();
+                _logger.LogInformation("Indexing stop requested.");
+                
+                // Wait for the indexing thread to actually stop before continuing
+                // This prevents lock disposal issues when the thread is still running
+                while (indexService.IsAlive)
+                {
+                    if (!indexService.Join(TimeSpan.FromSeconds(1)))
+                    {
+                        _logger.LogWarning("Indexing thread is still running...");
+                    }
+                }
+                
+                _indexServiceCancellationTokenSource?.Dispose();
+                _indexServiceCancellationTokenSource = null;
+                indexService = null;
             }
-            
-            _indexServiceCancellationTokenSource?.Dispose();
+            else if (indexService != null)
+            {
+                _logger.LogInformation("IndexService exists but is not alive - cleaning up.");
+                _indexServiceCancellationTokenSource?.Dispose();
+                _indexServiceCancellationTokenSource = null;
+                indexService = null;
+            }
+            else
+            {
+                _logger.LogInformation("No indexing service to stop.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error occurred while stopping index service.");
         }
     }
 
@@ -401,14 +602,15 @@ public partial class VectorDatabase : IDisposable
     }
 
     // This is an async function
-    public async Task RebuildSearchIndexesAsync()
+    public async Task RebuildSearchIndexesAsync(CancellationToken cancellationToken = default)
     {
         await Task.Run(() =>
         {
             using var activity = StartActivity(name: "BuildAllSearchIndexes");
+            cancellationToken.ThrowIfCancellationRequested();
             _searchService.BuildAllIndexes();
             activity?.SetStatus(ActivityStatusCode.Ok);
-        });
+        }, cancellationToken);
     }
     public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
@@ -604,11 +806,28 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
+                // Signal that disposal is starting to stop the indexing thread quickly
+                _isDisposing = true;
+                
+                // Cancel all ongoing operations immediately
+                _disposalCancellationTokenSource.Cancel();
+                
                 _logger.LogInformation("Shutting down VectorDatabase.");
                 StopIndexService();
+                
+                _rwLock.EnterWriteLock();
+                try
+                {
+                    _vectors.Modified -= VectorList_Modified;
+                    _vectors.Dispose();
+                }
+                finally
+                {
+                    _rwLock.ExitWriteLock();
+                }
+                
                 _rwLock.Dispose();
-                _vectors.Modified -= VectorList_Modified;
-                _vectors.Dispose();
+                _disposalCancellationTokenSource.Dispose();
             }
 
             _disposedValue = true;
