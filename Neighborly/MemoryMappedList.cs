@@ -24,14 +24,53 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly WriteAheadLog _wal;
     private readonly DurabilityManager _durabilityManager;
     private static readonly MemoryPressureMonitor s_memoryMonitor = new();
-    private ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
+    private readonly ReaderWriterLockSlim _rwLock = new ReaderWriterLockSlim();
     private long _count;
     /// <summary>
     /// Indicates if the index stream is at the end of the stream.
     /// This is used to enable fast adding of multiple vectors in sequence.
     /// </summary>
     private bool _isAtEndOfIndexStream = true;
-    private bool _disposedValue;
+    private volatile bool _disposedValue;
+    
+    // Metadata for O(1) append operations
+    private readonly AppendMetadata _appendMetadata = new();
+    
+    /// <summary>
+    /// Thread-safe metadata for fast append operations
+    /// </summary>
+    private sealed class AppendMetadata
+    {
+        private long _nextIndexPosition;
+        private long _nextDataPosition;
+        private readonly object _lock = new();
+        
+        public (long indexPos, long dataPos) GetNextPositions()
+        {
+            lock (_lock)
+            {
+                return (_nextIndexPosition, _nextDataPosition);
+            }
+        }
+        
+        public void UpdatePositions(long indexDelta, long dataDelta)
+        {
+            lock (_lock)
+            {
+                _nextIndexPosition += indexDelta;
+                _nextDataPosition += dataDelta;
+            }
+        }
+        
+        public void Reset(long indexPos, long dataPos)
+        {
+            lock (_lock)
+            {
+                _nextIndexPosition = indexPos;
+                _nextDataPosition = dataPos;
+            }
+        }
+    }
     #pragma warning disable CS0414 // Field assigned but never used - reserved for future defragmentation
     private long _defragPosition = 0; // Tracks the current position in the index file for defragmentation
     #pragma warning restore CS0414
@@ -45,6 +84,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     /// </summary>
     public void Flush()
     {
+        ThrowIfDisposed();
+        
         _rwLock.EnterWriteLock();
         try
         {
@@ -90,6 +131,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         // Recovery on startup
         RecoverFromWAL();
         
+        // Initialize append metadata after recovery
+        InitializeAppendMetadata();
+        
         // Register with memory pressure monitor
         s_memoryMonitor.RegisterList(this);
     }
@@ -99,6 +143,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         get
         {
+            ThrowIfDisposed();
             return Interlocked.Read(ref _count);
         }
     }
@@ -113,11 +158,23 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         {
             if (disposing)
             {
-                _durabilityManager.Dispose();
-                _wal.Dispose();
-                _dataFile.Dispose();
-                _indexFile.Dispose();
-                _rwLock.Dispose();
+                // Wait for any active operations to complete
+                _rwLock.EnterWriteLock();
+                try
+                {
+                    // Dispose in reverse order of creation
+                    _durabilityManager?.Dispose();
+                    _wal?.Dispose();
+                    _dataFile?.Dispose();
+                    _indexFile?.Dispose();
+                }
+                finally
+                {
+                    _rwLock.ExitWriteLock();
+                }
+                
+                // Dispose the lock last
+                _rwLock?.Dispose();
             }
 
             _disposedValue = true;
@@ -139,67 +196,21 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public Vector? GetVector(long index)
     {
+        ThrowIfDisposed();
+        
+        if (index < 0L || index >= Interlocked.Read(ref _count))
+        {
+            return null;
+        }
+
         _rwLock.EnterReadLock();
         try
         {
-            if (index < 0L || index >= Interlocked.Read(ref _count))
-            {
+            var location = FindVectorLocationByIndex(index);
+            if (!location.HasValue)
                 return null;
-            }
-
-            _isAtEndOfIndexStream = false;
-
-            // Start from the beginning and count non-tombstone entries
-            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-            
-            long currentLogicalIndex = 0;
-            int bytesRead;
-            
-            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
-            {
-                if (bytesRead != s_indexEntryByteLength)
-                {
-                    throw new InvalidOperationException("Failed to read the index entry");
-                }
                 
-                Guid vectorId = new(entry[..s_idBytesLength]);
-                
-                // If we hit an empty entry, we've reached the end
-                if (vectorId.Equals(Guid.Empty))
-                {
-                    return null;
-                }
-                
-                // Skip tombstones
-                if (vectorId.Equals(s_tombStone))
-                {
-                    continue;
-                }
-                
-                // Check if this is the index we're looking for
-                if (currentLogicalIndex == index)
-                {
-                    Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-                    Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
-                    long offset = BitConverter.ToInt64(offsetBytes);
-                    int length = BitConverter.ToInt32(lengthBytes);
-                    
-                    if (offset < 0L || length <= 0)
-                    {
-                        return null;
-                    }
-
-                    _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-                    Span<byte> bytes = stackalloc byte[length];
-                    _dataFile.Stream.ReadExactly(bytes);
-                    return new Vector(bytes);
-                }
-                
-                currentLogicalIndex++;
-            }
-            
-            return null;
+            return ReadVectorAtLocation(location.Value);
         }
         finally
         {
@@ -209,19 +220,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public Vector? GetVector(Guid id)
     {
+        ThrowIfDisposed();
+        
         _rwLock.EnterReadLock();
         try
         {
-            (_, long offset, int length) = SearchVectorInIndex(id);
-            if (offset < 0L || length <= 0)
-            {
+            var location = FindVectorLocation(id);
+            if (!location.HasValue)
                 return null;
-            }
-
-            _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-            Span<byte> bytes = stackalloc byte[length];
-            _dataFile.Stream.ReadExactly(bytes);
-            return new Vector(bytes);
+                
+            return ReadVectorAtLocation(location.Value);
         }
         finally
         {
@@ -331,47 +339,24 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     public void Add(Vector vector)
     {
         ArgumentNullException.ThrowIfNull(vector);
+        ThrowIfDisposed();
 
         _rwLock.EnterWriteLock();
         try
         {
-            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+            // Get next positions from metadata - O(1) operation
+            var (indexPosition, dataPosition) = _appendMetadata.GetNextPositions();
+            var data = vector.ToBinary();
             
-            // Always determine the correct positions within the lock to ensure consistency
-            DetermineAppendPositions(out long indexPosition, out long dataPosition);
-
-            byte[] data = vector.ToBinary();
-            
-
             // Log operation before performing it
             _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
 
-            Span<byte> idBytes = entry[..s_idBytesLength];
-            if (!vector.Id.TryWriteBytes(idBytes))
-            {
-                throw new InvalidOperationException("Failed to write the Id to bytes");
-            }
-
-            Span<byte> offsetBytes = entry[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-            if (!BitConverter.TryWriteBytes(offsetBytes, dataPosition))
-            {
-                throw new InvalidOperationException("Failed to write the offset to bytes");
-            }
-
-            Span<byte> lengthBytes = entry[(s_idBytesLength + s_offsetBytesLength)..];
-            if (!BitConverter.TryWriteBytes(lengthBytes, data.Length))
-            {
-                throw new InvalidOperationException("Failed to write the length to bytes");
-            }
-
-            // Ensure we're at the correct positions before writing
-            _indexFile.Stream.Seek(indexPosition, SeekOrigin.Begin);
-            _dataFile.Stream.Seek(dataPosition, SeekOrigin.Begin);
+            // Write data using position-independent operations
+            WriteVectorData(dataPosition, data);
+            WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
             
-            _indexFile.Stream.Write(entry);
-            _dataFile.Stream.Write(data);
-
-            _isAtEndOfIndexStream = true;
+            // Update metadata atomically
+            _appendMetadata.UpdatePositions(s_indexEntryByteLength, data.Length);
             
             // Record operation for durability management
             _durabilityManager.RecordOperation();
@@ -379,8 +364,13 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             // Commit WAL after successful operation
             _wal.Commit();
             
-            // Increment count atomically within the lock to ensure consistency
+            // Increment count atomically
             Interlocked.Increment(ref _count);
+        }
+        catch
+        {
+            // On failure, don't commit WAL
+            throw;
         }
         finally
         {
@@ -439,60 +429,40 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     public bool Remove(Vector vector)
     {
         ArgumentNullException.ThrowIfNull(vector);
+        ThrowIfDisposed();
 
         _rwLock.EnterWriteLock();
         try
         {
-            _isAtEndOfIndexStream = false;
-            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-
-            Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
-            int bytesRead;
-            while ((bytesRead = _indexFile.Stream.Read(entry)) > 0)
-            {
-                if (bytesRead != s_indexEntryByteLength)
-                {
-                    throw new InvalidOperationException("Failed to read the index entry");
-                }
-
-                Guid id = new(entry[..s_idBytesLength]);
-                if (id == vector.Id)
-                {
-                    // Get current index position for WAL logging
-                    long currentIndexPosition = _indexFile.Stream.Position - s_indexEntryByteLength;
-                    
-                    // Log operation before performing it
-                    _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, currentIndexPosition, -1);
-                    
-                    // Seek to the beginning of the entry and remove the ID with a tombstone-ID
-                    ReverseIndexStreamByIdBytesLength();
-                    _indexFile.Stream.Write(s_tombStoneBytes);
-                    // Seek to after the entry
-                    _indexFile.Stream.Seek(s_indexEntryByteLength - s_idBytesLength, SeekOrigin.Current);
-                    
-                    // Record operation for durability management
-                    _durabilityManager.RecordOperation();
-                    
-                    // Commit WAL after successful operation
-                    _wal.Commit();
-                    
-                    // Decrement count atomically within the lock to ensure consistency
-                    Interlocked.Decrement(ref _count);
-                    return true;
-                }
-                else if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
-                {
-                    _isAtEndOfIndexStream = true;
-                    ReverseIndexStreamByIdBytesLength();
-                    break;
-                }
-            }
+            var location = FindVectorLocation(vector.Id);
+            if (!location.HasValue)
+                return false;
+                
+            // Log operation before performing it
+            _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, location.Value.IndexPosition, -1);
+            
+            // Mark as tombstone
+            WriteTombstone(location.Value.IndexPosition);
+            
+            // Record operation for durability management
+            _durabilityManager.RecordOperation();
+            
+            // Commit WAL after successful operation
+            _wal.Commit();
+            
+            // Decrement count atomically
+            Interlocked.Decrement(ref _count);
+            return true;
+        }
+        catch
+        {
+            // On failure, don't commit WAL
+            throw;
         }
         finally
         {
             _rwLock.ExitWriteLock();
         }
-        return false;
     }
 
     public bool Update(Vector vector)
@@ -908,50 +878,34 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     public IEnumerator<Vector> GetEnumerator()
     {
+        ThrowIfDisposed();
+        
+        // Snapshot approach - read all valid entries under lock
+        List<(long offset, int length)> locations;
+        
         _rwLock.EnterReadLock();
         try
         {
-            _isAtEndOfIndexStream = false;
-            _indexFile.Stream.Seek(0, SeekOrigin.Begin);
-            _dataFile.Stream.Seek(0, SeekOrigin.Begin);
-
-            byte[] entry = new byte[s_indexEntryByteLength];
-            int bytesRead;
-            while ((bytesRead = _indexFile.Stream.Read(entry, 0, entry.Length)) > 0)
-            {
-                if (bytesRead != s_indexEntryByteLength)
-                {
-                    throw new InvalidOperationException("Failed to read the index entry");
-                }
-
-                var entrySpan = entry.AsSpan();
-                Guid id = new(entrySpan[..s_idBytesLength]);
-                if (id.Equals(s_tombStone))
-                {
-                    continue;
-                }
-
-                if (id.Equals(Guid.Empty) || id.Equals(s_tombStone))
-                {
-                    _isAtEndOfIndexStream = true;
-                    ReverseIndexStreamByIdBytesLength();
-                    break;
-                }
-
-                Span<byte> offsetBytes = entrySpan[s_idBytesLength..(s_idBytesLength + s_offsetBytesLength)];
-                Span<byte> lengthBytes = entrySpan[(s_idBytesLength + s_offsetBytesLength)..];
-                long offset = BitConverter.ToInt64(offsetBytes);
-                int length = BitConverter.ToInt32(lengthBytes);
-
-                _dataFile.Stream.Seek(offset, SeekOrigin.Begin);
-                Span<byte> bytes = stackalloc byte[length];
-                _dataFile.Stream.ReadExactly(bytes);
-                yield return new Vector(bytes);
-            }
+            locations = GetAllValidLocations();
         }
         finally
         {
             _rwLock.ExitReadLock();
+        }
+        
+        // Yield vectors without holding lock
+        foreach (var (offset, length) in locations)
+        {
+            _rwLock.EnterReadLock();
+            try
+            {
+                var data = ReadDataAt(offset, length);
+                yield return new Vector(data);
+            }
+            finally
+            {
+                _rwLock.ExitReadLock();
+            }
         }
     }
 
@@ -1348,5 +1302,189 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private long GetTotalDataSize()
     {
         return Math.Max(0, _dataFile.Stream.Length - 0);
+    }
+    
+    // Helper methods for position-independent operations
+    
+    private (long IndexPosition, long DataOffset, int Length)? FindVectorLocation(Guid id)
+    {
+        // Position-independent search through index
+        for (long pos = 0; pos < _appendMetadata.GetNextPositions().indexPos; pos += s_indexEntryByteLength)
+        {
+            var entry = ReadIndexEntryAt(pos);
+            if (entry.Id == id)
+                return (pos, entry.DataOffset, entry.Length);
+        }
+        
+        return null;
+    }
+    
+    private (long IndexPosition, long DataOffset, int Length)? FindVectorLocationByIndex(long targetIndex)
+    {
+        long currentIndex = 0;
+        
+        for (long pos = 0; pos < _appendMetadata.GetNextPositions().indexPos; pos += s_indexEntryByteLength)
+        {
+            var entry = ReadIndexEntryAt(pos);
+            
+            if (entry.Id.Equals(Guid.Empty))
+                break;
+                
+            if (!entry.Id.Equals(s_tombStone))
+            {
+                if (currentIndex == targetIndex)
+                    return (pos, entry.DataOffset, entry.Length);
+                currentIndex++;
+            }
+        }
+        
+        return null;
+    }
+    
+    private Vector ReadVectorAtLocation((long IndexPosition, long DataOffset, int Length) location)
+    {
+        var data = ReadDataAt(location.DataOffset, location.Length);
+        return new Vector(data);
+    }
+    
+    private byte[] ReadDataAt(long offset, int length)
+    {
+        // Use position-independent read with proper synchronization
+        var buffer = new byte[length];
+        lock (_dataFile.Stream)
+        {
+            _dataFile.Stream.Position = offset;
+            _dataFile.Stream.ReadExactly(buffer);
+        }
+        return buffer;
+    }
+    
+    private (Guid Id, long DataOffset, int Length) ReadIndexEntryAt(long position)
+    {
+        var buffer = new byte[s_indexEntryByteLength];
+        lock (_indexFile.Stream)
+        {
+            _indexFile.Stream.Position = position;
+            _indexFile.Stream.ReadExactly(buffer);
+        }
+        
+        var id = new Guid(buffer.AsSpan(0, s_idBytesLength));
+        var offset = BitConverter.ToInt64(buffer, s_idBytesLength);
+        var length = BitConverter.ToInt32(buffer, s_idBytesLength + s_offsetBytesLength);
+        
+        return (id, offset, length);
+    }
+    
+    private void WriteVectorData(long position, byte[] data)
+    {
+        lock (_dataFile.Stream)
+        {
+            _dataFile.Stream.Position = position;
+            _dataFile.Stream.Write(data);
+        }
+    }
+    
+    private void WriteIndexEntry(long position, Guid id, long dataOffset, int dataLength)
+    {
+        Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
+        
+        if (!id.TryWriteBytes(entry[..s_idBytesLength]))
+            throw new InvalidOperationException("Failed to write ID to bytes");
+            
+        if (!BitConverter.TryWriteBytes(entry[s_idBytesLength..], dataOffset))
+            throw new InvalidOperationException("Failed to write offset to bytes");
+            
+        if (!BitConverter.TryWriteBytes(entry[(s_idBytesLength + s_offsetBytesLength)..], dataLength))
+            throw new InvalidOperationException("Failed to write length to bytes");
+        
+        lock (_indexFile.Stream)
+        {
+            _indexFile.Stream.Position = position;
+            _indexFile.Stream.Write(entry);
+        }
+    }
+    
+    private void WriteTombstone(long indexPosition)
+    {
+        lock (_indexFile.Stream)
+        {
+            _indexFile.Stream.Position = indexPosition;
+            _indexFile.Stream.Write(s_tombStoneBytes);
+        }
+    }
+    
+    private void UpdateIndexEntry(long position, long newDataOffset, int newDataLength)
+    {
+        Span<byte> buffer = stackalloc byte[s_offsetBytesLength + s_lengthBytesLength];
+        
+        if (!BitConverter.TryWriteBytes(buffer[..s_offsetBytesLength], newDataOffset))
+            throw new InvalidOperationException("Failed to write offset to bytes");
+            
+        if (!BitConverter.TryWriteBytes(buffer[s_offsetBytesLength..], newDataLength))
+            throw new InvalidOperationException("Failed to write length to bytes");
+        
+        lock (_indexFile.Stream)
+        {
+            _indexFile.Stream.Position = position + s_idBytesLength;
+            _indexFile.Stream.Write(buffer);
+        }
+    }
+    
+    private List<(long offset, int length)> GetAllValidLocations()
+    {
+        var locations = new List<(long, int)>();
+        var (maxIndexPos, _) = _appendMetadata.GetNextPositions();
+        
+        for (long pos = 0; pos < maxIndexPos; pos += s_indexEntryByteLength)
+        {
+            var entry = ReadIndexEntryAt(pos);
+            
+            if (entry.Id.Equals(Guid.Empty))
+                break;
+                
+            if (!entry.Id.Equals(s_tombStone))
+            {
+                locations.Add((entry.DataOffset, entry.Length));
+            }
+        }
+        
+        return locations;
+    }
+    
+    private void InitializeAppendMetadata()
+    {
+        // Scan once at startup to find append positions
+        long maxIndexPos = 0;
+        long maxDataPos = 0;
+        
+        // Find the first empty slot in index
+        for (long pos = 0; pos < _indexFile.Stream.Length; pos += s_indexEntryByteLength)
+        {
+            var entry = ReadIndexEntryAt(pos);
+            
+            if (entry.Id.Equals(Guid.Empty))
+            {
+                maxIndexPos = pos;
+                break;
+            }
+            
+            // Track the highest data position for non-tombstone entries
+            if (!entry.Id.Equals(s_tombStone))
+            {
+                var endOfData = entry.DataOffset + entry.Length;
+                if (endOfData > maxDataPos)
+                    maxDataPos = endOfData;
+                    
+                Interlocked.Increment(ref _count);
+            }
+        }
+        
+        _appendMetadata.Reset(maxIndexPos, maxDataPos);
+    }
+    
+    private void ThrowIfDisposed()
+    {
+        if (_disposedValue)
+            throw new ObjectDisposedException(nameof(MemoryMappedList));
     }
 }

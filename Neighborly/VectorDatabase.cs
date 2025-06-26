@@ -507,7 +507,6 @@ public partial class VectorDatabase : IDisposable
         _indexServiceCancellationTokenSource = new CancellationTokenSource();
         var cancellationToken = _indexServiceCancellationTokenSource.Token;
 
-        // Create a new thread that will react when _hasOutdatedIndex is set to true
         indexService = new Thread(async () =>
         {
             _logger.LogInformation("Indexing thread started.");
@@ -553,26 +552,12 @@ public partial class VectorDatabase : IDisposable
                 
                 // Wait for the indexing thread to actually stop before continuing
                 // This prevents lock disposal issues when the thread is still running
-                if (!indexService.Join(TimeSpan.FromSeconds(5)))
+                while (indexService.IsAlive)
                 {
-                    _logger.LogWarning("Indexing thread did not stop within 5 seconds, waiting longer...");
-                    
-                    // Try waiting longer for graceful shutdown
-                    if (!indexService.Join(TimeSpan.FromSeconds(10)))
+                    if (!indexService.Join(TimeSpan.FromSeconds(1)))
                     {
-                        _logger.LogError("Indexing thread did not stop within 15 seconds total. This may cause disposal issues.");
-                        
-                        // As a last resort, we'll proceed but the thread might still be running
-                        // In production, consider Thread.Abort() here, but it's deprecated and dangerous
+                        _logger.LogWarning("Indexing thread is still running...");
                     }
-                    else
-                    {
-                        _logger.LogInformation("Indexing thread stopped after extended wait.");
-                    }
-                }
-                else
-                {
-                    _logger.LogInformation("Indexing thread stopped gracefully.");
                 }
                 
                 _indexServiceCancellationTokenSource?.Dispose();
@@ -830,24 +815,18 @@ public partial class VectorDatabase : IDisposable
                 _logger.LogInformation("Shutting down VectorDatabase.");
                 StopIndexService();
                 
-                // Safety check: ensure no locks are held before disposal
-                var maxRetries = 50; // Wait up to 5 seconds (50 * 100ms)
-                var retryCount = 0;
-                while (((_rwLock.IsReadLockHeld || _rwLock.IsWriteLockHeld) && retryCount < maxRetries))
+                _rwLock.EnterWriteLock();
+                try
                 {
-                    _logger.LogWarning($"Lock is still held during disposal (Read: {_rwLock.IsReadLockHeld}, Write: {_rwLock.IsWriteLockHeld}). Waiting... ({retryCount + 1}/{maxRetries})");
-                    Thread.Sleep(100);
-                    retryCount++;
+                    _vectors.Modified -= VectorList_Modified;
+                    _vectors.Dispose();
                 }
-                
-                if (_rwLock.IsReadLockHeld || _rwLock.IsWriteLockHeld)
+                finally
                 {
-                    _logger.LogError($"Lock is still held after waiting 5 seconds (Read: {_rwLock.IsReadLockHeld}, Write: {_rwLock.IsWriteLockHeld}). Proceeding with disposal anyway.");
+                    _rwLock.ExitWriteLock();
                 }
                 
                 _rwLock.Dispose();
-                _vectors.Modified -= VectorList_Modified;
-                _vectors.Dispose();
                 _disposalCancellationTokenSource.Dispose();
             }
 
