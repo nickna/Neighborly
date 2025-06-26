@@ -4,11 +4,14 @@ updates:
     directory: "/Neighborly" # The directory of the first project
     schedule:
       interval: "daily"
+    target-branch: "develop"
   - package-ecosystem: "nuget"
     directory: "/Tests" # The directory of the second project
     schedule:
       interval: "daily"
+    target-branch: "develop"
   - package-ecosystem: "nuget"
     directory: "/API.gRPC" # The directory of the third project
     schedule:
       interval: "daily"
+    target-branch: "develop"
