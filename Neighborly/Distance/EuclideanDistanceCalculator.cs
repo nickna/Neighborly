@@ -3,7 +3,7 @@
 /// <summary>
 /// Calculates distance using Euclidean math
 /// </summary>
-public sealed class EuclideanDistanceCalculator : AbstractDistanceCalculator
+public sealed class EuclideanDistanceCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="EuclideanDistanceCalculator"/>, which can be used directly
