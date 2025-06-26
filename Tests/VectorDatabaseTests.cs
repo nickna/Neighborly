@@ -244,7 +244,7 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
-        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(false);
 
         // Act
         var query = new Vector([2f, 3f, 4f]);
@@ -266,7 +266,7 @@ public class VectorDatabaseTests
 
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
-        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(false);
 
         // Act
         var query = new Vector([1f, 2f, 3f]);
@@ -291,14 +291,14 @@ public class VectorDatabaseTests
         _db.Vectors.Add(vector1);
         _db.Vectors.Add(vector2);
 
-        await _db.RebuildSearchIndexesAsync().ConfigureAwait(true);
+        await _db.RebuildSearchIndexesAsync().ConfigureAwait(false);
 
         var path = Path.GetTempPath();
 
         // Act    
-        await _db.SaveAsync(path).ConfigureAwait(true);
+        await _db.SaveAsync(path).ConfigureAwait(false);
         _db.Vectors.Clear();
-        await _db.LoadAsync(path).ConfigureAwait(true);
+        await _db.LoadAsync(path).ConfigureAwait(false);
 
         // Assert
         Assert.That(_db.Count, Is.EqualTo(2), "Count should be 2 after loading the saved database.");

@@ -1,45 +1,23 @@
 using System.Collections;
+using System.Collections.Concurrent;
 
 namespace Neighborly;
 
-/// <summary>
-/// List that stores items in memory up to a certain count, then spills over to disk.
-/// </summary>
 public class VectorList : IList<Vector>, IDisposable
 {
+    private readonly ConcurrentDictionary<Guid, Vector> _vectors = new();
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
-    private readonly MemoryMappedList _memoryMappedList = new(50_000);
     private bool _disposed = false;
 
-    /// <summary>
-    /// Event that is triggered when data has changed
-    /// </summary>
     public event EventHandler? Modified;
 
-    /// <summary>
-    /// Creates a new instance of DiskBackedList with a maximum in-memory count based on system memory.
-    /// </summary>
     public VectorList()
     {
         _tags = new VectorTags(this);
-        // VectorList.Modified event is triggered when VectorTags.Modified event is triggered
         _tags.Modified += (sender, e) => Modified?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// Defragments the MemoryMappedList if the fragmentation is greater than the threshold.
-    /// (Threshold is currently set to 0)
-    /// </summary>
-    public void Defrag()
-    {
-        _memoryMappedList.Defrag();
-    }
-
-    /// <summary>
-    /// This releases the file resources allocated to each Vector object when the list is disposed.
-    /// </summary>
-    /// <param name="disposing"></param>
     protected virtual void Dispose(bool disposing)
     {
         if (!_disposed)
@@ -47,14 +25,12 @@ public class VectorList : IList<Vector>, IDisposable
             if (disposing)
             {
                 IsReadOnly = true;
-
-                // Dispose managed resources.
-                _memoryMappedList.Dispose();
+                _vectors.Clear();
             }
-
             _disposed = true;
         }
     }
+
     public void Dispose()
     {
         Dispose(true);
@@ -64,10 +40,10 @@ public class VectorList : IList<Vector>, IDisposable
     public void Add(Vector item)
     {
         ArgumentNullException.ThrowIfNull(item);
-
-        _memoryMappedList.Add(item);
-
-        Modified?.Invoke(this, EventArgs.Empty);
+        if (_vectors.TryAdd(item.Id, item))
+        {
+            Modified?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public void AddRange(IEnumerable<Vector> items)
@@ -80,181 +56,118 @@ public class VectorList : IList<Vector>, IDisposable
 
     public Vector? Get(int index)
     {
-        return _memoryMappedList.GetVector(index);
+        return _vectors.Values.ElementAtOrDefault(index);
     }
 
-
-    public void Insert(int index, Vector item) => throw new NotSupportedException("Inserting items at a specific index is not supported");
+    public void Insert(int index, Vector item) => throw new NotSupportedException();
 
     public int IndexOf(Vector item)
     {
-        // Vector not found in list, check in memory mapped list
-        long memoryMappedIndex = _memoryMappedList.IndexOf(item);
-        if (memoryMappedIndex != -1)
+        var i = 0;
+        foreach (var vector in _vectors.Values)
         {
-            // TOOD: Fix cast with https://github.com/nickna/Neighborly/issues/33
-            return (int)(memoryMappedIndex);
+            if (vector.Equals(item))
+            {
+                return i;
+            }
+            i++;
         }
-
         return -1;
     }
+
     public bool IsReadOnly { get; private set; }
+
     public List<Vector> FindAll(Predicate<Vector> match)
     {
-        if (match == null)
-        {
-            throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
-        }
-
-        var foundItems = new List<Vector>();
-
-        foundItems.AddRange(_memoryMappedList.Where(x => x != null && match(x)).Select(x => x!));
-
-        return foundItems;
+        return _vectors.Values.Where(v => match(v)).ToList();
     }
 
     public Vector? Find(Predicate<Vector> match)
     {
-        if (match == null)
-        {
-            throw new ArgumentNullException(nameof(match), "Match predicate cannot be null");
-        }
-
-        foreach (var item in _memoryMappedList)
-        {
-            if (item != null && match(item))
-            {
-                return item;
-            }
-        }
-
-        return default;
+        return _vectors.Values.FirstOrDefault(v => match(v));
     }
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        if (array == null)
-        {
-            throw new ArgumentNullException(nameof(array), "Array cannot be null");
-        }
-
-        if (arrayIndex < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(arrayIndex), "Array index cannot be less than 0");
-        }
-
-        if (array.Length - arrayIndex < Count)
-        {
-            throw new ArgumentException("The number of elements in the list is greater than the available space from arrayIndex to the end of the destination array");
-        }
-
-        _memoryMappedList.CopyTo(array, arrayIndex);
+        _vectors.Values.CopyTo(array, arrayIndex);
     }
 
     public Vector this[int index]
     {
-        get
-        {
-            return Get(index) ?? throw new IndexOutOfRangeException();
-        }
-        set
-        {
-            if (index < 0 || index >= Count)
-            {
-                throw new IndexOutOfRangeException();
-            }
-
-            throw new NotSupportedException("Updating items on disk is not supported");
-        }
+        get => _vectors.Values.ElementAt(index);
+        set => throw new NotSupportedException();
     }
 
-    /// <summary>
-    /// Checks the list for the presence of a vector by Id.
-    /// </summary>
-    /// <param name="item"></param>
-    /// <returns></returns>
     public bool Contains(Vector item)
     {
-        return _memoryMappedList.GetVector(item.Id) != null;
+        return _vectors.ContainsKey(item.Id);
     }
 
-    public IEnumerator<Vector> GetEnumerator()
-    {
-        return _memoryMappedList.GetEnumerator();
-    }
+    public IEnumerator<Vector> GetEnumerator() => _vectors.Values.GetEnumerator();
+
+    public IReadOnlyList<Guid> GetIds() => _vectors.Keys.ToList();
 
     public void RemoveAt(int index)
     {
-        if (index < 0 || index >= Count)
-        {
-            throw new ArgumentOutOfRangeException(nameof(index), "Index is out of range");
-        }
-
-        var vector = _memoryMappedList.GetVector(index);
+        var vector = Get(index);
         if (vector != null)
         {
-            _memoryMappedList.Remove(vector);
+            Remove(vector);
         }
-
-        Modified?.Invoke(this, EventArgs.Empty);
-
     }
 
     internal Vector? GetById(Guid id)
     {
-        if (Guid.Empty.Equals(id))
-        {
-            // Return default if id is empty
-            return default;
-        }
-
-        return _memoryMappedList.GetVector(id);
+        _vectors.TryGetValue(id, out var vector);
+        return vector;
     }
 
     public bool Remove(Vector item)
     {
-        bool removed = _memoryMappedList.Remove(item);
-        if (removed)
+        if (_vectors.TryRemove(item.Id, out _))
         {
             Modified?.Invoke(this, EventArgs.Empty);
+            return true;
         }
-        return removed;
+        return false;
     }
 
-    public int Count => (int)_memoryMappedList.Count;
+    public int Count => _vectors.Count;
 
     public void Clear()
     {
-        _memoryMappedList.Clear();
-
+        _vectors.Clear();
         Modified?.Invoke(this, EventArgs.Empty);
     }
 
-    IEnumerator IEnumerable.GetEnumerator()
-    {
-        return GetEnumerator();
-    }
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public int FindIndexById(Guid id)
     {
-        // TOOD: Fix cast with https://github.com/nickna/Neighborly/issues/33
-        return (int)_memoryMappedList.FindIndexById(id);
+        var i = 0;
+        foreach (var key in _vectors.Keys)
+        {
+            if (key == id)
+            {
+                return i;
+            }
+            i++;
+        }
+        return -1;
     }
 
     public int FindIndex(Predicate<Vector> match)
     {
-        var index = 0;
-
-        foreach (var item in _memoryMappedList)
+        var i = 0;
+        foreach (var vector in _vectors.Values)
         {
-            ++index;
-            if (item != null && match(item))
+            if (match(vector))
             {
-                return index;
+                return i;
             }
+            i++;
         }
-
-        return -1; // Return -1 if no match is found
+        return -1;
     }
 
     public void RemoveRange(IEnumerable<Vector> items)
@@ -265,47 +178,31 @@ public class VectorList : IList<Vector>, IDisposable
         }
     }
 
-    public bool Update(Guid Id, Vector vector)
+    internal bool Update(Guid id, Vector vector)
     {
-        vector.Id = Id; // Change the Id of the incoming vector to match the Id of the existing vector
-
-        var updated = _memoryMappedList.Update(vector);
-
-        if (updated)
+        while (_vectors.TryGetValue(id, out Vector? existingVector))
         {
-            Modified?.Invoke(this, EventArgs.Empty);
+            // Create a new vector with the same ID as the existing one but with updated data
+            var updatedVector = new Vector(vector.Values, vector.OriginalText);
+            updatedVector.Id = id; // Preserve the original ID
+            
+            // Attempt to update. If it fails, it means another thread modified it,
+            // so we loop and try again with the new existing value.
+            if (_vectors.TryUpdate(id, updatedVector, existingVector))
+            {
+                Modified?.Invoke(this, EventArgs.Empty);
+                return true;
+            }
         }
-
-        return updated;
+        // If TryGetValue returns false, the key doesn't exist.
+        return false;
     }
 
     public void RemoveById(Guid guid)
     {
-        int index = FindIndexById(guid);
-        if (index != -1)
+        if (_vectors.TryRemove(guid, out _))
         {
-            RemoveAt(index);
+            Modified?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    public long CalculateFragmentation()
-    {
-        return _memoryMappedList.CalculateFragmentation();
-    }
-
-    public long DefragBatch()
-    {
-        return _memoryMappedList.DefragBatch();
-    }
-
-    internal long[] GetFileInfo()
-    {
-        return _memoryMappedList.GetFileInfo();
-    }
-
-    internal void ForceFlush()
-    {
-        _memoryMappedList.Flush();
-        return;
     }
 }
