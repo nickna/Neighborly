@@ -493,36 +493,14 @@ public partial class VectorDatabase : IDisposable
             while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
             {
                 bool rebuildIndexes = false;
-                _rwLock.EnterReadLock();
-                try
+                
+                // Check if rebuild is needed without holding a lock
+                // These are volatile reads, so we get the latest values
+                if (_hasOutdatedIndex &&
+                    _vectors.Count > 0 &&
+                    DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
                 {
-
-                _rwLock.EnterReadLock();
-                try
-                {
-                    // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
-                    if (_hasOutdatedIndex &&
-                        _vectors.Count > 0 &&
-                        DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
-                    {
-                        rebuildIndexes = true;
-                    }
-                }
-                finally
-                {
-                    _rwLock.ExitReadLock();
-                }
-
-                if (rebuildIndexes)
-                {
-                    await RebuildTagsAsync();
-                    await RebuildSearchIndexesAsync(cancellationToken);
-                    _indexRebuildCounter.Add(1);
-                }
-                }
-                finally
-                {
-                    _rwLock.ExitReadLock();
+                    rebuildIndexes = true;
                 }
 
                 if (rebuildIndexes)
