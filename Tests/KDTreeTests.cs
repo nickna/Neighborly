@@ -174,7 +174,7 @@ public class KDTreeTests
     }
 
     [Test]
-    public async Task ParallelConfiguration_RespectsSettings()
+    public void ParallelConfiguration_RespectsSettings()
     {
         // Arrange
         var vectors = new VectorList();
