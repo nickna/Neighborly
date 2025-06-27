@@ -51,7 +51,7 @@ public sealed class SimdEuclideanDistance128Calculator : AbstractDistanceCalcula
             sumVector += diff * diff;
         }
 
-        var sum = Vector.Dot(sumVector, Vector<float>.One);
+        var sum = System.Numerics.Vector.Dot(sumVector, Vector<float>.One);
 
         for (; i < ExpectedDimension; i++)
         {

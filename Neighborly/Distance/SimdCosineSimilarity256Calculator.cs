@@ -75,9 +75,9 @@ public sealed class SimdCosineSimilarity256Calculator : AbstractDistanceCalculat
             magnitudeBVector += vec2 * vec2;
         }
 
-        var dotProduct = Vector.Dot(dotProductVector, Vector<float>.One);
-        var magnitudeA = Vector.Dot(magnitudeAVector, Vector<float>.One);
-        var magnitudeB = Vector.Dot(magnitudeBVector, Vector<float>.One);
+        var dotProduct = System.Numerics.Vector.Dot(dotProductVector, Vector<float>.One);
+        var magnitudeA = System.Numerics.Vector.Dot(magnitudeAVector, Vector<float>.One);
+        var magnitudeB = System.Numerics.Vector.Dot(magnitudeBVector, Vector<float>.One);
 
         for (; i < ExpectedDimension; i++)
         {
