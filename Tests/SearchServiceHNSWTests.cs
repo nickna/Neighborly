@@ -26,7 +26,7 @@ public class SearchServiceHNSWTests
     }
 
     [Test]
-    public void SearchService_BuildIndex_HNSW_CreatesValidIndex()
+    public void SearchService_BuildIndexes_HNSW_CreatesValidIndex()
     {
         // Add some test vectors
         var vectors = new[]
@@ -42,7 +42,7 @@ public class SearchServiceHNSWTests
         }
 
         // Build HNSW index
-        Assert.DoesNotThrow(() => _searchService.BuildIndex(SearchAlgorithm.HNSW));
+        Assert.DoesNotThrow(() => _searchService.BuildIndexes(SearchAlgorithm.HNSW));
     }
 
     [Test]
@@ -63,7 +63,7 @@ public class SearchServiceHNSWTests
         }
 
         // Build index
-        _searchService.BuildIndex(SearchAlgorithm.HNSW);
+        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
 
         // Search for vectors close to origin
         var query = new Vector(new[] { 0.1f, 0.1f });
@@ -83,7 +83,7 @@ public class SearchServiceHNSWTests
         _vectors.Add(new Vector("third document"));
 
         // Build index
-        _searchService.BuildIndex(SearchAlgorithm.HNSW);
+        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
 
         // Search with text
         var results = _searchService.Search("test", 2, SearchAlgorithm.HNSW);
@@ -107,7 +107,7 @@ public class SearchServiceHNSWTests
     {
         // Add and build
         _vectors.Add(new Vector(new[] { 1.0f, 2.0f }, "test"));
-        _searchService.BuildIndex(SearchAlgorithm.HNSW);
+        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
 
         // Clear should not throw
         Assert.DoesNotThrow(() => _searchService.Clear());
@@ -136,7 +136,7 @@ public class SearchServiceHNSWTests
             _vectors.Add(vector);
         }
 
-        _searchService.BuildIndex(SearchAlgorithm.HNSW);
+        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
 
         var query = new Vector(new[] { 0.0f, 0.0f });
         

@@ -50,6 +50,12 @@ public class KDTree
     private const int s_currentFileVersion = 1;
 
     private KDTreeNode? root;
+    private readonly IDistanceCalculator _distanceCalculator;
+
+    public KDTree()
+    {
+        _distanceCalculator = EuclideanDistanceCalculator.Instance;
+    }
 
     /// <summary>
     /// Bounded priority queue that efficiently maintains the k best candidates
@@ -133,6 +139,8 @@ public class KDTree
         }
 
         public bool IsFull => _count >= _capacity;
+        
+        public int Count => _count;
 
         public float WorstDistance
         {
@@ -194,7 +202,7 @@ public class KDTree
         }
     }
 
-    public void Build(VectorList vectors)
+    public async Task Build(VectorList vectors)
     {
         if (vectors == null)
         {
@@ -208,7 +216,7 @@ public class KDTree
         // Use parallel construction for large datasets if enabled
         bool useParallel = KDTreeParallelConfig.EnableParallelConstruction && 
                           vectors.Count >= KDTreeParallelConfig.ParallelConstructionThreshold;
-        root = useParallel ? BuildParallel(vectors, 0) : Build(vectors, 0);
+        root = useParallel ? await BuildParallel(vectors, 0) : Build(vectors, 0);
     }
 
     public void Load(BinaryReader reader, VectorList vectors)
@@ -264,7 +272,7 @@ public class KDTree
         };
     }
 
-    private KDTreeNode? BuildParallel(IList<Vector> vectors, int depth)
+    private async Task<KDTreeNode?> BuildParallel(IList<Vector> vectors, int depth)
     {
         if (vectors.Count <= 0)
         {
@@ -284,37 +292,34 @@ public class KDTree
         var leftVectors = sortedVectors.Take(median).ToList();
         var rightVectors = sortedVectors.Skip(median + 1).ToList();
 
-        // Use parallel construction for large subtrees, sequential for small ones
-        KDTreeNode? leftChild = null;
-        KDTreeNode? rightChild = null;
+        Task<KDTreeNode?> leftChildTask;
+        Task<KDTreeNode?> rightChildTask;
 
-        if (leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize || rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        if (leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
         {
-            // Parallel construction for larger subtrees
-            var leftTask = Task.Run(() => leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize 
-                ? BuildParallel(leftVectors, depth + 1) 
-                : Build(leftVectors, depth + 1));
-            
-            var rightTask = Task.Run(() => rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize 
-                ? BuildParallel(rightVectors, depth + 1) 
-                : Build(rightVectors, depth + 1));
-
-            Task.WaitAll(leftTask, rightTask);
-            leftChild = leftTask.Result;
-            rightChild = rightTask.Result;
+            leftChildTask = BuildParallel(leftVectors, depth + 1);
         }
         else
         {
-            // Sequential construction for smaller subtrees to avoid overhead
-            leftChild = Build(leftVectors, depth + 1);
-            rightChild = Build(rightVectors, depth + 1);
+            leftChildTask = Task.FromResult(Build(leftVectors, depth + 1));
         }
+
+        if (rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        {
+            rightChildTask = BuildParallel(rightVectors, depth + 1);
+        }
+        else
+        {
+            rightChildTask = Task.FromResult(Build(rightVectors, depth + 1));
+        }
+
+        await Task.WhenAll(leftChildTask, rightChildTask);
 
         return new KDTreeNode
         {
             Vector = sortedVectors[median],
-            Left = leftChild,
-            Right = rightChild
+            Left = leftChildTask.Result,
+            Right = rightChildTask.Result
         };
     }
 
@@ -329,7 +334,7 @@ public class KDTree
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
         }
 
-        var candidates = new BoundedPriorityQueue(k);
+        var candidates = new ThreadSafeBoundedPriorityQueue(k);
         NearestNeighbors(root, query, k, 0, candidates);
         
         return candidates.GetResults();
@@ -339,7 +344,7 @@ public class KDTree
     /// Parallel version of nearest neighbors search for large datasets
     /// Uses multiple threads to search different subtrees concurrently
     /// </summary>
-    public IList<Vector> NearestNeighborsParallel(Vector query, int k)
+    public async Task<IList<Vector>> NearestNeighborsParallel(Vector query, int k)
     {
         if (query == null)
         {
@@ -351,7 +356,7 @@ public class KDTree
         }
 
         var candidates = new ThreadSafeBoundedPriorityQueue(k);
-        NearestNeighborsParallel(root, query, k, 0, candidates);
+        await NearestNeighborsParallel(root, query, k, 0, candidates);
         
         return candidates.GetResults();
     }
@@ -390,7 +395,7 @@ public class KDTree
     /// Parallel version of range neighbors search for large datasets
     /// Uses concurrent collections to safely collect results from multiple threads
     /// </summary>
-    public IList<Vector> RangeNeighborsParallel(Vector query, float radius, IDistanceCalculator? distanceCalculator = null)
+    public async Task<IList<Vector>> RangeNeighborsParallel(Vector query, float radius, IDistanceCalculator? distanceCalculator = null)
     {
         if (query == null)
         {
@@ -403,7 +408,7 @@ public class KDTree
 
         distanceCalculator ??= EuclideanDistanceCalculator.Instance;
         var results = new ConcurrentBag<(Vector vector, float distance)>();
-        RangeNeighborsParallel(root, query, radius, 0, distanceCalculator, results);
+        await RangeNeighborsParallel(root, query, radius, 0, distanceCalculator, results);
         
         // Sort by distance, then by vector ID for consistent ordering when distances are equal
         return results
@@ -413,7 +418,7 @@ public class KDTree
             .ToList();
     }
 
-    private void RangeNeighbors(KDTreeNode? node, Vector query, float radius, int depth, IDistanceCalculator distanceCalculator, List<(Vector vector, float distance)> results)
+    private void RangeNeighbors(KDTreeNode? node, Vector query, float radius, int depth, IDistanceCalculator distanceCalculator, System.Collections.Generic.List<(Vector vector, float distance)> results)
     {
         if (node?.Vector == null)
             return;
@@ -442,86 +447,85 @@ public class KDTree
         }
     }
 
-    private void RangeNeighborsParallel(KDTreeNode? node, Vector query, float radius, int depth, IDistanceCalculator distanceCalculator, ConcurrentBag<(Vector vector, float distance)> results)
+    private async Task RangeNeighborsParallel(KDTreeNode? node, Vector query, float radius, int depth, IDistanceCalculator distanceCalculator, System.Collections.Concurrent.ConcurrentBag<(Vector vector, float distance)> results)
     {
-        if (node?.Vector == null)
-            return;
-
-        var axis = depth % query.Dimensions;
-        var distance = distanceCalculator.CalculateDistance(node.Vector, query);
-        
-        // Add current node if it's within radius
-        if (distance <= radius)
+        if (node == null)
         {
-            results.Add((node.Vector, distance));
+            return;
         }
 
-        // Determine which child to search first
-        var nearChild = query[axis] <= node.Vector[axis] ? node.Left : node.Right;
-        var farChild = query[axis] <= node.Vector[axis] ? node.Right : node.Left;
-
-        // Check if we need to search the far child (pruning condition)
-        var axisDistance = Math.Abs(query[axis] - node.Vector[axis]);
-
-        if (depth <= KDTreeParallelConfig.MaxParallelSearchDepth) // Use parallel execution for shallow depths
+        if (node.IsLeaf)
         {
-            // Create tasks for parallel execution
-            var tasks = new List<Task>();
-
-            // Always search the near child
-            if (nearChild != null)
+            float distance = distanceCalculator.CalculateDistance(query, node.Vector);
+            if (distance <= radius)
             {
-                tasks.Add(Task.Run(() => RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results)));
+                results.Add((node.Vector, distance));
+            }
+            return;
+        }
+
+        int axis = depth % query.Dimensions;
+        float queryAxisValue = query.Values[axis];
+
+        KDTreeNode? nearChild = queryAxisValue < node.Vector.Values[axis] ? node.Left : node.Right;
+        KDTreeNode? farChild = queryAxisValue < node.Vector.Values[axis] ? node.Right : node.Left;
+
+        float axisDistance = Math.Abs(queryAxisValue - node.Vector.Values[axis]);
+
+        if (depth < KDTreeParallelConfig.MaxParallelSearchDepth)
+        {
+            List<Task> tasks = new();
+            tasks.Add(RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results));
+
+            if (axisDistance <= radius)
+            {
+                tasks.Add(RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results));
             }
 
-            // Search far child if within radius
-            if (farChild != null && axisDistance <= radius)
-            {
-                tasks.Add(Task.Run(() => RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results)));
-            }
-
-            // Wait for all tasks to complete
-            Task.WaitAll(tasks.ToArray());
+            await Task.WhenAll(tasks);
         }
         else
         {
             // Use sequential execution for deeper levels to avoid task overhead
-            RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results);
+            await RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results);
 
             if (axisDistance <= radius)
             {
-                RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results);
+                await RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results);
             }
         }
     }
 
-    private void NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth, BoundedPriorityQueue candidates)
+    private void NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue candidates)
     {
-        if (node?.Vector == null)
+        if (node == null)
+        {
             return;
+        }
 
-        var axis = depth % query.Dimensions;
-        var distance = (node.Vector - query).Magnitude;
-        
-        // Add current node to candidates
-        candidates.TryAdd(node.Vector, distance);
+        if (node.IsLeaf)
+        {
+            candidates.TryAdd(node.Vector, _distanceCalculator.CalculateDistance(query, node.Vector));
+            return;
+        }
 
-        // Determine which child to search first
-        var nearChild = query[axis] <= node.Vector[axis] ? node.Left : node.Right;
-        var farChild = query[axis] <= node.Vector[axis] ? node.Right : node.Left;
+        int axis = depth % query.Dimensions;
+        float queryAxisValue = query.Values[axis];
 
-        // Search the near child first
+        KDTreeNode? nearChild = queryAxisValue < node.Vector.Values[axis] ? node.Left : node.Right;
+        KDTreeNode? farChild = queryAxisValue < node.Vector.Values[axis] ? node.Right : node.Left;
+
         NearestNeighbors(nearChild, query, k, depth + 1, candidates);
 
-        // Check if we need to search the far child (pruning condition)
-        var axisDistance = Math.Abs(query[axis] - node.Vector[axis]);
-        if (!candidates.IsFull || axisDistance < candidates.WorstDistance)
+        float axisDistance = Math.Abs(queryAxisValue - node.Vector.Values[axis]);
+
+        if (candidates.Count < k || axisDistance < candidates.WorstDistance)
         {
             NearestNeighbors(farChild, query, k, depth + 1, candidates);
         }
     }
 
-    private void NearestNeighborsParallel(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue candidates)
+    private async Task NearestNeighborsParallel(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue candidates)
     {
         if (node?.Vector == null)
             return;
@@ -536,31 +540,43 @@ public class KDTree
         var nearChild = query[axis] <= node.Vector[axis] ? node.Left : node.Right;
         var farChild = query[axis] <= node.Vector[axis] ? node.Right : node.Left;
 
+        // Create a list of tasks to await
+        var tasks = new List<Task>();
+
         // Search the near child first (always)
-        NearestNeighborsParallel(nearChild, query, k, depth + 1, candidates);
+        tasks.Add(NearestNeighborsParallel(nearChild, query, k, depth + 1, candidates));
 
         // Check if we need to search the far child (pruning condition)
         var axisDistance = Math.Abs(query[axis] - node.Vector[axis]);
         if (!candidates.IsFull || axisDistance < candidates.WorstDistance)
         {
             // For shallow levels, use parallel execution to search the far child
-            if (depth <= KDTreeParallelConfig.MaxParallelSearchDepth) // Only parallelize at shallow depths to avoid excessive task overhead
+            if (depth <= KDTreeParallelConfig.MaxParallelSearchDepth)
             {
-                var task = Task.Run(() => NearestNeighborsParallel(farChild, query, k, depth + 1, candidates));
-                task.Wait(); // Wait for completion to ensure consistent results
+                tasks.Add(NearestNeighborsParallel(farChild, query, k, depth + 1, candidates));
             }
             else
             {
                 // Use sequential search for deeper levels
-                NearestNeighborsParallel(farChild, query, k, depth + 1, candidates);
+                NearestNeighbors(farChild, query, k, depth + 1, candidates);
             }
         }
+
+        await Task.WhenAll(tasks);
     }
 
     public IList<Vector> Search(Vector query, int k)
     {
         // Perform the nearest neighbor search
         var results = NearestNeighbors(query, k);
+
+        return results;
+    }
+
+    public async Task<IList<Vector>> SearchParallel(Vector query, int k)
+    {
+        // Perform the nearest neighbor search in parallel
+        var results = await NearestNeighborsParallel(query, k);
 
         return results;
     }

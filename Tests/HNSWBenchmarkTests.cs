@@ -96,7 +96,7 @@ public class HNSWBenchmarkTests
             _searchService.Clear();
             
             var stopwatch = Stopwatch.StartNew();
-            _searchService.BuildIndex(algorithm);
+            _searchService.BuildIndexes(algorithm);
             stopwatch.Stop();
             
             buildTimes[algorithm.ToString()] = stopwatch.ElapsedMilliseconds;
@@ -119,8 +119,8 @@ public class HNSWBenchmarkTests
         CreateTestDataset(2000, 64);
         
         // Build indexes
-        _searchService.BuildIndex(SearchAlgorithm.HNSW);
-        _searchService.BuildIndex(SearchAlgorithm.Linear); // Ground truth
+        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
+        _searchService.BuildIndexes(SearchAlgorithm.Linear); // Ground truth
         
         var random = new Random(42);
         var queryCount = 20;
@@ -188,7 +188,7 @@ public class HNSWBenchmarkTests
         {
             if (algorithm != SearchAlgorithm.Linear) // Linear doesn't need index
             {
-                _searchService.BuildIndex(algorithm);
+                _searchService.BuildIndexes(algorithm);
             }
         }
         
