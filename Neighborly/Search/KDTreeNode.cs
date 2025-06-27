@@ -6,6 +6,8 @@ public class KDTreeNode
     public KDTreeNode? Left { get; set; }
     public KDTreeNode? Right { get; set; }
 
+    public bool IsLeaf => Left == null && Right == null;
+
     internal void WriteTo(BinaryWriter writer)
     {
         writer.Write(Vector.Id.ToByteArray());

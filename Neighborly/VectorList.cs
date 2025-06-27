@@ -56,7 +56,7 @@ public class VectorList : IList<Vector>, IDisposable
 
     public Vector? Get(int index)
     {
-        return _vectors.Values.ElementAtOrDefault(index);
+        return _vectors.Values.ToList().ElementAtOrDefault(index);
     }
 
     public void Insert(int index, Vector item) => throw new NotSupportedException();
@@ -64,7 +64,7 @@ public class VectorList : IList<Vector>, IDisposable
     public int IndexOf(Vector item)
     {
         var i = 0;
-        foreach (var vector in _vectors.Values)
+        foreach (var vector in _vectors.Values.ToList())
         {
             if (vector.Equals(item))
             {
@@ -79,22 +79,22 @@ public class VectorList : IList<Vector>, IDisposable
 
     public List<Vector> FindAll(Predicate<Vector> match)
     {
-        return _vectors.Values.Where(v => match(v)).ToList();
+        return _vectors.Values.ToList().Where(v => match(v)).ToList();
     }
 
     public Vector? Find(Predicate<Vector> match)
     {
-        return _vectors.Values.FirstOrDefault(v => match(v));
+        return _vectors.Values.ToList().FirstOrDefault(v => match(v));
     }
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        _vectors.Values.CopyTo(array, arrayIndex);
+        _vectors.Values.ToList().CopyTo(array, arrayIndex);
     }
 
     public Vector this[int index]
     {
-        get => _vectors.Values.ElementAt(index);
+        get => _vectors.Values.ToList().ElementAt(index);
         set => throw new NotSupportedException();
     }
 
@@ -103,9 +103,9 @@ public class VectorList : IList<Vector>, IDisposable
         return _vectors.ContainsKey(item.Id);
     }
 
-    public IEnumerator<Vector> GetEnumerator() => _vectors.Values.GetEnumerator();
+    public IEnumerator<Vector> GetEnumerator() => _vectors.Values.ToList().GetEnumerator();
 
-    public IReadOnlyList<Guid> GetIds() => _vectors.Keys.ToList();
+    public IReadOnlyList<Guid> GetIds() => _vectors.Keys.ToList().AsReadOnly();
 
     public void RemoveAt(int index)
     {
@@ -145,7 +145,7 @@ public class VectorList : IList<Vector>, IDisposable
     public int FindIndexById(Guid id)
     {
         var i = 0;
-        foreach (var key in _vectors.Keys)
+        foreach (var key in _vectors.Keys.ToList())
         {
             if (key == id)
             {
@@ -159,7 +159,7 @@ public class VectorList : IList<Vector>, IDisposable
     public int FindIndex(Predicate<Vector> match)
     {
         var i = 0;
-        foreach (var vector in _vectors.Values)
+        foreach (var vector in _vectors.Values.ToList())
         {
             if (match(vector))
             {

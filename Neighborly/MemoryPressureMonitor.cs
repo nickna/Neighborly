@@ -61,26 +61,32 @@ internal class MemoryPressureMonitor : IDisposable
 
     private void RespondToMemoryPressure()
     {
+        List<MemoryMappedList> listsToProcess = new List<MemoryMappedList>();
         lock (_lock)
         {
             foreach (var weakRef in _managedLists)
             {
                 if (weakRef.TryGetTarget(out var list))
                 {
-                    try
-                    {
-                        // Force flush to ensure data is persisted
-                        list.Flush();
-                        
-                        // Dispose stream handles to release memory-mapped memory
-                        // This forces the OS to page out unused data
-                        list.ReleaseMappedMemory();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logging.Logger.Warning(ex, "Failed to respond to memory pressure for a list");
-                    }
+                    listsToProcess.Add(list);
                 }
+            }
+        }
+        
+        foreach (var list in listsToProcess)
+        {
+            try
+            {
+                // Force flush to ensure data is persisted
+                list.Flush();
+                
+                // Dispose stream handles to release memory-mapped memory
+                // This forces the OS to page out unused data
+                list.ReleaseMappedMemory();
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Warning(ex, "Failed to respond to memory pressure for a list");
             }
         }
         

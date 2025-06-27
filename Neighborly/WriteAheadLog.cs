@@ -88,39 +88,47 @@ internal class WriteAheadLog : IDisposable
 
     public List<WALEntry> ReadEntries()
     {
-        var entries = new List<WALEntry>();
-        
-        if (!File.Exists(_walPath) || new FileInfo(_walPath).Length == 0)
-            return entries;
-
-        using var readStream = new FileStream(_walPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using var reader = new BinaryReader(readStream);
-
-        while (readStream.Position < readStream.Length)
+        _walLock.EnterReadLock();
+        try
         {
-            try
+            var entries = new List<WALEntry>();
+            
+            if (!File.Exists(_walPath) || new FileInfo(_walPath).Length == 0)
+                return entries;
+
+            using var readStream = new FileStream(_walPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new BinaryReader(readStream);
+
+            while (readStream.Position < readStream.Length)
             {
-                var entry = new WALEntry
+                try
                 {
-                    Operation = (WALOperationType)reader.ReadByte(),
-                    VectorId = new Guid(reader.ReadBytes(16)),
-                };
+                    var entry = new WALEntry
+                    {
+                        Operation = (WALOperationType)reader.ReadByte(),
+                        VectorId = new Guid(reader.ReadBytes(16)),
+                    };
 
-                int dataLength = reader.ReadInt32();
-                entry.VectorData = dataLength > 0 ? reader.ReadBytes(dataLength) : null;
-                entry.IndexPosition = reader.ReadInt64();
-                entry.DataPosition = reader.ReadInt64();
-                entry.Timestamp = DateTime.FromBinary(reader.ReadInt64());
+                    int dataLength = reader.ReadInt32();
+                    entry.VectorData = dataLength > 0 ? reader.ReadBytes(dataLength) : null;
+                    entry.IndexPosition = reader.ReadInt64();
+                    entry.DataPosition = reader.ReadInt64();
+                    entry.Timestamp = DateTime.FromBinary(reader.ReadInt64());
 
-                entries.Add(entry);
+                    entries.Add(entry);
+                }
+                catch (EndOfStreamException)
+                {
+                    break;
+                }
             }
-            catch (EndOfStreamException)
-            {
-                break;
-            }
+
+            return entries;
         }
-
-        return entries;
+        finally
+        {
+            _walLock.ExitReadLock();
+        }
     }
 
     protected virtual void Dispose(bool disposing)

@@ -25,23 +25,32 @@ namespace Neighborly
 
         public short GetId(string tag)
         {
-            var key = _tags.FirstOrDefault(pair => pair.Value == tag.Trim().ToLower()).Key;
-            if (key != default(short))
+            lock (_tags)
             {
-                return key;
+                var key = _tags.FirstOrDefault(pair => pair.Value == tag.Trim().ToLower()).Key;
+                if (key != default(short))
+                {
+                    return key;
+                }
+                else
+                    return -1;
             }
-            else
-                return -1;
         }
 
         public short[] GetIdRange(string[] tags)
         {
-            return tags.Select(tag => GetId(tag)).ToArray();
+            lock (_tags)
+            {
+                return tags.Select(tag => GetId(tag)).ToArray();
+            }
         }
 
         public string[] GetRange(short[] tagIds)
         {
-            return tagIds.Select(tagId => _tags[tagId]).ToArray();
+            lock (_tags)
+            {
+                return tagIds.Select(tagId => _tags[tagId]).ToArray();
+            }
         }
 
         public short Add(string tag)
@@ -76,12 +85,21 @@ namespace Neighborly
 
         public int Count
         {
-            get { return _tags.Count; }
+            get
+            {
+                lock (_tags)
+                {
+                    return _tags.Count;
+                }
+            }
         }
 
         public bool Contains(string tag) 
         {
-            return _tags.ContainsValue(tag.Trim().ToLower());
+            lock (_tags)
+            {
+                return _tags.ContainsValue(tag.Trim().ToLower());
+            }
         }
 
         /// <summary>
@@ -93,7 +111,10 @@ namespace Neighborly
         {
             get
             {
-                return _tags[tagId];
+                lock (_tags)
+                {
+                    return _tags[tagId];
+                }
             }
         }
 
@@ -106,7 +127,10 @@ namespace Neighborly
         {
             get
             {
-                return GetId(tag);
+                lock (_tags)
+                {
+                    return GetId(tag);
+                }
             }
         }
 
@@ -116,14 +140,17 @@ namespace Neighborly
         /// <returns></returns>
         public byte[] ToBinary()
         {
-            var bytes = new List<byte>();
-            foreach (var tag in _tags)
+            lock (_tags)
             {
-                bytes.AddRange(BitConverter.GetBytes(tag.Key));
-                bytes.AddRange(BitConverter.GetBytes(tag.Value.Length));
-                bytes.AddRange(Encoding.UTF8.GetBytes(tag.Value));
+                var bytes = new List<byte>();
+                foreach (var tag in _tags)
+                {
+                    bytes.AddRange(BitConverter.GetBytes(tag.Key));
+                    bytes.AddRange(BitConverter.GetBytes(tag.Value.Length));
+                    bytes.AddRange(Encoding.UTF8.GetBytes(tag.Value));
+                }
+                return bytes.ToArray();
             }
-            return bytes.ToArray();
         }
 
         /// <summary>
@@ -132,16 +159,19 @@ namespace Neighborly
         /// <param name="data"></param>
         public void FromBinary(byte[] data)
         {
-            _tags.Clear();
-            for (int i = 0; i < data.Length;)
+            lock (_tags)
             {
-                short tagId = BitConverter.ToInt16(data, i);
-                i += sizeof(short);
-                int tagLength = BitConverter.ToInt32(data, i);
-                i += sizeof(int);
-                string tag = Encoding.UTF8.GetString(data, i, tagLength);
-                i += tagLength;
-                _tags.Add(tagId, tag);
+                _tags.Clear();
+                for (int i = 0; i < data.Length;)
+                {
+                    short tagId = BitConverter.ToInt16(data, i);
+                    i += sizeof(short);
+                    int tagLength = BitConverter.ToInt32(data, i);
+                    i += sizeof(int);
+                    string tag = Encoding.UTF8.GetString(data, i, tagLength);
+                    i += tagLength;
+                    _tags.Add(tagId, tag);
+                }
             }
         }
 
@@ -152,16 +182,19 @@ namespace Neighborly
         /// <returns></returns>
         public string GetRangeAsString(short[] tagIds)
         {
-            if (tagIds == null || tagIds.Length == 0)
+            lock (_tags)
             {
-                return string.Empty;
+                if (tagIds == null || tagIds.Length == 0)
+                {
+                    return string.Empty;
+                }
+                var tags = new List<string>();
+                foreach (var tagId in tagIds)
+                {
+                    tags.Add(_tags[tagId]);
+                }
+                return string.Join(", ", tags);
             }
-            var tags = new List<string>();
-            foreach (var tagId in tagIds)
-            {
-                tags.Add(_tags[tagId]);
-            }
-            return string.Join(", ", tags);
         }
 
         /// <summary>
@@ -199,7 +232,10 @@ namespace Neighborly
         /// <returns></returns>
         public IAsyncEnumerable<string> GetAll()
         {
-            return _tags.Values.ToAsyncEnumerable();
+            lock (_tags)
+            {
+                return _tags.Values.ToAsyncEnumerable();
+            }
         }
 
         public void Remove(short tagId)
