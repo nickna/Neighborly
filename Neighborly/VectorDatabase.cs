@@ -192,6 +192,7 @@ public partial class VectorDatabase : IDisposable
     public IList<Vector> Search(string text, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
+        _rwLock.EnterReadLock();
         try
         {
             var result = _searchService.Search(text, k, searchMethod, similarityThreshold);
@@ -199,11 +200,9 @@ public partial class VectorDatabase : IDisposable
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        catch (Exception ex)
+        finally
         {
-            // CouldNotFindVectorInDb(text, k, ex);
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            return new List<Vector>();
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -220,18 +219,19 @@ public partial class VectorDatabase : IDisposable
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
         try
         {
-            var result = _searchService.Search(query:query, k, searchMethod, similarityThreshold: similarityThreshold);
+            var result = _searchService.Search(query: query, k, searchMethod, similarityThreshold: similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
         catch (Exception ex)
         {
-            CouldNotFindVectorInDb(query, k, ex);
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return new List<Vector>();
         }
     }
+
+    
 
     /// <summary>
     /// Searches for all vectors within a specified radius of the given text in the database.
@@ -245,28 +245,18 @@ public partial class VectorDatabase : IDisposable
     /// <seealso cref="EmbeddingGenerator"/>
     public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
-        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        _rwLock.EnterReadLock();
         try
         {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        catch (ArgumentException)
+        finally
         {
-            // Re-throw validation exceptions so tests can catch them
-            throw;
-        }
-        catch (NotSupportedException)
-        {
-            // Re-throw unsupported operation exceptions so tests can catch them
-            throw;
-        }
-        catch (Exception ex)
-        {
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            return new List<Vector>();
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -280,29 +270,18 @@ public partial class VectorDatabase : IDisposable
     /// <returns>Vectors that are within the specified radius</returns>
     public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
-        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+        _rwLock.EnterReadLock();
         try
         {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
             return result;
         }
-        catch (ArgumentException)
+        finally
         {
-            // Re-throw validation exceptions so tests can catch them
-            throw;
-        }
-        catch (NotSupportedException)
-        {
-            // Re-throw unsupported operation exceptions so tests can catch them
-            throw;
-        }
-        catch (Exception ex)
-        {
-            CouldNotPerformRangeSearchInDb(query, radius, ex);
-            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
-            return new List<Vector>();
+            _rwLock.ExitReadLock();
         }
     }
 
@@ -513,10 +492,40 @@ public partial class VectorDatabase : IDisposable
 
             while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
             {
-                // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
-                if (_hasOutdatedIndex &&
-                    _vectors.Count > 0 &&
-                    DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
+                bool rebuildIndexes = false;
+                _rwLock.EnterReadLock();
+                try
+                {
+
+                _rwLock.EnterReadLock();
+                try
+                {
+                    // If the database has been modified and the last modification was more than 5 seconds ago, rebuild the indexes
+                    if (_hasOutdatedIndex &&
+                        _vectors.Count > 0 &&
+                        DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
+                    {
+                        rebuildIndexes = true;
+                    }
+                }
+                finally
+                {
+                    _rwLock.ExitReadLock();
+                }
+
+                if (rebuildIndexes)
+                {
+                    await RebuildTagsAsync();
+                    await RebuildSearchIndexesAsync(cancellationToken);
+                    _indexRebuildCounter.Add(1);
+                }
+                }
+                finally
+                {
+                    _rwLock.ExitReadLock();
+                }
+
+                if (rebuildIndexes)
                 {
                     await RebuildTagsAsync();
                     await RebuildSearchIndexesAsync(cancellationToken);
@@ -604,20 +613,20 @@ public partial class VectorDatabase : IDisposable
     // This is an async function
     public async Task RebuildSearchIndexesAsync(CancellationToken cancellationToken = default)
     {
-        await Task.Run(() =>
+        await Task.Run(async () =>
         {
             using var activity = StartActivity(name: "BuildAllSearchIndexes");
             cancellationToken.ThrowIfCancellationRequested();
-            _searchService.BuildAllIndexes();
+            await _searchService.BuildAllIndexes();
             activity?.SetStatus(ActivityStatusCode.Ok);
         }, cancellationToken);
     }
     public async Task RebuildSearchIndexAsync(SearchAlgorithm searchMethod = SearchAlgorithm.KDTree)
     {
-        await Task.Run(() =>
+        await Task.Run(async () =>
         {
             using var activity = StartActivity(name: "BuildSearchIndex");
-            _searchService.BuildIndex(searchMethod);
+            await _searchService.BuildIndexes(searchMethod);
             activity?.SetStatus(ActivityStatusCode.Ok);
         });
     }

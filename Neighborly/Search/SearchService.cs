@@ -41,12 +41,12 @@ namespace Neighborly.Search
         /// Build all indexes for the given vector list
         /// (Not recommended for production use)
         /// </summary>
-        public void BuildAllIndexes()
+        public async Task BuildAllIndexes()
         {
             // TODO -- Examine memory footprint and performance of each index
-            BuildIndex(SearchAlgorithm.KDTree);
-            BuildIndex(SearchAlgorithm.BallTree);
-            BuildIndex(SearchAlgorithm.HNSW);
+            await BuildIndexes(SearchAlgorithm.KDTree);
+            await BuildIndexes(SearchAlgorithm.BallTree);
+            await BuildIndexes(SearchAlgorithm.HNSW);
         }
 
         public void Clear()
@@ -56,28 +56,27 @@ namespace Neighborly.Search
             _hnsw = new();
         }
 
-        public void BuildIndex(SearchAlgorithm method)
+        internal Task BuildIndexes(SearchAlgorithm method)
+    {
+        if (_vectors.Count == 0)
         {
-            if (_vectors.Count == 0)
-            {
-                return;
-            }
-
-            switch (method)
-            {
-                case SearchAlgorithm.KDTree:
-                    _kdTree.Build(_vectors);
-                    break;
-                case SearchAlgorithm.BallTree:
-                    _ballTree.Build(_vectors);
-                    break;
-                case SearchAlgorithm.HNSW:
-                    _hnsw.Build(_vectors);
-                    break;
-                default:
-                    return;  // Other SearchMethods do not require building an index
-            }
+            return Task.CompletedTask;
         }
+
+        switch (method)
+        {
+            case SearchAlgorithm.KDTree:
+                return _kdTree.Build(_vectors);
+            case SearchAlgorithm.BallTree:
+                _ballTree.Build(_vectors);
+                return Task.CompletedTask;
+            case SearchAlgorithm.HNSW:
+                _hnsw.Build(_vectors);
+                return Task.CompletedTask;
+            default:
+                return Task.CompletedTask;  // Other SearchMethods do not require building an index
+        }
+    }
 
         private float CalculateDefaultThreshold(string text)
         {
