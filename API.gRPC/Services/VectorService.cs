@@ -108,7 +108,69 @@ namespace Neighborly.API
             return Task.FromResult(response);
         }
 
+        public override Task<SearchResponse> SearchNearestWithMetadata(SearchNearestWithMetadataRequest request, ServerCallContext context)
+        {
+            try
+            {
+                // Convert proto objects to domain objects
+                var query = Utility.ConvertToVector(request.Query);
+                var metadataFilter = Utility.ConvertToMetadataFilter(request.MetadataFilter);
+                var algorithm = Utility.ConvertToSearchAlgorithm(request.Algorithm);
+                
+                // Perform search with metadata filtering
+                var vectors = _db.SearchWithMetadata(
+                    query, 
+                    request.K, 
+                    metadataFilter,
+                    algorithm,
+                    request.SimilarityThreshold
+                );
 
+                // Create response
+                var response = new SearchResponse();
+                foreach (var vector in vectors)
+                {
+                    response.Vectors.Add(Utility.ConvertToVectorMessage(vector));
+                }
+
+                return Task.FromResult(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during SearchNearestWithMetadata operation");
+                throw new RpcException(new Status(StatusCode.Internal, ex.Message));
+            }
+        }
+
+        public override Task<SearchResponse> RangeSearch(RangeSearchRequest request, ServerCallContext context)
+        {
+            try
+            {
+                // Convert proto objects to domain objects
+                var query = Utility.ConvertToVector(request.Query);
+                var metadataFilter = Utility.ConvertToMetadataFilter(request.MetadataFilter);
+                var algorithm = Utility.ConvertToSearchAlgorithm(request.Algorithm);
+                
+                // Perform range search with optional metadata filtering
+                var vectors = metadataFilter != null
+                    ? _db.RangeSearchWithMetadata(query, request.Radius, metadataFilter, algorithm)
+                    : _db.RangeSearch(query, request.Radius, algorithm);
+
+                // Create response
+                var response = new SearchResponse();
+                foreach (var vector in vectors)
+                {
+                    response.Vectors.Add(Utility.ConvertToVectorMessage(vector));
+                }
+
+                return Task.FromResult(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during RangeSearch operation");
+                throw new RpcException(new Status(StatusCode.Internal, ex.Message));
+            }
+        }
 
     }
 }

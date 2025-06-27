@@ -285,6 +285,110 @@ public partial class VectorDatabase : IDisposable
         }
     }
 
+    /// <summary>
+    /// Performs text search with metadata filtering support.
+    /// </summary>
+    /// <param name="text">The text to search for</param>
+    /// <param name="k">Number of nearest neighbors to return</param>
+    /// <param name="metadataFilter">Metadata filter to apply</param>
+    /// <param name="searchMethod">The search algorithm to use</param>
+    /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
+    /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
+    public IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float? similarityThreshold = null)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+            var result = _searchService.SearchWithMetadata(text, k, metadataFilter, searchMethod, similarityThreshold);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Performs vector search with metadata filtering support.
+    /// </summary>
+    /// <param name="query">The query vector</param>
+    /// <param name="k">Number of nearest neighbors to return</param>
+    /// <param name="metadataFilter">Metadata filter to apply</param>
+    /// <param name="searchMethod">The search algorithm to use</param>
+    /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
+    /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
+    public IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+            var result = _searchService.SearchWithMetadata(query, k, metadataFilter, searchMethod, similarityThreshold);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Performs range search with metadata filtering support.
+    /// </summary>
+    /// <param name="text">The text to search for</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="metadataFilter">Metadata filter to apply</param>
+    /// <param name="searchMethod">The search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use</param>
+    /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
+    public IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+            var result = _searchService.RangeSearchWithMetadata(text, radius, metadataFilter, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Performs range search with metadata filtering support.
+    /// </summary>
+    /// <param name="query">The query vector</param>
+    /// <param name="radius">The maximum distance from the query</param>
+    /// <param name="metadataFilter">Metadata filter to apply</param>
+    /// <param name="searchMethod">The search algorithm to use</param>
+    /// <param name="distanceCalculator">The distance calculator to use</param>
+    /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
+    public IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+    {
+        _rwLock.EnterReadLock();
+        try
+        {
+            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+            var result = _searchService.RangeSearchWithMetadata(query, radius, metadataFilter, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
+        }
+    }
+
     [LoggerMessage(
     EventId = 1,
     Level = LogLevel.Error,

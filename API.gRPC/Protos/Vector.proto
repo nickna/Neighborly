@@ -34,8 +34,9 @@ service Vector {
   rpc GetVectorById (GetVectorByIdRequest) returns (GetVectorResponse);
   rpc UpdateVector (UpdateVectorRequest) returns (Response);
   rpc SearchNearest (SearchNearestRequest) returns (SearchResponse);
+  rpc SearchNearestWithMetadata (SearchNearestWithMetadataRequest) returns (SearchResponse);
+  rpc RangeSearch (RangeSearchRequest) returns (SearchResponse);
   rpc ClearVectors (Request) returns (Response);
-
 }
 
 // The request message for the GetVectorById operation
@@ -59,10 +60,87 @@ message UpdateVectorRequest {
   VectorMessage vector = 2;
 }
 
+// Metadata filter support
+message MetadataFilter {
+  repeated FilterExpression expressions = 1;
+  FilterLogic logic = 2;
+}
+
+message FilterExpression {
+  string key = 1;
+  FilterValue value = 2;
+}
+
+message FilterValue {
+  oneof value_type {
+    string string_value = 1;
+    double numeric_value = 2;
+    bool boolean_value = 3;
+    StringArray array_value = 4;
+    string datetime_value = 5; // ISO 8601 format
+  }
+  FilterOperator operator = 6;
+}
+
+message StringArray {
+  repeated string values = 1;
+}
+
+enum FilterOperator {
+  EQUALS = 0;
+  NOT_EQUALS = 1;
+  GREATER_THAN = 2;
+  LESS_THAN = 3;
+  GREATER_EQUAL = 4;
+  LESS_EQUAL = 5;
+  CONTAINS = 6;
+  NOT_CONTAINS = 7;
+  IN = 8;
+  NOT_IN = 9;
+  REGEX = 10;
+  STARTS_WITH = 11;
+  ENDS_WITH = 12;
+}
+
+enum FilterLogic {
+  AND = 0;
+  OR = 1;
+}
+
+enum SearchAlgorithm {
+  KDTREE = 0;
+  BALL_TREE = 1;
+  LINEAR = 2;
+  LSH = 3;
+  HNSW = 4;
+  BINARY_QUANTIZATION = 5;
+  PRODUCT_QUANTIZATION = 6;
+}
+
 // The request message for the SearchNearest operation
 message SearchNearestRequest {
   VectorMessage query = 1;
   int32 k = 2;
+  MetadataFilter metadata_filter = 3;
+  SearchAlgorithm algorithm = 4;
+  float similarity_threshold = 5;
+}
+
+// The request message for the SearchNearestWithMetadata operation
+message SearchNearestWithMetadataRequest {
+  VectorMessage query = 1;
+  int32 k = 2;
+  MetadataFilter metadata_filter = 3;
+  SearchAlgorithm algorithm = 4;
+  float similarity_threshold = 5;
+}
+
+// The request message for the RangeSearch operation
+message RangeSearchRequest {
+  VectorMessage query = 1;
+  float radius = 2;
+  SearchAlgorithm algorithm = 3;
+  MetadataFilter metadata_filter = 4;
 }
 
 // The response message for the SearchNearest operation

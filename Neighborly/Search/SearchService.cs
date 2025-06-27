@@ -351,7 +351,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
         /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
-        public virtual IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
+        public virtual IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter? metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -374,7 +374,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
         /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
-        public virtual IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+        public virtual IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter? metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
         {
             if (query == null)
             {
@@ -407,7 +407,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="distanceCalculator">The distance calculator to use</param>
         /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
-        public virtual IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        public virtual IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter? metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -430,7 +430,7 @@ namespace Neighborly.Search
         /// <param name="method">The search algorithm to use</param>
         /// <param name="distanceCalculator">The distance calculator to use</param>
         /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
-        public virtual IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        public virtual IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter? metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
         {
             if (query == null)
             {
@@ -537,22 +537,46 @@ namespace Neighborly.Search
         }
 
         /// <summary>
-        /// Tree-based search with metadata filtering.
+        /// Tree-based search with metadata filtering using dynamic expansion and selectivity optimization.
         /// For tree algorithms, we may need to search beyond k to find enough filtered results.
         /// </summary>
         private IList<Vector> TreeSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
         {
-            // Start with a larger search to account for filtering
-            int expandedK = Math.Min(k * 5, _vectors.Count); // Search up to 5x more vectors
+            // Estimate filter selectivity to optimize search strategy
+            var selectivity = EstimateFilterSelectivity(filterPredicate, Math.Min(1000, _vectors.Count));
+            
+            // Dynamic expansion based on estimated selectivity
+            int expandedK = CalculateOptimalExpansion(k, selectivity, _vectors.Count);
+            
+            // Special handling for very low selectivity - use linear search directly
+            if (selectivity < 0.01 && _vectors.Count > 5000)
+            {
+                return LinearSearchWithFilter(query, k, filterPredicate);
+            }
+            
             var candidates = Search(query, expandedK, method, similarityThreshold);
-
-            // Apply metadata filter
             var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
 
-            // If we don't have enough results, expand search further
-            if (filteredResults.Count < k && candidates.Count == expandedK && expandedK < _vectors.Count)
+            // Progressive expansion if we need more results
+            int maxAttempts = 3;
+            int attempt = 1;
+            
+            while (filteredResults.Count < k && expandedK < _vectors.Count && attempt < maxAttempts)
             {
-                // Try linear search on all vectors as fallback
+                // Increase expansion factor progressively
+                int newExpandedK = Math.Min(_vectors.Count, expandedK * 2);
+                if (newExpandedK == expandedK) break; // No more expansion possible
+                
+                candidates = Search(query, newExpandedK, method, similarityThreshold);
+                filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
+                
+                expandedK = newExpandedK;
+                attempt++;
+            }
+
+            // Final fallback to linear search if still insufficient results
+            if (filteredResults.Count < k / 2) // Only if we have very few results
+            {
                 return LinearSearchWithFilter(query, k, filterPredicate);
             }
 
@@ -560,23 +584,92 @@ namespace Neighborly.Search
         }
 
         /// <summary>
-        /// Approximate search algorithms with metadata filtering.
+        /// Approximate search algorithms with metadata filtering using dynamic expansion.
         /// </summary>
         private IList<Vector> ApproximateSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
         {
-            // For approximate algorithms, we expand the search and then filter
-            int expandedK = Math.Min(k * 3, _vectors.Count); // Search up to 3x more for approximate algorithms
+            // Estimate filter selectivity for approximate algorithms
+            var selectivity = EstimateFilterSelectivity(filterPredicate, Math.Min(500, _vectors.Count));
+            
+            // Conservative expansion for approximate algorithms (they're already approximate)
+            int baseExpansion = (int)(CalculateOptimalExpansion(k, selectivity, _vectors.Count) * 0.7);
+            int expandedK = Math.Max(k * 2, Math.Min(baseExpansion, _vectors.Count));
+            
             var candidates = Search(query, expandedK, method, similarityThreshold);
-
             var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
 
-            // If we don't have enough results with reasonable expansion, fall back to linear search
-            if (filteredResults.Count < k / 2) // If we get less than half the requested results
+            // For approximate algorithms, be more aggressive about fallback due to quality trade-offs
+            if (filteredResults.Count < k * 0.6) // If we have less than 60% of what we need
             {
-                return LinearSearchWithFilter(query, k, filterPredicate);
+                // Try one more expansion before falling back to linear
+                if (expandedK < _vectors.Count)
+                {
+                    int secondExpansion = Math.Min(_vectors.Count, expandedK * 2);
+                    candidates = Search(query, secondExpansion, method, similarityThreshold);
+                    filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
+                }
+                
+                // Final fallback to linear search if still insufficient
+                if (filteredResults.Count < k * 0.4)
+                {
+                    return LinearSearchWithFilter(query, k, filterPredicate);
+                }
             }
 
             return filteredResults;
+        }
+
+        /// <summary>
+        /// Estimates the selectivity of a metadata filter by sampling a subset of vectors.
+        /// </summary>
+        /// <param name="filterPredicate">The filter predicate to test</param>
+        /// <param name="sampleSize">Number of vectors to sample for estimation</param>
+        /// <returns>Estimated selectivity as a ratio between 0 and 1</returns>
+        private double EstimateFilterSelectivity(Func<Vector, bool> filterPredicate, int sampleSize)
+        {
+            if (_vectors.Count == 0) return 0.0;
+            
+            sampleSize = Math.Min(sampleSize, _vectors.Count);
+            int matches = 0;
+            
+            // Use systematic sampling for better representation
+            int step = Math.Max(1, _vectors.Count / sampleSize);
+            int sampledCount = 0;
+            
+            for (int i = 0; i < _vectors.Count && sampledCount < sampleSize; i += step)
+            {
+                if (filterPredicate(_vectors[i]))
+                {
+                    matches++;
+                }
+                sampledCount++;
+            }
+            
+            return sampledCount > 0 ? (double)matches / sampledCount : 0.0;
+        }
+
+        /// <summary>
+        /// Calculates the optimal expansion factor based on filter selectivity.
+        /// </summary>
+        /// <param name="k">Requested number of results</param>
+        /// <param name="selectivity">Estimated filter selectivity (0-1)</param>
+        /// <param name="totalVectors">Total number of vectors in the collection</param>
+        /// <returns>Optimal number of candidates to search</returns>
+        private int CalculateOptimalExpansion(int k, double selectivity, int totalVectors)
+        {
+            if (selectivity <= 0.0) return totalVectors; // No matches expected, search all
+            
+            // Calculate expansion factor based on selectivity with safety margin
+            double safetyMargin = 1.5; // 50% safety margin
+            double requiredExpansion = (k / selectivity) * safetyMargin;
+            
+            // Apply reasonable bounds
+            int minExpansion = k * 2;     // At least 2x expansion
+            int maxExpansion = k * 20;    // At most 20x expansion
+            
+            int expansion = (int)Math.Ceiling(Math.Max(minExpansion, Math.Min(maxExpansion, requiredExpansion)));
+            
+            return Math.Min(expansion, totalVectors);
         }
 
         #endregion
