@@ -339,5 +339,246 @@ namespace Neighborly.Search
                     throw new InvalidOperationException("Unsupported search method");
             }
         }
+
+        #region Metadata Filtering Search Methods
+
+        /// <summary>
+        /// Performs text search with metadata filtering support.
+        /// </summary>
+        /// <param name="text">The text to search for</param>
+        /// <param name="k">Number of nearest neighbors to return</param>
+        /// <param name="metadataFilter">Metadata filter to apply</param>
+        /// <param name="method">The search algorithm to use</param>
+        /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
+        /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
+        public virtual IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float? similarityThreshold = null)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
+            }
+
+            // Convert text into an embedding
+            var embedding = embeddingGenerator.GenerateEmbedding(text);
+            var query = new Vector(embedding);
+            
+            return SearchWithMetadata(query, k, metadataFilter, method, similarityThreshold ?? CalculateDefaultThreshold(text));
+        }
+
+        /// <summary>
+        /// Performs vector search with metadata filtering support.
+        /// </summary>
+        /// <param name="query">The query vector</param>
+        /// <param name="k">Number of nearest neighbors to return</param>
+        /// <param name="metadataFilter">Metadata filter to apply</param>
+        /// <param name="method">The search algorithm to use</param>
+        /// <param name="similarityThreshold">Similarity threshold for filtering results</param>
+        /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
+        public virtual IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
+        {
+            if (query == null)
+            {
+                throw new ArgumentNullException(nameof(query), "Query vector cannot be null");
+            }
+            if (k <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
+            }
+
+            // If no metadata filter is provided, use the original search method
+            if (metadataFilter == null || !metadataFilter.HasFilters)
+            {
+                return Search(query, k, method, similarityThreshold);
+            }
+
+            // Create filter predicate
+            var filterPredicate = MetadataFilterEvaluator.CreatePredicate(metadataFilter);
+
+            // Apply filtering strategy based on algorithm
+            return SearchWithMetadataFilter(query, k, method, similarityThreshold, filterPredicate);
+        }
+
+        /// <summary>
+        /// Performs range search with metadata filtering support.
+        /// </summary>
+        /// <param name="text">The text to search for</param>
+        /// <param name="radius">The maximum distance from the query</param>
+        /// <param name="metadataFilter">Metadata filter to apply</param>
+        /// <param name="method">The search algorithm to use</param>
+        /// <param name="distanceCalculator">The distance calculator to use</param>
+        /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
+        public virtual IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
+            }
+
+            // Convert text into an embedding
+            var embedding = embeddingGenerator.GenerateEmbedding(text);
+            var query = new Vector(embedding);
+            
+            return RangeSearchWithMetadata(query, radius, metadataFilter, method, distanceCalculator);
+        }
+
+        /// <summary>
+        /// Performs range search with metadata filtering support.
+        /// </summary>
+        /// <param name="query">The query vector</param>
+        /// <param name="radius">The maximum distance from the query</param>
+        /// <param name="metadataFilter">Metadata filter to apply</param>
+        /// <param name="method">The search algorithm to use</param>
+        /// <param name="distanceCalculator">The distance calculator to use</param>
+        /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
+        public virtual IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter metadataFilter, SearchAlgorithm method = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
+        {
+            if (query == null)
+            {
+                throw new ArgumentNullException(nameof(query), "Query vector cannot be null");
+            }
+            if (radius <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(radius), "Radius must be greater than 0");
+            }
+
+            // If no metadata filter is provided, use the original range search method
+            if (metadataFilter == null || !metadataFilter.HasFilters)
+            {
+                return RangeSearch(query, radius, method, distanceCalculator);
+            }
+
+            // Create filter predicate
+            var filterPredicate = MetadataFilterEvaluator.CreatePredicate(metadataFilter);
+
+            // Apply filtering strategy for range search
+            return RangeSearchWithMetadataFilter(query, radius, method, distanceCalculator, filterPredicate);
+        }
+
+        #endregion
+
+        #region Private Metadata Filtering Implementation
+
+        /// <summary>
+        /// Performs search with metadata filtering using the optimal strategy for the given algorithm.
+        /// </summary>
+        private IList<Vector> SearchWithMetadataFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
+        {
+            switch (method)
+            {
+                case SearchAlgorithm.Linear:
+                    // For linear search, apply filter during iteration for optimal performance
+                    return LinearSearchWithFilter(query, k, filterPredicate);
+
+                case SearchAlgorithm.KDTree:
+                case SearchAlgorithm.BallTree:
+                    // For tree-based algorithms, we need to potentially expand search to find enough filtered results
+                    return TreeSearchWithFilter(query, k, method, similarityThreshold, filterPredicate);
+
+                case SearchAlgorithm.LSH:
+                case SearchAlgorithm.HNSW:
+                case SearchAlgorithm.BinaryQuantization:
+                case SearchAlgorithm.ProductQuantization:
+                    // For approximate algorithms, use post-filtering with expanded search
+                    return ApproximateSearchWithFilter(query, k, method, similarityThreshold, filterPredicate);
+
+                default:
+                    throw new NotSupportedException($"Metadata filtering is not supported for algorithm: {method}");
+            }
+        }
+
+        /// <summary>
+        /// Performs range search with metadata filtering.
+        /// </summary>
+        private IList<Vector> RangeSearchWithMetadataFilter(Vector query, float radius, SearchAlgorithm method, IDistanceCalculator? distanceCalculator, Func<Vector, bool> filterPredicate)
+        {
+            // For range search, we typically need to filter during the search process
+            distanceCalculator ??= new EuclideanDistanceCalculator();
+
+            var candidates = new List<Vector>();
+            
+            // Apply filter during candidate collection
+            foreach (var vector in _vectors)
+            {
+                if (!filterPredicate(vector))
+                    continue;
+
+                var distance = distanceCalculator.CalculateDistance(query, vector);
+                if (distance <= radius)
+                {
+                    candidates.Add(vector);
+                }
+            }
+
+            // Sort by distance
+            return candidates.OrderBy(v => distanceCalculator.CalculateDistance(query, v)).ToList();
+        }
+
+        /// <summary>
+        /// Linear search with integrated metadata filtering.
+        /// </summary>
+        private IList<Vector> LinearSearchWithFilter(Vector query, int k, Func<Vector, bool> filterPredicate)
+        {
+            var candidates = new List<(Vector vector, float distance)>();
+
+            foreach (var vector in _vectors)
+            {
+                if (!filterPredicate(vector))
+                    continue;
+
+                var distance = vector.Distance(query);
+                candidates.Add((vector, distance));
+            }
+
+            return candidates
+                .OrderBy(c => c.distance)
+                .Take(k)
+                .Select(c => c.vector)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Tree-based search with metadata filtering.
+        /// For tree algorithms, we may need to search beyond k to find enough filtered results.
+        /// </summary>
+        private IList<Vector> TreeSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
+        {
+            // Start with a larger search to account for filtering
+            int expandedK = Math.Min(k * 5, _vectors.Count); // Search up to 5x more vectors
+            var candidates = Search(query, expandedK, method, similarityThreshold);
+
+            // Apply metadata filter
+            var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
+
+            // If we don't have enough results, expand search further
+            if (filteredResults.Count < k && candidates.Count == expandedK && expandedK < _vectors.Count)
+            {
+                // Try linear search on all vectors as fallback
+                return LinearSearchWithFilter(query, k, filterPredicate);
+            }
+
+            return filteredResults;
+        }
+
+        /// <summary>
+        /// Approximate search algorithms with metadata filtering.
+        /// </summary>
+        private IList<Vector> ApproximateSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
+        {
+            // For approximate algorithms, we expand the search and then filter
+            int expandedK = Math.Min(k * 3, _vectors.Count); // Search up to 3x more for approximate algorithms
+            var candidates = Search(query, expandedK, method, similarityThreshold);
+
+            var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
+
+            // If we don't have enough results with reasonable expansion, fall back to linear search
+            if (filteredResults.Count < k / 2) // If we get less than half the requested results
+            {
+                return LinearSearchWithFilter(query, k, filterPredicate);
+            }
+
+            return filteredResults;
+        }
+
+        #endregion
     }
 }
