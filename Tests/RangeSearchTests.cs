@@ -23,7 +23,7 @@ public class RangeSearchTests
     ];
 
     [SetUp]
-    public void Setup()
+    public async Task Setup()
     {
         _db?.Dispose();
         _db = new VectorDatabase(_logger, null);
@@ -31,7 +31,7 @@ public class RangeSearchTests
         {
             _db.Vectors.Add(vector);
         }
-        _db.RebuildSearchIndexesAsync().Wait();
+        await _db.RebuildSearchIndexesAsync();
     }
 
     [TearDown]
@@ -200,13 +200,13 @@ public class RangeSearchTests
     }
 
     [Test]
-    public void RangeSearch_WithStringQuery_ConvertsToEmbedding()
+    public async Task RangeSearch_WithStringQuery_ConvertsToEmbedding()
     {
         // Arrange
         var db = new VectorDatabase(_logger, null);
         db.Vectors.Add(new Vector("Hello world"));
         db.Vectors.Add(new Vector("Goodbye world"));
-        db.RebuildSearchIndexesAsync().Wait();
+        await db.RebuildSearchIndexesAsync();
 
         // Act - Use a large radius since embeddings can have large distances
         var results = db.RangeSearch("Hello", 50.0f, SearchAlgorithm.Linear);
@@ -292,7 +292,7 @@ public class RangeSearchTests
     }
 
     [Test]
-    public void RangeSearch_KDTreeVsLinear_PerformanceComparison()
+    public async Task RangeSearch_KDTreeVsLinear_PerformanceComparison()
     {
         // Arrange - Create a larger dataset for meaningful performance comparison
         var largeDb = new VectorDatabase(_logger, null);
@@ -307,7 +307,7 @@ public class RangeSearchTests
             }
             largeDb.Vectors.Add(new Vector(values, $"Vector {i}"));
         }
-        largeDb.RebuildSearchIndexesAsync().Wait();
+        await largeDb.RebuildSearchIndexesAsync();
 
         var query = new Vector(Enumerable.Range(0, 10).Select(_ => (float)(random.NextDouble() * 10)).ToArray());
         var radius = 5.0f;

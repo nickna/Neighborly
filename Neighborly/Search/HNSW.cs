@@ -81,6 +81,34 @@ public class HNSW
     }
 
     /// <summary>
+    /// Async version of Build that yields control periodically and supports cancellation
+    /// </summary>
+    public async Task BuildAsync(VectorList vectors, CancellationToken cancellationToken = default)
+    {
+        if (vectors == null)
+            throw new ArgumentNullException(nameof(vectors));
+
+        Clear();
+
+        for (int i = 0; i < vectors.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            var vector = vectors[i];
+            if (vector != null)
+            {
+                Insert(vector);
+                
+                // Yield control every 10 insertions to prevent blocking
+                if (i % 10 == 0)
+                {
+                    await Task.Yield();
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Clear all nodes and reset the graph
     /// </summary>
     public void Clear()

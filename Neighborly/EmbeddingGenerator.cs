@@ -24,6 +24,7 @@ public class EmbeddingGenerator
     private readonly EmbeddingGenerationInfo _embeddingFactoryInfo;
     private readonly HttpClient? _httpClient;
     private int? _cachedDimension;
+    private readonly Dictionary<string, float[]> _embeddingCache = new();
 
     public EmbeddingGenerator(EmbeddingGenerationInfo embeddingFactoryInfo)
     {
@@ -59,15 +60,28 @@ public class EmbeddingGenerator
 
     public float[] GenerateEmbedding(string text)
     {
+        // Check cache first to avoid expensive recomputation
+        if (_embeddingCache.TryGetValue(text, out var cachedEmbedding))
+        {
+            return cachedEmbedding;
+        }
+
+        float[] embedding;
         switch (_embeddingFactoryInfo.Source)
         {
             case EmbeddingSource.Internal:
-                return GenerateEmbeddingInternal(text);
+                embedding = GenerateEmbeddingInternal(text);
+                break;
             case EmbeddingSource.Ollama:
-                return GenerateEmbeddingOllamaAsync(text).Result;
+                embedding = GenerateEmbeddingOllamaAsync(text).Result;
+                break;
             default:
                 throw new InvalidOperationException("Invalid embedding source");
         }
+
+        // Cache the result for future use
+        _embeddingCache[text] = embedding;
+        return embedding;
     }
 
     private async Task<float[]> GenerateEmbeddingOllamaAsync(string text)

@@ -25,7 +25,7 @@ public class VectorSearchTests
     private MockLogger<VectorDatabase> _logger = new MockLogger<VectorDatabase>();
 
     [SetUp]
-    public void Setup()
+    public async Task Setup()
     {
         _db?.Dispose();
         _db = new VectorDatabase(_logger, null);
@@ -34,7 +34,7 @@ public class VectorSearchTests
             var v = new Vector(originalText: originalText);
             _db.Vectors.Add(v);
         }
-        _db.RebuildSearchIndexesAsync().Wait();
+        await _db.RebuildSearchIndexesAsync();
     }
 
     [TearDown]

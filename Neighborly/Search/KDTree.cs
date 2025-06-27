@@ -454,13 +454,15 @@ public class KDTree
             return;
         }
 
+        // Check and add current node if it's within radius (both leaf and internal nodes)
+        float distance = distanceCalculator.CalculateDistance(query, node.Vector);
+        if (distance <= radius)
+        {
+            results.Add((node.Vector, distance));
+        }
+        
         if (node.IsLeaf)
         {
-            float distance = distanceCalculator.CalculateDistance(query, node.Vector);
-            if (distance <= radius)
-            {
-                results.Add((node.Vector, distance));
-            }
             return;
         }
 
@@ -503,9 +505,11 @@ public class KDTree
             return;
         }
 
+        // Add current node to candidates (both leaf and internal nodes)
+        candidates.TryAdd(node.Vector, _distanceCalculator.CalculateDistance(query, node.Vector));
+        
         if (node.IsLeaf)
         {
-            candidates.TryAdd(node.Vector, _distanceCalculator.CalculateDistance(query, node.Vector));
             return;
         }
 
@@ -531,7 +535,7 @@ public class KDTree
             return;
 
         var axis = depth % query.Dimensions;
-        var distance = (node.Vector - query).Magnitude;
+        var distance = _distanceCalculator.CalculateDistance(query, node.Vector);
         
         // Add current node to candidates
         candidates.TryAdd(node.Vector, distance);

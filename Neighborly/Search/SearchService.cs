@@ -41,12 +41,12 @@ namespace Neighborly.Search
         /// Build all indexes for the given vector list
         /// (Not recommended for production use)
         /// </summary>
-        public async Task BuildAllIndexes()
+        public async Task BuildAllIndexes(CancellationToken cancellationToken = default)
         {
             // TODO -- Examine memory footprint and performance of each index
-            await BuildIndexes(SearchAlgorithm.KDTree);
-            await BuildIndexes(SearchAlgorithm.BallTree);
-            await BuildIndexes(SearchAlgorithm.HNSW);
+            await BuildIndexes(SearchAlgorithm.KDTree, cancellationToken).ConfigureAwait(false);
+            await BuildIndexes(SearchAlgorithm.BallTree, cancellationToken).ConfigureAwait(false);
+            await BuildIndexes(SearchAlgorithm.HNSW, cancellationToken).ConfigureAwait(false);
         }
 
         public void Clear()
@@ -56,7 +56,7 @@ namespace Neighborly.Search
             _hnsw = new();
         }
 
-        internal Task BuildIndexes(SearchAlgorithm method)
+        internal Task BuildIndexes(SearchAlgorithm method, CancellationToken cancellationToken = default)
     {
         if (_vectors.Count == 0)
         {
@@ -71,8 +71,7 @@ namespace Neighborly.Search
                 _ballTree.Build(_vectors);
                 return Task.CompletedTask;
             case SearchAlgorithm.HNSW:
-                _hnsw.Build(_vectors);
-                return Task.CompletedTask;
+                return _hnsw.BuildAsync(_vectors, cancellationToken);
             default:
                 return Task.CompletedTask;  // Other SearchMethods do not require building an index
         }
