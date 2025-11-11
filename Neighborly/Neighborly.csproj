@@ -41,7 +41,7 @@
     <PackageReference Include="Microsoft.ML" Version="4.0.2" />
     <PackageReference Include="Parquet.Net" Version="5.1.1" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="9.0.2" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
     <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
     <PackageReference Include="Serilog.Sinks.InMemory" Version="0.16.0" />
     <PackageReference Include="System.Linq.Async" Version="6.0.3" />
