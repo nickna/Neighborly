@@ -103,38 +103,54 @@ public class BallTree
         }, cancellationToken);
     }
 
-    public async Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
+    public Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
         writer.Write(s_currentFileVersion); // Write the version number
 
-        // Write internal vectors (centers of internal nodes)
-        using var internalVectors = BuildInternalVectors(root);
-        await internalVectors.WriteToAsync(writer, false, cancellationToken).ConfigureAwait(false);
+        // Write internal vectors (centers of internal nodes) directly without creating VectorDatabase
+        var internalVectors = BuildInternalVectorsList(root);
+        WriteVectorList(writer, internalVectors, cancellationToken);
 
         root?.WriteTo(writer);
+        return Task.CompletedTask;
     }
 
-    private static VectorDatabase BuildInternalVectors(BallTreeNode? node)
+    private static void WriteVectorList(BinaryWriter writer, List<Vector> vectors, CancellationToken cancellationToken)
     {
-        return BuildInternalVectors(node, new VectorDatabase());
+        // Write in same format as VectorDatabase.WriteToAsync
+        const int fileVersion = 1;
+        writer.Write(fileVersion);
+        writer.Write(vectors.Count);
+        foreach (var v in vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[] bytes = v.ToBinary();
+            writer.Write(bytes.Length);
+            writer.Write(bytes);
+        }
     }
 
-    private static VectorDatabase BuildInternalVectors(BallTreeNode? node, VectorDatabase internalVectors)
+    private static List<Vector> BuildInternalVectorsList(BallTreeNode? node)
+    {
+        var vectors = new List<Vector>();
+        CollectInternalVectors(node, vectors);
+        return vectors;
+    }
+
+    private static void CollectInternalVectors(BallTreeNode? node, List<Vector> internalVectors)
     {
         if (node == null)
-            return internalVectors;
+            return;
 
         if (node.Left != null || node.Right != null)
         {
-            internalVectors.Vectors.Add(node.Center);
+            internalVectors.Add(node.Center);
         }
 
-        internalVectors = BuildInternalVectors(node.Left, internalVectors);
-        internalVectors = BuildInternalVectors(node.Right, internalVectors);
-
-        return internalVectors;
+        CollectInternalVectors(node.Left, internalVectors);
+        CollectInternalVectors(node.Right, internalVectors);
     }
 
     private BallTreeNode? BuildNodes(IList<Vector> vectors)

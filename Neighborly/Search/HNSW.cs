@@ -397,8 +397,10 @@ public class HNSW
         _nextNodeId = _nodes.Count > 0 ? _nodes.Keys.Max() + 1 : 0;
     }
 
-    private async Task WriteNodeAsync(BinaryWriter writer, HNSWNode node, CancellationToken cancellationToken)
+    private Task WriteNodeAsync(BinaryWriter writer, HNSWNode node, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         writer.Write(node.Id);
         writer.Write(node.Vector.Id.ToByteArray());
         writer.Write(node.MaxLayer);
@@ -414,11 +416,13 @@ public class HNSW
             }
         }
 
-        await Task.Yield(); // Allow cancellation
+        return Task.CompletedTask;
     }
 
-    private async Task ReadNodeAsync(BinaryReader reader, VectorList vectors, CancellationToken cancellationToken)
+    private Task ReadNodeAsync(BinaryReader reader, VectorList vectors, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         int nodeId = reader.ReadInt32();
         var vectorGuidBytes = reader.ReadBytes(16);
         var vectorGuid = new Guid(vectorGuidBytes);
@@ -427,7 +431,7 @@ public class HNSW
         // Find vector in the vector list
         var vector = vectors.GetById(vectorGuid);
         if (vector == null)
-            return; // Skip if vector not found
+            return Task.CompletedTask; // Skip if vector not found
 
         var node = new HNSWNode(vector, nodeId, maxLayer);
 
@@ -443,7 +447,7 @@ public class HNSW
         }
 
         _nodes[nodeId] = node;
-        await Task.Yield(); // Allow cancellation
+        return Task.CompletedTask;
     }
 
     public override bool Equals(object? obj)

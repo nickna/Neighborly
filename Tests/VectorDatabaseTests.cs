@@ -293,9 +293,9 @@ public class VectorDatabaseTests
 
         await _db.RebuildSearchIndexesAsync().ConfigureAwait(false);
 
-        var path = Path.GetTempPath();
+        var path = Path.Combine(Path.GetTempPath(), $"test_save_{Guid.NewGuid()}");
 
-        // Act    
+        // Act
         await _db.SaveAsync(path).ConfigureAwait(false);
         _db.Vectors.Clear();
         await _db.LoadAsync(path).ConfigureAwait(false);
@@ -305,10 +305,8 @@ public class VectorDatabaseTests
         Assert.That(_db.Vectors.Contains(vector1), Is.True, "Database should contain the first vector after loading.");
         Assert.That(_db.Vectors.Contains(vector2), Is.True, "Database should contain the second vector after loading.");
 
-
         // Clean up
-        string filePath = Path.Combine(path, "vectors.bin");
-        File.Delete(filePath);
+        if (Directory.Exists(path)) Directory.Delete(path, true);
     }
     [Test]
     public void TestUpdateNonExistentItem()

@@ -217,6 +217,7 @@ public partial class VectorDatabase : IDisposable
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
+        _rwLock.EnterReadLock();
         try
         {
             var result = _searchService.Search(query: query, k, searchMethod, similarityThreshold: similarityThreshold);
@@ -229,6 +230,10 @@ public partial class VectorDatabase : IDisposable
             _logger.LogError(ex, "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).", query, k);
             activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
             return new List<Vector>();
+        }
+        finally
+        {
+            _rwLock.ExitReadLock();
         }
     }
 
