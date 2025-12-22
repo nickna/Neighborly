@@ -246,6 +246,20 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// <returns></returns>
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
+        ArgumentNullException.ThrowIfNull(query);
+        if (k <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
+        }
+        if (float.IsNaN(similarityThreshold) || float.IsInfinity(similarityThreshold))
+        {
+            throw new ArgumentException("Similarity threshold cannot be NaN or Infinity", nameof(similarityThreshold));
+        }
+        if (similarityThreshold < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(similarityThreshold), "Similarity threshold cannot be negative");
+        }
+
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
 
         // Lock-free path for immutable indexes
@@ -575,6 +589,8 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// <param name="createOnNew">Indicates whether to create a new file if it doesn't exist.</param>
     public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
         using var activity = StartActivity(name: "LoadVectors");
         using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
         var combinedToken = combinedCts.Token;
@@ -972,6 +988,8 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
         using var activity = StartActivity(name: "SaveVectors");
 
         string filePath = Path.Combine(path, "vectors.bin");

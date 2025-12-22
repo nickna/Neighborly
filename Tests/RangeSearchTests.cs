@@ -256,6 +256,33 @@ public class RangeSearchTests
     }
 
     [Test]
+    [TestCase(float.NaN)]
+    [TestCase(float.NegativeInfinity)]
+    [TestCase(float.PositiveInfinity)]
+    public void Search_WithNaNOrInfinitySimilarityThreshold_ThrowsArgumentException(float threshold)
+    {
+        // Arrange
+        var query = new Vector([1.0f, 1.0f]);
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() =>
+            _db.Search(query, 5, SearchAlgorithm.Linear, threshold));
+    }
+
+    [Test]
+    [TestCase(-0.1f)]
+    [TestCase(-1.0f)]
+    public void Search_WithNegativeSimilarityThreshold_ThrowsArgumentOutOfRangeException(float threshold)
+    {
+        // Arrange
+        var query = new Vector([1.0f, 1.0f]);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            _db.Search(query, 5, SearchAlgorithm.Linear, threshold));
+    }
+
+    [Test]
     public void LinearRangeSearch_StaticMethod_WorksCorrectly()
     {
         // Arrange

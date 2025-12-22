@@ -66,7 +66,10 @@ if (!gRPCEnable && !RESTEnable)
 }
 
 // Load Database on application start
-await vectorDatabase.LoadAsync(databasePath);
+if (!string.IsNullOrEmpty(databasePath))
+{
+    await vectorDatabase.LoadAsync(databasePath);
+}
 
 // Save Database on application shutdown
 lifetime.ApplicationStopping.Register(async () =>

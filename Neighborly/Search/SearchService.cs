@@ -135,6 +135,17 @@ namespace Neighborly.Search
             {
                 throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
             }
+            if (similarityThreshold.HasValue)
+            {
+                if (float.IsNaN(similarityThreshold.Value) || float.IsInfinity(similarityThreshold.Value))
+                {
+                    throw new ArgumentException("Similarity threshold cannot be NaN or Infinity", nameof(similarityThreshold));
+                }
+                if (similarityThreshold.Value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(similarityThreshold), "Similarity threshold cannot be negative");
+                }
+            }
 
             // If no threshold is provided, calculate a default based on the text length
             float effectiveThreshold = similarityThreshold ?? CalculateDefaultThreshold(text);
@@ -166,6 +177,14 @@ namespace Neighborly.Search
             if (k <= 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
+            }
+            if (float.IsNaN(similarityThreshold) || float.IsInfinity(similarityThreshold))
+            {
+                throw new ArgumentException("Similarity threshold cannot be NaN or Infinity", nameof(similarityThreshold));
+            }
+            if (similarityThreshold < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(similarityThreshold), "Similarity threshold cannot be negative");
             }
 
             IList<Vector> results;
@@ -407,6 +426,17 @@ namespace Neighborly.Search
             {
                 throw new ArgumentNullException(nameof(text), "Text cannot be null or empty");
             }
+            if (similarityThreshold.HasValue)
+            {
+                if (float.IsNaN(similarityThreshold.Value) || float.IsInfinity(similarityThreshold.Value))
+                {
+                    throw new ArgumentException("Similarity threshold cannot be NaN or Infinity", nameof(similarityThreshold));
+                }
+                if (similarityThreshold.Value < 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(similarityThreshold), "Similarity threshold cannot be negative");
+                }
+            }
 
             // Convert text into an embedding
             var embedding = embeddingGenerator.GenerateEmbedding(text);
@@ -433,6 +463,14 @@ namespace Neighborly.Search
             if (k <= 0)
             {
                 throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
+            }
+            if (float.IsNaN(similarityThreshold) || float.IsInfinity(similarityThreshold))
+            {
+                throw new ArgumentException("Similarity threshold cannot be NaN or Infinity", nameof(similarityThreshold));
+            }
+            if (similarityThreshold < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(similarityThreshold), "Similarity threshold cannot be negative");
             }
 
             // If no metadata filter is provided, use the original search method

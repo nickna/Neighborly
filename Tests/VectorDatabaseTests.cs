@@ -397,35 +397,48 @@ public class VectorDatabaseTests
     }
 
     [Test]
-    public void Search_WhenSearchMethodThrowsAnException_ExceptionIsLogged()
+    public void Search_WithInvalidK_ThrowsArgumentOutOfRangeException()
     {
         // Arrange
-        // _logger is already attached to the VectorDatabase instance
-
         var query = new Vector([1f, 2f, 3f]);
         var k = -1;
 
-        // Act
-        _db.Search(query, k);
-
-        // Assert
-        Assert.That(_logger.LastLogLevel, Is.EqualTo(LogLevel.Error), "An error should be logged.");
-        Assert.That(_logger.LastEventId?.Id, Is.EqualTo(0), "The event ID should be 0.");
-        if (_logger.LastState is IReadOnlyList<KeyValuePair<string, object?>> state)
-        {
-            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("Query", query)), "The query should be logged.");
-            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("k", k)), "The number of neighbors should be logged.");
-            Assert.That(state, Contains.Item(new KeyValuePair<string, object?>("{OriginalFormat}", "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).")), "The message template should be logged.");
-        }
-
-        Assert.That(_logger.LastException, Is.InstanceOf<System.ArgumentOutOfRangeException>(), "The exception should be logged.");
-        Assert.That(_logger.LastMessage, Is.EqualTo("Could not find vector `Neighborly.Vector` in the database searching the -1 nearest neighbor(s)."), "The message should be correct.");
+        // Act & Assert - validation now throws before reaching internal try-catch
+        Assert.Throws<ArgumentOutOfRangeException>(() => _db.Search(query, k));
     }
 
     [Test]
     public void Ctor_WhenLoggerIsNull_ThrowsArgumentNullException()
     {
         Assert.Throws<ArgumentNullException>(() => new VectorDatabase(null!, null));
+    }
+
+    [Test]
+    public void SaveAsync_WithNullPath_ThrowsArgumentNullException()
+    {
+        Assert.ThrowsAsync<ArgumentNullException>(() => _db.SaveAsync(null!));
+    }
+
+    [Test]
+    [TestCase("")]
+    [TestCase("   ")]
+    public void SaveAsync_WithEmptyOrWhitespacePath_ThrowsArgumentException(string path)
+    {
+        Assert.ThrowsAsync<ArgumentException>(() => _db.SaveAsync(path));
+    }
+
+    [Test]
+    public void LoadAsync_WithNullPath_ThrowsArgumentNullException()
+    {
+        Assert.ThrowsAsync<ArgumentNullException>(() => _db.LoadAsync(null!));
+    }
+
+    [Test]
+    [TestCase("")]
+    [TestCase("   ")]
+    public void LoadAsync_WithEmptyOrWhitespacePath_ThrowsArgumentException(string path)
+    {
+        Assert.ThrowsAsync<ArgumentException>(() => _db.LoadAsync(path));
     }
 
     [Test]
