@@ -25,7 +25,7 @@ public partial class VectorDatabase : IDisposable
     /// The unique identifier of the database for telemetry purposes.
     /// </summary>
     private readonly Guid _id = Guid.NewGuid();
-    private readonly IEnumerable<KeyValuePair<string, object?>>? _defaultTags;
+    private readonly IEnumerable<KeyValuePair<string, object?>> _defaultTags;
     private readonly VectorList _vectors = new();
     private readonly System.Diagnostics.Metrics.Counter<long> _indexRebuildCounter;
     public VectorList Vectors => _vectors;

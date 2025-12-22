@@ -1,16 +1,14 @@
-﻿using Atc.SemanticKernel.Connectors.Ollama.ChatCompletion;
-using Atc.SemanticKernel.Connectors.Ollama.TextEmbeddingGeneration;
-using Atc.SemanticKernel.Connectors.Ollama.TextGenerationService;
-using NeighborlyMemory;
+﻿using NeighborlyMemory;
 using Microsoft.SemanticKernel;
 using Microsoft.SemanticKernel.Memory;
 using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Microsoft.SemanticKernel.Plugins.Memory;
+using Microsoft.SemanticKernel.Connectors.Ollama;
+using OllamaSharp;
 using DotNet.Testcontainers.Builders;
-using Microsoft.SemanticKernel.Embeddings;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.SemanticKernel.ChatCompletion;
-using Microsoft.SemanticKernel.TextGeneration;
+using Microsoft.SemanticKernel.Embeddings;
 using Microsoft.Extensions.Logging;
 using Neighborly;
 
@@ -40,9 +38,13 @@ await ollama.StartAsync().ConfigureAwait(false);
 
 Uri ollamaUri = new($"http://localhost:{ollama.GetMappedPublicPort(11434)}");
 
-OllamaChatCompletionService ollamaChat = new(ollamaUri, modelName);
-OllamaTextGenerationService ollamaText = new(ollamaUri, modelName);
-OllamaTextEmbeddingGenerationService ollamaEmbedding = new(ollamaUri, embeddingModelName);
+#pragma warning disable SKEXP0070 // Ollama connector is experimental
+using var ollamaClient = new OllamaApiClient(ollamaUri, modelName);
+using var ollamaEmbeddingClient = new OllamaApiClient(ollamaUri, embeddingModelName);
+
+var ollamaChat = ollamaClient.AsChatCompletionService();
+var ollamaEmbedding = ollamaEmbeddingClient.AsTextEmbeddingGenerationService();
+#pragma warning restore SKEXP0070
 
 #pragma warning disable SKEXP0001 // Type is for evaluation purposes only and is subject to change or removal in future updates. Suppress this diagnostic to proceed.
 using var db = new VectorDatabase(loggerFactory.CreateLogger<VectorDatabase>(), null);
@@ -59,10 +61,9 @@ builder.Services.AddSingleton(loggerFactory);
 builder.Services.AddSingleton(db);
 builder.Services.AddSingleton(memory);
 builder.Services.AddSingleton<IChatCompletionService>(ollamaChat);
-builder.Services.AddSingleton<ITextGenerationService>(ollamaText);
-#pragma warning disable SKEXP0001
+#pragma warning disable SKEXP0001, CS0618
 builder.Services.AddSingleton<ITextEmbeddingGenerationService>(ollamaEmbedding);
-#pragma warning restore SKEXP0001
+#pragma warning restore SKEXP0001, CS0618
 
 var kernel = builder.Build();
 
