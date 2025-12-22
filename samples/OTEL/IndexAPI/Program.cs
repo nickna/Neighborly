@@ -78,7 +78,6 @@ app.MapPost("/", static async (string text, FakeEmbeddingService embeddingServic
         return Results.BadRequest(response.Message);
     }
 })
-.WithName("AddTextToIndex")
-.WithOpenApi();
+.WithName("AddTextToIndex");
 
 await app.RunAsync().ConfigureAwait(false);
