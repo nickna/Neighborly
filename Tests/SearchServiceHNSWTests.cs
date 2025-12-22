@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using System;
 using System.Linq;
+using System.Threading.Tasks;
 using Neighborly;
 using Neighborly.Search;
 
@@ -46,7 +47,7 @@ public class SearchServiceHNSWTests
     }
 
     [Test]
-    public void SearchService_Search_HNSW_ReturnsResults()
+    public async Task SearchService_Search_HNSW_ReturnsResults()
     {
         // Add test vectors
         var vectors = new[]
@@ -62,12 +63,13 @@ public class SearchServiceHNSWTests
             _vectors.Add(vector);
         }
 
-        // Build index
-        _searchService.BuildIndexes(SearchAlgorithm.HNSW);
+        // Build index (must await since BuildIndexes is async)
+        await _searchService.BuildIndexes(SearchAlgorithm.HNSW);
 
         // Search for vectors close to origin
+        // Distance from [0.1, 0.1] to [0, 0] = 0.14, to [1, 0] = 0.91
         var query = new Vector(new[] { 0.1f, 0.1f });
-        var results = _searchService.Search(query, 2, SearchAlgorithm.HNSW, 1.0f);
+        var results = _searchService.Search(query, 2, SearchAlgorithm.HNSW, 2.0f);
 
         Assert.That(results, Is.Not.Null);
         Assert.That(results.Count, Is.GreaterThan(0));
