@@ -1,5 +1,5 @@
-# Use the official .NET 8.0 SDK image as the build environment
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
+# Use the official .NET 10.0 SDK image as the build environment
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build-env
 
 WORKDIR /app
 
@@ -24,8 +24,8 @@ COPY Neighborly/. ./Neighborly/
 WORKDIR /app/API.gRPC
 RUN dotnet publish -c Release -o out
 
-# Use the official .NET 8.0 runtime image as the base image
-FROM mcr.microsoft.com/dotnet/aspnet:8.0
+# Use the official .NET 10.0 runtime image as the base image
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
 WORKDIR /app
 
