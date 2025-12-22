@@ -920,18 +920,20 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     }
 
     /// <summary>
-    /// Saves the vectors to a specified file path.
-    /// (In the API server, this searchMethod will be called when the host OS sends a shutdown signal.)
+    /// Saves the vectors to a specified file path atomically.
+    /// Uses write-to-temp-then-rename pattern for crash-safe persistence.
     /// </summary>
-    /// <param name="path">The file path to save the vectors to.</param>
+    /// <param name="path">The directory path to save the vectors to.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public async Task SaveAsync(string path, CancellationToken cancellationToken = default)
     {
         using var activity = StartActivity(name: "SaveVectors");
-        
-        string filePath = Path.Combine(path, "vectors.bin");
-        string oldFilePath = Path.Combine(path, "vectors.old.bin");
 
-        // If the database hasn't been modified, no need to save it
+        string filePath = Path.Combine(path, "vectors.bin");
+        // Temp file in same directory for atomic rename (cross-volume rename not atomic)
+        string tempFilePath = Path.Combine(path, $"vectors.{Guid.NewGuid():N}.tmp");
+
+        // Early exit if no changes - no lock needed for this volatile read
         if (!_hasUnsavedChanges)
         {
             _logger.LogInformation("The database has not been modified since the last save.");
@@ -945,52 +947,82 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
             _logger.LogInformation("The directory {Path} was created.", path);
         }
 
-        if (File.Exists(filePath))
-        {
-            if (File.Exists(oldFilePath))
-            {
-                File.Delete(oldFilePath);
-                _logger.LogInformation("The file {oldFilePath} exists and is deleted.", oldFilePath);
-            }
-            File.Move(filePath, oldFilePath, true);
-            _logger.LogInformation("The file {Path} exists and is moved to {oldFilePath} temporarily.", path, oldFilePath);
-        }
+        bool writeSucceeded = false;
 
         try
         {
-            _rwLock.EnterWriteLock();
-            // Save the vectors to a binary file
-            using var outputStream = new FileStream(filePath, FileMode.Create);
-            // TODO -- Experiment with other compression types. For now, GZip works.
-            using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest))
-            using (var writer = new BinaryWriter(compressionStream))
+            // READ lock - only reading vector data to serialize
+            _rwLock.EnterReadLock();
+            try
             {
-                await WriteToAsync(writer, true, cancellationToken).ConfigureAwait(false);
-            }
-            outputStream.Close();
-            _hasUnsavedChanges = false; // Clear the flag to indicate the database hasn't been modified
-            activity?.SetStatus(ActivityStatusCode.Ok);
-            File.Delete(oldFilePath);   // Delete the old file
-            _logger.LogInformation("Saved the database to {FilePath} and deleted old backup {oldFilePath}.", filePath, oldFilePath);
+                await using var outputStream = new FileStream(
+                    tempFilePath,
+                    FileMode.Create,
+                    FileAccess.Write,
+                    FileShare.None,
+                    bufferSize: 4096,
+                    useAsync: true);
 
+                await using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest, leaveOpen: true))
+                await using (var writer = new BinaryWriter(compressionStream, System.Text.Encoding.UTF8, leaveOpen: true))
+                {
+                    await WriteToAsync(writer, includeIndexes: true, cancellationToken).ConfigureAwait(false);
+                }
+
+                // Flush to disk before rename to ensure durability
+                outputStream.Flush(flushToDisk: true);
+            }
+            finally
+            {
+                if (_rwLock.IsReadLockHeld)
+                {
+                    _rwLock.ExitReadLock();
+                }
+            }
+
+            // Atomic rename - this is the commit point
+            File.Move(tempFilePath, filePath, overwrite: true);
+            writeSucceeded = true;
+
+            _logger.LogInformation("Saved the database atomically to {FilePath}.", filePath);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogWarning("Save operation was cancelled.");
+            activity?.SetStatus(ActivityStatusCode.Error, "Operation cancelled");
+            throw;
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogError(ex, "An error occurred while saving the database. Access to the path is denied.");
+            _logger.LogError(ex, "Access denied while saving the database to {FilePath}.", filePath);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
         catch (IOException ex)
         {
-            _logger.LogError(ex, "An error occurred while saving the database.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "An error occurred while saving the database.");
+            _logger.LogError(ex, "I/O error while saving the database to {FilePath}.", filePath);
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            throw;
         }
         finally
         {
-            if (_rwLock.IsWriteLockHeld)
+            // Always clean up temp file
+            if (File.Exists(tempFilePath))
             {
-                _rwLock.ExitWriteLock();
+                try
+                {
+                    File.Delete(tempFilePath);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to clean up temp file {TempFilePath}.", tempFilePath);
+                }
+            }
+
+            if (writeSucceeded)
+            {
+                _hasUnsavedChanges = false;
             }
         }
     }
