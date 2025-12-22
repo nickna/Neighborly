@@ -10,7 +10,38 @@ public class VectorList : IList<Vector>, IDisposable
     public VectorTags Tags => _tags;
     private bool _disposed = false;
 
+    // Caching for efficient index-based access
+    private List<Vector>? _cachedList;
+    private int _cachedListVersion;
+    private int _currentVersion;
+    private readonly object _cacheLock = new();
+
     public event EventHandler? Modified;
+
+    /// <summary>
+    /// Gets a cached list of vectors for efficient index-based access.
+    /// The cache is invalidated when vectors are added, removed, or modified.
+    /// </summary>
+    private List<Vector> GetCachedList()
+    {
+        lock (_cacheLock)
+        {
+            if (_cachedList == null || _cachedListVersion != _currentVersion)
+            {
+                _cachedList = _vectors.Values.ToList();
+                _cachedListVersion = _currentVersion;
+            }
+            return _cachedList;
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the cached list by incrementing the version.
+    /// </summary>
+    private void InvalidateCache()
+    {
+        Interlocked.Increment(ref _currentVersion);
+    }
 
     public VectorList()
     {
@@ -42,6 +73,7 @@ public class VectorList : IList<Vector>, IDisposable
         ArgumentNullException.ThrowIfNull(item);
         if (_vectors.TryAdd(item.Id, item))
         {
+            InvalidateCache();
             Modified?.Invoke(this, EventArgs.Empty);
         }
     }
@@ -56,21 +88,21 @@ public class VectorList : IList<Vector>, IDisposable
 
     public Vector? Get(int index)
     {
-        return _vectors.Values.ToList().ElementAtOrDefault(index);
+        var list = GetCachedList();
+        return index >= 0 && index < list.Count ? list[index] : null;
     }
 
     public void Insert(int index, Vector item) => throw new NotSupportedException();
 
     public int IndexOf(Vector item)
     {
-        var i = 0;
-        foreach (var vector in _vectors.Values.ToList())
+        var list = GetCachedList();
+        for (var i = 0; i < list.Count; i++)
         {
-            if (vector.Equals(item))
+            if (list[i].Equals(item))
             {
                 return i;
             }
-            i++;
         }
         return -1;
     }
@@ -79,22 +111,22 @@ public class VectorList : IList<Vector>, IDisposable
 
     public List<Vector> FindAll(Predicate<Vector> match)
     {
-        return _vectors.Values.ToList().Where(v => match(v)).ToList();
+        return GetCachedList().Where(v => match(v)).ToList();
     }
 
     public Vector? Find(Predicate<Vector> match)
     {
-        return _vectors.Values.ToList().FirstOrDefault(v => match(v));
+        return GetCachedList().FirstOrDefault(v => match(v));
     }
 
     public void CopyTo(Vector[] array, int arrayIndex)
     {
-        _vectors.Values.ToList().CopyTo(array, arrayIndex);
+        GetCachedList().CopyTo(array, arrayIndex);
     }
 
     public Vector this[int index]
     {
-        get => _vectors.Values.ToList().ElementAt(index);
+        get => GetCachedList()[index];
         set => throw new NotSupportedException();
     }
 
@@ -103,9 +135,14 @@ public class VectorList : IList<Vector>, IDisposable
         return _vectors.ContainsKey(item.Id);
     }
 
-    public IEnumerator<Vector> GetEnumerator() => _vectors.Values.ToList().GetEnumerator();
+    public IEnumerator<Vector> GetEnumerator() => GetCachedList().GetEnumerator();
 
     public IReadOnlyList<Guid> GetIds() => _vectors.Keys.ToList().AsReadOnly();
+
+    /// <summary>
+    /// Creates a snapshot of the current vector list for thread-safe iteration.
+    /// </summary>
+    public List<Vector> ToList() => _vectors.Values.ToList();
 
     public void RemoveAt(int index)
     {
@@ -126,6 +163,7 @@ public class VectorList : IList<Vector>, IDisposable
     {
         if (_vectors.TryRemove(item.Id, out _))
         {
+            InvalidateCache();
             Modified?.Invoke(this, EventArgs.Empty);
             return true;
         }
@@ -137,6 +175,7 @@ public class VectorList : IList<Vector>, IDisposable
     public void Clear()
     {
         _vectors.Clear();
+        InvalidateCache();
         Modified?.Invoke(this, EventArgs.Empty);
     }
 
@@ -144,28 +183,26 @@ public class VectorList : IList<Vector>, IDisposable
 
     public int FindIndexById(Guid id)
     {
-        var i = 0;
-        foreach (var key in _vectors.Keys.ToList())
+        var list = GetCachedList();
+        for (var i = 0; i < list.Count; i++)
         {
-            if (key == id)
+            if (list[i].Id == id)
             {
                 return i;
             }
-            i++;
         }
         return -1;
     }
 
     public int FindIndex(Predicate<Vector> match)
     {
-        var i = 0;
-        foreach (var vector in _vectors.Values.ToList())
+        var list = GetCachedList();
+        for (var i = 0; i < list.Count; i++)
         {
-            if (match(vector))
+            if (match(list[i]))
             {
                 return i;
             }
-            i++;
         }
         return -1;
     }
@@ -185,11 +222,12 @@ public class VectorList : IList<Vector>, IDisposable
             // Create a new vector with the same ID as the existing one but with updated data
             var updatedVector = new Vector(vector.Values, vector.OriginalText);
             updatedVector.Id = id; // Preserve the original ID
-            
+
             // Attempt to update. If it fails, it means another thread modified it,
             // so we loop and try again with the new existing value.
             if (_vectors.TryUpdate(id, updatedVector, existingVector))
             {
+                InvalidateCache();
                 Modified?.Invoke(this, EventArgs.Empty);
                 return true;
             }
@@ -202,6 +240,7 @@ public class VectorList : IList<Vector>, IDisposable
     {
         if (_vectors.TryRemove(guid, out _))
         {
+            InvalidateCache();
             Modified?.Invoke(this, EventArgs.Empty);
         }
     }

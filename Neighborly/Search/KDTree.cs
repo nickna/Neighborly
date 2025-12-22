@@ -202,7 +202,7 @@ public class KDTree
         }
     }
 
-    public async Task Build(VectorList vectors)
+    public async Task Build(VectorList vectors, CancellationToken cancellationToken = default)
     {
         if (vectors == null)
         {
@@ -213,10 +213,12 @@ public class KDTree
             return;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Use parallel construction for large datasets if enabled
-        bool useParallel = KDTreeParallelConfig.EnableParallelConstruction && 
+        bool useParallel = KDTreeParallelConfig.EnableParallelConstruction &&
                           vectors.Count >= KDTreeParallelConfig.ParallelConstructionThreshold;
-        root = useParallel ? await BuildParallel(vectors, 0) : Build(vectors, 0);
+        root = useParallel ? await BuildParallel(vectors, 0, cancellationToken) : Build(vectors, 0, cancellationToken);
     }
 
     public void Load(BinaryReader reader, VectorList vectors)
@@ -246,8 +248,10 @@ public class KDTree
         root?.WriteTo(writer);
     }
 
-    private KDTreeNode? Build(IList<Vector> vectors, int depth)
+    private KDTreeNode? Build(IList<Vector> vectors, int depth, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (vectors.Count <= 0)
         {
             return null;
@@ -267,13 +271,15 @@ public class KDTree
         return new KDTreeNode
         {
             Vector = sortedVectors[median],
-            Left = Build(sortedVectors.Take(median).ToList(), depth + 1),
-            Right = Build(sortedVectors.Skip(median + 1).ToList(), depth + 1)
+            Left = Build(sortedVectors.Take(median).ToList(), depth + 1, cancellationToken),
+            Right = Build(sortedVectors.Skip(median + 1).ToList(), depth + 1, cancellationToken)
         };
     }
 
-    private async Task<KDTreeNode?> BuildParallel(IList<Vector> vectors, int depth)
+    private async Task<KDTreeNode?> BuildParallel(IList<Vector> vectors, int depth, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (vectors.Count <= 0)
         {
             return null;
@@ -288,6 +294,8 @@ public class KDTree
         var axis = depth % firstVector.Dimensions;
         var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         var median = sortedVectors.Count / 2;
         var leftVectors = sortedVectors.Take(median).ToList();
         var rightVectors = sortedVectors.Skip(median + 1).ToList();
@@ -297,20 +305,20 @@ public class KDTree
 
         if (leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
         {
-            leftChildTask = BuildParallel(leftVectors, depth + 1);
+            leftChildTask = BuildParallel(leftVectors, depth + 1, cancellationToken);
         }
         else
         {
-            leftChildTask = Task.FromResult(Build(leftVectors, depth + 1));
+            leftChildTask = Task.FromResult(Build(leftVectors, depth + 1, cancellationToken));
         }
 
         if (rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
         {
-            rightChildTask = BuildParallel(rightVectors, depth + 1);
+            rightChildTask = BuildParallel(rightVectors, depth + 1, cancellationToken);
         }
         else
         {
-            rightChildTask = Task.FromResult(Build(rightVectors, depth + 1));
+            rightChildTask = Task.FromResult(Build(rightVectors, depth + 1, cancellationToken));
         }
 
         await Task.WhenAll(leftChildTask, rightChildTask);

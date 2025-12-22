@@ -18,6 +18,21 @@ public class BallTree
         root = BuildNodes(vectors);
     }
 
+    /// <summary>
+    /// Builds the BallTree index asynchronously with cancellation support.
+    /// </summary>
+    /// <param name="vectors">The vectors to index.</param>
+    /// <param name="cancellationToken">Cancellation token to stop the build operation.</param>
+    public Task BuildAsync(VectorList vectors, CancellationToken cancellationToken = default)
+    {
+        if (vectors.Count == 0)
+            return Task.CompletedTask;
+
+        cancellationToken.ThrowIfCancellationRequested();
+        root = BuildNodes(vectors, cancellationToken);
+        return Task.CompletedTask;
+    }
+
     private static BallTreeNode? BuildNodes(Span<Vector> vectors)
     {
         if (vectors.IsEmpty)
@@ -124,28 +139,36 @@ public class BallTree
 
     private BallTreeNode? BuildNodes(IList<Vector> vectors)
     {
+        return BuildNodes(vectors, CancellationToken.None);
+    }
+
+    private BallTreeNode? BuildNodes(IList<Vector> vectors, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (vectors.Count <= 0)
         {
             return null;
         }
 
         if (vectors.Count == 1)
-
+        {
             return new BallTreeNode
             {
                 Center = vectors[0],
                 Radius = 0
             };
+        }
 
-        var center = vectors.Aggregate((a, b) => a + b) / vectors.Count;
-        var radius = vectors.Max(v => v.Distance(center));
+        var center = Aggregate(vectors, cancellationToken);
+        var radius = MaxDistance(vectors, center, cancellationToken);
 
         return new BallTreeNode
         {
             Center = center,
             Radius = radius,
-            Left = BuildNodes(vectors.Take(vectors.Count / 2).ToList()),
-            Right = BuildNodes(vectors.Skip(vectors.Count / 2).ToList())
+            Left = BuildNodes(vectors.Take(vectors.Count / 2).ToList(), cancellationToken),
+            Right = BuildNodes(vectors.Skip(vectors.Count / 2).ToList(), cancellationToken)
         };
     }
 
@@ -154,6 +177,22 @@ public class BallTree
         var max = 0.0f;
         foreach (var vector in vectors)
         {
+            var distance = vector.Distance(center);
+            if (distance > max)
+            {
+                max = distance;
+            }
+        }
+
+        return max;
+    }
+
+    private static float MaxDistance(IList<Vector> vectors, Vector center, CancellationToken cancellationToken)
+    {
+        var max = 0.0f;
+        foreach (var vector in vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             var distance = vector.Distance(center);
             if (distance > max)
             {
@@ -180,6 +219,25 @@ public class BallTree
         }
 
         return sum!;
+    }
+
+    private static Vector Aggregate(IList<Vector> vectors, CancellationToken cancellationToken)
+    {
+        Vector? sum = null;
+        foreach (var vector in vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sum == null)
+            {
+                sum = vector;
+            }
+            else
+            {
+                sum += vector;
+            }
+        }
+
+        return sum! / vectors.Count;
     }
 
     public IList<Vector> Search(Vector query, int k)

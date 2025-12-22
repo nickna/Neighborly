@@ -589,7 +589,7 @@ public partial class VectorDatabase : IDisposable
         while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
         {
             bool rebuildIndexes = false;
-            
+
             // Check if rebuild is needed without holding a lock
             // These are volatile reads, so we get the latest values
             if (_hasOutdatedIndex &&
@@ -599,21 +599,34 @@ public partial class VectorDatabase : IDisposable
                 rebuildIndexes = true;
             }
 
-            if (rebuildIndexes)
+            // Double-check _isDisposing before starting expensive operations
+            if (rebuildIndexes && !_isDisposing)
             {
                 try
                 {
-                    // Use ConfigureAwait(false) to avoid deadlocks in background thread context
+                    // Check again before each operation to exit quickly during disposal
+                    if (_isDisposing) break;
                     RebuildTagsAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
+
+                    if (_isDisposing) break;
                     RebuildSearchIndexesAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
+
                     _indexRebuildCounter.Add(1);
                 }
-                catch (Exception ex) when (!(ex is OperationCanceledException))
+                catch (OperationCanceledException)
+                {
+                    _logger.LogInformation("Indexing thread was canceled during rebuild.");
+                    break;
+                }
+                catch (Exception ex)
                 {
                     _logger.LogError(ex, "Error during background index rebuild");
                 }
             }
-            
+
+            // Exit early if disposing
+            if (_isDisposing) break;
+
             try
             {
                 // Use cancellation token-aware sleep for faster shutdown
@@ -719,14 +732,21 @@ public partial class VectorDatabase : IDisposable
         {
             return Task.CompletedTask;
         }
-        
+
         cancellationToken.ThrowIfCancellationRequested();
-        
+
+        // Take snapshot for thread-safe iteration
+        var snapshot = _vectors.ToList();
+        if (snapshot.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
         using var activity = StartActivity(name: "RebuildTags");
-        _vectors.Tags.BuildMap();
+        _vectors.Tags.BuildMap(snapshot);
         activity?.SetStatus(ActivityStatusCode.Ok);
         _hasOutdatedIndex = false;
-        
+
         return Task.CompletedTask;
     }
 

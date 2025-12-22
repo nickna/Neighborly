@@ -66,10 +66,9 @@ namespace Neighborly.Search
         switch (method)
         {
             case SearchAlgorithm.KDTree:
-                return _kdTree.Build(_vectors);
+                return _kdTree.Build(_vectors, cancellationToken);
             case SearchAlgorithm.BallTree:
-                _ballTree.Build(_vectors);
-                return Task.CompletedTask;
+                return _ballTree.BuildAsync(_vectors, cancellationToken);
             case SearchAlgorithm.HNSW:
                 return _hnsw.BuildAsync(_vectors, cancellationToken);
             default:

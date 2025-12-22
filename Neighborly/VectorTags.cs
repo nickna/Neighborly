@@ -198,32 +198,45 @@ namespace Neighborly
         }
 
         /// <summary>
-        /// Creates a tag map for the vectors
+        /// Creates a tag map for the vectors.
         /// </summary>
-        /// <exception cref="ArgumentNullException"></exception>
-        public void BuildMap()
+        /// <param name="snapshot">Optional pre-created snapshot of vectors for thread-safe iteration.
+        /// If null, a snapshot will be created from the vector list.</param>
+        public void BuildMap(IReadOnlyList<Vector>? snapshot = null)
         {
-            if (_vectorList == null || _vectorList.Count == 0)
+            // Use provided snapshot or create one for thread-safe iteration
+            var vectors = snapshot ?? _vectorList.ToList();
+
+            if (vectors.Count == 0)
             {
-                throw new ArgumentNullException(nameof(VectorList));
-            }
-            lock (_tagMap)
-            {
-                _tagMap.Clear();
-                for (int i = 0; i < _vectorList.Count; i++)
+                lock (_tagMap)
                 {
-                    var vector = _vectorList[i];
-                    foreach (var tagId in vector.Tags)
+                    _tagMap.Clear();
+                }
+                return;
+            }
+
+            // Build new map without holding lock during iteration
+            var newTagMap = new Dictionary<short, List<Guid>>();
+
+            foreach (var vector in vectors)
+            {
+                foreach (var tagId in vector.Tags)
+                {
+                    if (!newTagMap.TryGetValue(tagId, out var list))
                     {
-                        if (!_tagMap.ContainsKey(tagId))
-                        {
-                            _tagMap.Add(tagId, new List<Guid>());
-                        }
-                        _tagMap[tagId].Add(vector.Id);
+                        list = new List<Guid>();
+                        newTagMap[tagId] = list;
                     }
+                    list.Add(vector.Id);
                 }
             }
 
+            // Atomic swap under lock
+            lock (_tagMap)
+            {
+                _tagMap = newTagMap;
+            }
         }
 
         /// <summary>
