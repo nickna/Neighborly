@@ -20,6 +20,16 @@ namespace Neighborly.Search
         private Search.BallTree _ballTree;
         private Search.HNSW _hnsw;
         private EmbeddingGenerator embeddingGenerator = EmbeddingGenerator.Instance;
+
+        // Immutable tree roots for lock-free reads
+        private volatile ImmutableKDTree? _immutableKdTree;
+        private volatile ImmutableBallTree? _immutableBallTree;
+
+        /// <summary>
+        /// Gets or sets whether to use immutable index structures for lock-free reads.
+        /// When enabled, search operations on KDTree and BallTree do not require locks.
+        /// </summary>
+        public static bool UseImmutableIndexes { get; set; } = false;
         public EmbeddingGenerator EmbeddingGenerator
         {
             get => embeddingGenerator;
@@ -56,25 +66,46 @@ namespace Neighborly.Search
             _hnsw = new();
         }
 
-        internal Task BuildIndexes(SearchAlgorithm method, CancellationToken cancellationToken = default)
-    {
-        if (_vectors.Count == 0)
+        internal async Task BuildIndexes(SearchAlgorithm method, CancellationToken cancellationToken = default)
         {
-            return Task.CompletedTask;
-        }
+            if (_vectors.Count == 0)
+            {
+                return;
+            }
 
-        switch (method)
-        {
-            case SearchAlgorithm.KDTree:
-                return _kdTree.Build(_vectors, cancellationToken);
-            case SearchAlgorithm.BallTree:
-                return _ballTree.BuildAsync(_vectors, cancellationToken);
-            case SearchAlgorithm.HNSW:
-                return _hnsw.BuildAsync(_vectors, cancellationToken);
-            default:
-                return Task.CompletedTask;  // Other SearchMethods do not require building an index
+            switch (method)
+            {
+                case SearchAlgorithm.KDTree:
+                    if (UseImmutableIndexes)
+                    {
+                        // Build immutable tree and atomically swap the reference
+                        var newImmutableKdTree = await ImmutableKDTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                        _immutableKdTree = newImmutableKdTree;
+                    }
+                    else
+                    {
+                        await _kdTree.Build(_vectors, cancellationToken).ConfigureAwait(false);
+                    }
+                    break;
+                case SearchAlgorithm.BallTree:
+                    if (UseImmutableIndexes)
+                    {
+                        // Build immutable tree and atomically swap the reference
+                        var newImmutableBallTree = await ImmutableBallTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                        _immutableBallTree = newImmutableBallTree;
+                    }
+                    else
+                    {
+                        await _ballTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                    }
+                    break;
+                case SearchAlgorithm.HNSW:
+                    await _hnsw.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                    break;
+                default:
+                    break;  // Other SearchMethods do not require building an index
+            }
         }
-    }
 
         private float CalculateDefaultThreshold(string text)
         {
@@ -141,10 +172,24 @@ namespace Neighborly.Search
             switch (method)
             {
                 case SearchAlgorithm.KDTree:
-                    results = _kdTree.NearestNeighbors(query, k);
+                    if (UseImmutableIndexes && _immutableKdTree is { } kdTree)
+                    {
+                        results = kdTree.NearestNeighbors(query, k);
+                    }
+                    else
+                    {
+                        results = _kdTree.NearestNeighbors(query, k);
+                    }
                     break;
                 case SearchAlgorithm.BallTree:
-                    results = _ballTree.Search(query, k);
+                    if (UseImmutableIndexes && _immutableBallTree is { } ballTree)
+                    {
+                        results = ballTree.Search(query, k);
+                    }
+                    else
+                    {
+                        results = _ballTree.Search(query, k);
+                    }
                     break;
                 case SearchAlgorithm.Linear:
                     results = LinearSearch.Search(_vectors, query, k);
@@ -238,7 +283,14 @@ namespace Neighborly.Search
                     results = LinearRangeSearch.Search(_vectors, query, radius, distanceCalculator);
                     break;
                 case SearchAlgorithm.KDTree:
-                    results = _kdTree.RangeNeighbors(query, radius, distanceCalculator);
+                    if (UseImmutableIndexes && _immutableKdTree is { } kdTree)
+                    {
+                        results = kdTree.RangeNeighbors(query, radius, distanceCalculator);
+                    }
+                    else
+                    {
+                        results = _kdTree.RangeNeighbors(query, radius, distanceCalculator);
+                    }
                     break;
                 default:
                     throw new NotSupportedException($"Range search is not yet supported for {method} algorithm");

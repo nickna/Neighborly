@@ -2,6 +2,7 @@
 using Neighborly.ETL;
 using Neighborly.Search;
 using Neighborly.Distance;
+using static Neighborly.Search.SearchService;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -180,6 +181,15 @@ public partial class VectorDatabase : IDisposable
     }
 
     /// <summary>
+    /// Checks if the given search method can use lock-free immutable indexes.
+    /// </summary>
+    private static bool CanUseLockFreeSearch(SearchAlgorithm searchMethod)
+    {
+        return UseImmutableIndexes &&
+               (searchMethod == SearchAlgorithm.KDTree || searchMethod == SearchAlgorithm.BallTree);
+    }
+
+    /// <summary>
     /// Searches for a specified text in the database and returns the k nearest neighbors.
     /// This text is first converted into an embedding using the EmbeddingGenerator.
     /// </summary>
@@ -192,6 +202,17 @@ public partial class VectorDatabase : IDisposable
     public IList<Vector> Search(string text, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.Search(text, k, searchMethod, similarityThreshold);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
@@ -217,6 +238,26 @@ public partial class VectorDatabase : IDisposable
     public IList<Vector> Search(Vector query, int k, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
         using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            try
+            {
+                var result = _searchService.Search(query: query, k, searchMethod, similarityThreshold: similarityThreshold);
+                activity?.AddTag("search.result.count", result.Count);
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not find vector `{Query}` in the database searching the {k} nearest neighbor(s).", query, k);
+                activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+                return new List<Vector>();
+            }
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
@@ -251,10 +292,21 @@ public partial class VectorDatabase : IDisposable
     /// <seealso cref="EmbeddingGenerator"/>
     public IList<Vector> RangeSearch(string text, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(text, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
@@ -276,10 +328,21 @@ public partial class VectorDatabase : IDisposable
     /// <returns>Vectors that are within the specified radius</returns>
     public IList<Vector> RangeSearch(Vector query, float radius, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius)]);
             var result = _searchService.RangeSearch(query, radius, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
@@ -302,10 +365,21 @@ public partial class VectorDatabase : IDisposable
     /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
     public IList<Vector> SearchWithMetadata(string text, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float? similarityThreshold = null)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.SearchWithMetadata(text, k, metadataFilter, searchMethod, similarityThreshold);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
             var result = _searchService.SearchWithMetadata(text, k, metadataFilter, searchMethod, similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
@@ -328,10 +402,21 @@ public partial class VectorDatabase : IDisposable
     /// <returns>A list of vectors matching the criteria, ordered by distance</returns>
     public IList<Vector> SearchWithMetadata(Vector query, int k, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.KDTree, float similarityThreshold = 0.5f)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.SearchWithMetadata(query, k, metadataFilter, searchMethod, similarityThreshold);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.k", k), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
             var result = _searchService.SearchWithMetadata(query, k, metadataFilter, searchMethod, similarityThreshold);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
@@ -354,10 +439,21 @@ public partial class VectorDatabase : IDisposable
     /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
     public IList<Vector> RangeSearchWithMetadata(string text, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.RangeSearchWithMetadata(text, radius, metadataFilter, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
             var result = _searchService.RangeSearchWithMetadata(text, radius, metadataFilter, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
@@ -380,10 +476,21 @@ public partial class VectorDatabase : IDisposable
     /// <returns>A list of vectors within the specified radius and matching metadata criteria</returns>
     public IList<Vector> RangeSearchWithMetadata(Vector query, float radius, MetadataFilter? metadataFilter, SearchAlgorithm searchMethod = SearchAlgorithm.Linear, IDistanceCalculator? distanceCalculator = null)
     {
+        using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
+
+        // Lock-free path for immutable indexes
+        if (CanUseLockFreeSearch(searchMethod))
+        {
+            var result = _searchService.RangeSearchWithMetadata(query, radius, metadataFilter, searchMethod, distanceCalculator);
+            activity?.AddTag("search.result.count", result.Count);
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            return result;
+        }
+
+        // Legacy path with read lock
         _rwLock.EnterReadLock();
         try
         {
-            using var activity = StartActivity(tags: [new("search.searchMethod", searchMethod), new("search.radius", radius), new("search.hasMetadataFilter", metadataFilter?.HasFilters ?? false)]);
             var result = _searchService.RangeSearchWithMetadata(query, radius, metadataFilter, searchMethod, distanceCalculator);
             activity?.AddTag("search.result.count", result.Count);
             activity?.SetStatus(ActivityStatusCode.Ok);
