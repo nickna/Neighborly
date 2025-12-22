@@ -3,6 +3,7 @@ using Neighborly.ETL;
 using Neighborly.Search;
 using Neighborly.Distance;
 using static Neighborly.Search.SearchService;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
@@ -594,67 +595,103 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         }
         else
         {
-            bool indexesAreDirty;
-            
-            // Load data without holding lock for the entire operation
-            _rwLock.EnterWriteLock();
-            try
+            // Phase 1: Load vectors into temporary dictionary WITHOUT holding any lock
+            var tempDict = new ConcurrentDictionary<Guid, Vector>();
+            int fileVersion;
+            bool hasSerializedIndexes = false;
+
+            _logger.LogInformation("Starting background load from {FilePath}...", filePath);
+
+            using (var inputStream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+                FileShare.Read, bufferSize: 81920, useAsync: true))
+            using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
+            using (var reader = new BinaryReader(decompressionStream))
             {
-                using (var inputStream = new FileStream(filePath, FileMode.Open))
-                using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
-                using (var reader = new BinaryReader(decompressionStream))
+                // Read file version and load vectors only (no indexes yet)
+                fileVersion = reader.ReadInt32();
+                var vectorCount = await LoadVectorsOnlyAsync(reader, tempDict, combinedToken).ConfigureAwait(false);
+                _logger.LogInformation("Loaded {VectorCount} vectors into temporary storage.", vectorCount);
+
+                // Phase 2: Atomic dictionary swap - write lock held only for microseconds
+                _rwLock.EnterWriteLock();
+                try
                 {
-                    _vectors.Clear();
-                    (int vectorCount, indexesAreDirty) = await ReadFromAsync(reader, true, combinedToken).ConfigureAwait(false);
-                    _logger.LogInformation("Loaded {VectorCount} vectors from {FilePath}.", vectorCount, inputStream.Name);
+                    _vectors.SwapDictionary(tempDict);  // Atomic swap of internal dictionary
+                    _vectors.Tags.BuildMap();
+                    _hasUnsavedChanges = false;
                 }
-            }
-            finally
-            {
-                if (_rwLock.IsWriteLockHeld)
+                finally
                 {
                     _rwLock.ExitWriteLock();
                 }
+
+                _logger.LogInformation("Atomic dictionary swap completed.");
+
+                // Phase 3: Load indexes from file if V1 format (now that vectors are in _vectors)
+                if (fileVersion == 1)
+                {
+                    await _searchService.LoadAsync(reader, combinedToken).ConfigureAwait(false);
+                    hasSerializedIndexes = true;
+                    _logger.LogInformation("Loaded serialized indexes from file.");
+                }
             }
 
-            // Rebuild indexes outside the write lock to reduce lock contention
-            if (indexesAreDirty && !_shutdownCts.IsCancellationRequested)
+            // Phase 4: Rebuild indexes if not loaded from file
+            if (!hasSerializedIndexes && !_shutdownCts.IsCancellationRequested)
             {
-                // Check for disposal/cancellation before rebuilding indexes
                 combinedToken.ThrowIfCancellationRequested();
-                await RebuildSearchIndexesAsync(combinedToken).ConfigureAwait(false);     // Rebuild both k-d tree and Ball Tree search index  
+                await RebuildSearchIndexesAsync(combinedToken).ConfigureAwait(false);
             }
 
-            // Update state flags with minimal lock time
             _rwLock.EnterWriteLock();
             try
             {
-                _vectors.Tags.BuildMap();   // Rebuild the tag map
-                _hasUnsavedChanges = false; // Set the flag to indicate the database hasn't been modified
-                _hasOutdatedIndex = false;  // Set the flag to indicate the index is up-to-date
+                _hasOutdatedIndex = false;
                 activity?.SetStatus(ActivityStatusCode.Ok);
             }
             finally
             {
-                if (_rwLock.IsWriteLockHeld)
-                {
-                    _rwLock.ExitWriteLock();
-                }
+                _rwLock.ExitWriteLock();
             }
         }
     }
 
-    internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken)
+    /// <summary>
+    /// Loads only the vectors from the file (not indexes) into the specified dictionary.
+    /// </summary>
+    private Task<int> LoadVectorsOnlyAsync(
+        BinaryReader reader,
+        ConcurrentDictionary<Guid, Vector> targetDict,
+        CancellationToken cancellationToken)
+    {
+        var vectorCount = reader.ReadInt32();
+
+        for (int i = 0; i < vectorCount; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var nextVector = reader.ReadInt32();
+            var vector = new Vector(reader.ReadBytes(nextVector));
+            targetDict.TryAdd(vector.Id, vector);
+        }
+
+        return Task.FromResult(vectorCount);
+    }
+
+    internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(
+        BinaryReader reader,
+        ConcurrentDictionary<Guid, Vector> targetDict,
+        bool includeIndexes,
+        CancellationToken cancellationToken)
     {
         var fileVersion = reader.ReadInt32();   // File version
 
-        Func<BinaryReader, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
+        Func<BinaryReader, ConcurrentDictionary<Guid, Vector>, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
         {
             1 => LoadV1Async,
             _ => LoadV0Async
         };
 
-        return await importFunc(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+        return await importFunc(reader, targetDict, includeIndexes, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -665,10 +702,14 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// followed by the binary representation of each vector. Up to this, the V0 layout is the same.
     /// However, it is followed by the binary representation the indexes.
     /// </remarks>
-    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
+    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(
+        BinaryReader reader,
+        ConcurrentDictionary<Guid, Vector> targetDict,
+        bool includeIndexes,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Loading vectors from the V1 layout.");
-        var (vectorCount, _) = await LoadV0Async(reader, includeIndexes, cancellationToken).ConfigureAwait(false);
+        var (vectorCount, _) = await LoadV0Async(reader, targetDict, includeIndexes, cancellationToken).ConfigureAwait(false);
 
         if (includeIndexes)
         {
@@ -686,7 +727,11 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// The original layout has a leading integer that indicates the total number of vectors in the database
     /// followed by the binary representation of each vector.
     /// </remarks>
-    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(BinaryReader reader, bool includeIndexes, CancellationToken cancellationToken = default)
+    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(
+        BinaryReader reader,
+        ConcurrentDictionary<Guid, Vector> targetDict,
+        bool includeIndexes,
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Loading vectors from the original (V0) layout.");
         var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
@@ -696,7 +741,7 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
             cancellationToken.ThrowIfCancellationRequested();
             var nextVector = reader.ReadInt32();    // File offset of the next Vector
             var vector = new Vector(reader.ReadBytes(nextVector));
-            _vectors.Add(vector);
+            targetDict.TryAdd(vector.Id, vector);  // Add to temp dictionary
         }
 
         return Task.FromResult((vectorCount, true));

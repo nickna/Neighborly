@@ -5,7 +5,7 @@ namespace Neighborly;
 
 public class VectorList : IList<Vector>, IDisposable
 {
-    private readonly ConcurrentDictionary<Guid, Vector> _vectors = new();
+    private ConcurrentDictionary<Guid, Vector> _vectors = new();
     private readonly VectorTags _tags;
     public VectorTags Tags => _tags;
     private bool _disposed = false;
@@ -213,6 +213,27 @@ public class VectorList : IList<Vector>, IDisposable
         {
             Remove(item);
         }
+    }
+
+    /// <summary>
+    /// Atomically swaps the internal dictionary with a new one.
+    /// Used by LoadAsync for lock-minimized bulk loading.
+    /// </summary>
+    /// <param name="newDictionary">The pre-populated dictionary to swap in.</param>
+    /// <remarks>
+    /// This operation should be called under a write lock from VectorDatabase.
+    /// The old dictionary is released to GC after the swap.
+    /// </remarks>
+    internal void SwapDictionary(ConcurrentDictionary<Guid, Vector> newDictionary)
+    {
+        ArgumentNullException.ThrowIfNull(newDictionary);
+
+        // Atomic reference swap
+        Interlocked.Exchange(ref _vectors, newDictionary);
+
+        // Invalidate cache and notify
+        InvalidateCache();
+        Modified?.Invoke(this, EventArgs.Empty);
     }
 
     internal bool Update(Guid id, Vector vector)
