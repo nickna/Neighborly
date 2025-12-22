@@ -13,7 +13,7 @@ namespace Neighborly;
 /// <summary>
 /// Represents a database for storing and searching vectors.
 /// </summary>
-public partial class VectorDatabase : IDisposable
+public partial class VectorDatabase : IDisposable, IAsyncDisposable
 {
     /// <summary>
     /// The version of the database file format that this class writes.
@@ -110,8 +110,15 @@ public partial class VectorDatabase : IDisposable
     }
     private Search.SearchService _searchService = null!;
     private ReaderWriterLockSlim _rwLock = new();
-    private Thread? indexService;
-    private CancellationTokenSource? _indexServiceCancellationTokenSource;
+
+    // Unified cancellation token for all shutdown coordination
+    private readonly CancellationTokenSource _shutdownCts = new();
+
+    // Background indexing task (replaces Thread)
+    private Task? _indexingTask;
+
+    // PeriodicTimer for async-native timed loops
+    private PeriodicTimer? _indexingTimer;
 
 
     /// <summary>
@@ -145,8 +152,9 @@ public partial class VectorDatabase : IDisposable
     private bool _hasOutdatedIndex = false;
 
     private bool _disposedValue;
-    private volatile bool _isDisposing;
-    private readonly CancellationTokenSource _disposalCancellationTokenSource = new();
+
+    // Tracks if async disposal has started (for thread-safe single-entry)
+    private int _asyncDisposeStarted;
 
     /// <summary>
     /// Gets a value indicating whether the database has been modified since the last save.
@@ -567,7 +575,7 @@ public partial class VectorDatabase : IDisposable
     public async Task LoadAsync(string path, bool createOnNew = true, CancellationToken cancellationToken = default)
     {
         using var activity = StartActivity(name: "LoadVectors");
-        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _disposalCancellationTokenSource.Token);
+        using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _shutdownCts.Token);
         var combinedToken = combinedCts.Token;
         string filePath = Path.Combine(path, "vectors.bin");
         bool fileExists = File.Exists(filePath);
@@ -610,7 +618,7 @@ public partial class VectorDatabase : IDisposable
             }
 
             // Rebuild indexes outside the write lock to reduce lock contention
-            if (indexesAreDirty && !_isDisposing)
+            if (indexesAreDirty && !_shutdownCts.IsCancellationRequested)
             {
                 // Check for disposal/cancellation before rebuilding indexes
                 combinedToken.ThrowIfCancellationRequested();
@@ -694,144 +702,166 @@ public partial class VectorDatabase : IDisposable
         return Task.FromResult((vectorCount, true));
     }
 
-    private void IndexingThreadWorker(CancellationToken cancellationToken)
+    /// <summary>
+    /// Async background worker for periodic index rebuilding.
+    /// Uses PeriodicTimer for cancellation-aware, async-native timed loops.
+    /// </summary>
+    private async Task IndexingWorkerAsync(CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Indexing thread started.");
+        _logger.LogInformation("Background indexing task started.");
 
-        while (!_vectors.IsReadOnly && !cancellationToken.IsCancellationRequested && !_isDisposing)
+        try
         {
-            bool rebuildIndexes = false;
+            // Create PeriodicTimer with interval matching timeThresholdSeconds
+            _indexingTimer = new PeriodicTimer(TimeSpan.FromSeconds(timeThresholdSeconds));
 
-            // Check if rebuild is needed without holding a lock
-            // These are volatile reads, so we get the latest values
-            if (_hasOutdatedIndex &&
-                _vectors.Count > 0 &&
-                DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
-            {
-                rebuildIndexes = true;
-            }
-
-            // Double-check _isDisposing before starting expensive operations
-            if (rebuildIndexes && !_isDisposing)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 try
                 {
-                    // Check again before each operation to exit quickly during disposal
-                    if (_isDisposing) break;
-                    RebuildTagsAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
+                    // Wait for next tick - this is cancellation-aware
+                    if (!await _indexingTimer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                    {
+                        // Timer was disposed, exit loop
+                        break;
+                    }
 
-                    if (_isDisposing) break;
-                    RebuildSearchIndexesAsync(cancellationToken).ConfigureAwait(false).GetAwaiter().GetResult();
-
-                    _indexRebuildCounter.Add(1);
+                    // Check if rebuild is needed
+                    if (_hasOutdatedIndex &&
+                        _vectors.Count > 0 &&
+                        DateTime.UtcNow.Subtract(_lastModification).TotalSeconds > timeThresholdSeconds)
+                    {
+                        await PerformIndexRebuildAsync(cancellationToken).ConfigureAwait(false);
+                    }
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
-                    _logger.LogInformation("Indexing thread was canceled during rebuild.");
+                    // Expected during shutdown, exit gracefully
                     break;
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error during background index rebuild");
-                }
-            }
-
-            // Exit early if disposing
-            if (_isDisposing) break;
-
-            try
-            {
-                // Use cancellation token-aware sleep for faster shutdown
-                Task.Delay(5000, cancellationToken).Wait();
-            }
-            catch (AggregateException ex) when (ex.InnerException is TaskCanceledException)
-            {
-                _logger.LogInformation("Indexing thread was canceled.");
-                break;
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Indexing thread was canceled.");
-                break;
             }
         }
-
-        _logger.LogInformation("Indexing thread stopping.");
-    }
-
-    private void StartIndexService()
-    {
-        // The index service is not supported on mobile platforms
-        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
-            return;
-
-        _indexServiceCancellationTokenSource = new CancellationTokenSource();
-        var cancellationToken = _indexServiceCancellationTokenSource.Token;
-
-        indexService = new Thread(() =>
+        catch (OperationCanceledException)
         {
-            IndexingThreadWorker(cancellationToken);
-        });
-        indexService.Priority = ThreadPriority.Lowest;
-        indexService.Start();
-    }
-
-    private void StopIndexService()
-    {
-        try
-        {
-            _logger.LogInformation($"StopIndexService called. IndexService exists: {indexService != null}, IsAlive: {indexService?.IsAlive}, CancellationSource exists: {_indexServiceCancellationTokenSource != null}");
-            
-            if (indexService != null && indexService.IsAlive)
-            {
-                _indexServiceCancellationTokenSource?.Cancel();
-                _logger.LogInformation("Indexing stop requested.");
-                
-                // Wait for the indexing thread to actually stop before continuing
-                // This prevents lock disposal issues when the thread is still running
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var maxWaitTime = TimeSpan.FromSeconds(10); // Maximum 10 seconds wait
-                
-                while (indexService.IsAlive && stopwatch.Elapsed < maxWaitTime)
-                {
-                    if (!indexService.Join(TimeSpan.FromSeconds(1)))
-                    {
-                        _logger.LogWarning("Indexing thread is still running...");
-                    }
-                }
-                
-                if (indexService.IsAlive)
-                {
-                    _logger.LogError("Indexing thread did not stop within timeout, forcefully aborting");
-                    indexService.Interrupt();
-                    
-                    // Give it one more chance to stop gracefully
-                    if (!indexService.Join(TimeSpan.FromSeconds(2)))
-                    {
-                        _logger.LogError("Indexing thread still alive after interrupt, this may cause resource leaks");
-                    }
-                }
-                
-                _indexServiceCancellationTokenSource?.Dispose();
-                _indexServiceCancellationTokenSource = null;
-                indexService = null;
-            }
-            else if (indexService != null)
-            {
-                _logger.LogInformation("IndexService exists but is not alive - cleaning up.");
-                _indexServiceCancellationTokenSource?.Dispose();
-                _indexServiceCancellationTokenSource = null;
-                indexService = null;
-            }
-            else
-            {
-                _logger.LogInformation("No indexing service to stop.");
-            }
+            _logger.LogInformation("Background indexing task cancelled.");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error occurred while stopping index service.");
+            _logger.LogError(ex, "Unexpected error in background indexing task.");
         }
+        finally
+        {
+            _logger.LogInformation("Background indexing task stopped.");
+        }
+    }
+
+    /// <summary>
+    /// Performs the actual index rebuild operations.
+    /// Separated for clarity and testability.
+    /// </summary>
+    private async Task PerformIndexRebuildAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await RebuildTagsAsync(cancellationToken).ConfigureAwait(false);
+
+            cancellationToken.ThrowIfCancellationRequested();
+            await RebuildSearchIndexesAsync(cancellationToken).ConfigureAwait(false);
+
+            _indexRebuildCounter.Add(1);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Index rebuild cancelled during operation.");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during background index rebuild.");
+            // Don't rethrow - allow the worker to continue
+        }
+    }
+
+    /// <summary>
+    /// Starts the background indexing service.
+    /// On mobile platforms (iOS/Android), background processing is disabled.
+    /// </summary>
+    private void StartIndexService()
+    {
+        // Background processing disabled on mobile platforms
+        if (OperatingSystem.IsAndroid() || OperatingSystem.IsIOS())
+        {
+            _logger.LogInformation("Background indexing disabled on mobile platform.");
+            return;
+        }
+
+        // Start the async background task on the thread pool
+        _indexingTask = Task.Run(
+            () => IndexingWorkerAsync(_shutdownCts.Token),
+            _shutdownCts.Token);
+
+        _logger.LogDebug("Background indexing service started.");
+    }
+
+    /// <summary>
+    /// Stops the background indexing service gracefully.
+    /// Guarantees completion within the specified timeout (default 5 seconds).
+    /// </summary>
+    /// <param name="timeout">Maximum time to wait for graceful shutdown.</param>
+    /// <returns>True if shutdown completed gracefully, false if timed out.</returns>
+    private async Task<bool> StopIndexServiceAsync(TimeSpan? timeout = null)
+    {
+        timeout ??= TimeSpan.FromSeconds(5);
+
+        _logger.LogInformation("Stopping background indexing service...");
+
+        // Dispose the timer first to unblock WaitForNextTickAsync
+        _indexingTimer?.Dispose();
+        _indexingTimer = null;
+
+        if (_indexingTask is null || _indexingTask.IsCompleted)
+        {
+            _logger.LogDebug("Indexing task already completed or was never started.");
+            return true;
+        }
+
+        try
+        {
+            // Signal cancellation using async cancel (.NET 8+)
+            await _shutdownCts.CancelAsync().ConfigureAwait(false);
+
+            // Wait for task with timeout using Task.WaitAsync (non-blocking)
+            await _indexingTask.WaitAsync(timeout.Value).ConfigureAwait(false);
+
+            _logger.LogInformation("Background indexing service stopped gracefully.");
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "Background indexing task did not complete within {Timeout}s timeout. Proceeding with disposal anyway.",
+                timeout.Value.TotalSeconds);
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogDebug("Indexing task cancellation acknowledged.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while stopping indexing service.");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Synchronous wrapper for backwards compatibility with IDisposable.
+    /// </summary>
+    private void StopIndexService()
+    {
+        StopIndexServiceAsync().GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -1061,28 +1091,37 @@ public partial class VectorDatabase : IDisposable
         {
             if (disposing)
             {
-                // Signal that disposal is starting to stop the indexing thread quickly
-                _isDisposing = true;
-                
-                // Cancel all ongoing operations immediately
-                _disposalCancellationTokenSource.Cancel();
-                
-                _logger.LogInformation("Shutting down VectorDatabase.");
-                StopIndexService();
-                
-                _rwLock.EnterWriteLock();
-                try
+                // Check if async disposal already happened (thread-safe single-entry)
+                if (Interlocked.CompareExchange(ref _asyncDisposeStarted, 1, 0) == 0)
                 {
-                    _vectors.Modified -= VectorList_Modified;
-                    _vectors.Dispose();
+                    // Async dispose hasn't run - do sync cleanup
+                    _logger.LogInformation("Disposing VectorDatabase synchronously...");
+
+                    // Stop indexing service (uses sync wrapper with 5s timeout)
+                    StopIndexService();
+
+                    // Dispose timer if not already done
+                    _indexingTimer?.Dispose();
+
+                    // Cleanup vectors with write lock
+                    _rwLock.EnterWriteLock();
+                    try
+                    {
+                        _vectors.Modified -= VectorList_Modified;
+                        _vectors.Dispose();
+                    }
+                    finally
+                    {
+                        _rwLock.ExitWriteLock();
+                    }
+
+                    // Dispose synchronization primitives
+                    _rwLock.Dispose();
+                    _shutdownCts.Dispose();
+
+                    _logger.LogInformation("VectorDatabase disposed.");
                 }
-                finally
-                {
-                    _rwLock.ExitWriteLock();
-                }
-                
-                _rwLock.Dispose();
-                _disposalCancellationTokenSource.Dispose();
+                // If _asyncDisposeStarted was already 1, async dispose handled cleanup
             }
 
             _disposedValue = true;
@@ -1091,9 +1130,75 @@ public partial class VectorDatabase : IDisposable
 
     public void Dispose()
     {
-        // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' searchMethod
         Dispose(disposing: true);
         GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Disposes resources asynchronously, allowing graceful shutdown of background tasks.
+    /// Implements the async disposal pattern from Microsoft guidelines.
+    /// </summary>
+    public async ValueTask DisposeAsync()
+    {
+        await DisposeAsyncCore().ConfigureAwait(false);
+
+        // Suppress finalization since we've disposed
+        Dispose(disposing: false);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Core async disposal logic - handles async cleanup operations.
+    /// </summary>
+    protected virtual async ValueTask DisposeAsyncCore()
+    {
+        // Ensure single-entry with thread-safety
+        if (Interlocked.CompareExchange(ref _asyncDisposeStarted, 1, 0) != 0)
+        {
+            return; // Already disposing
+        }
+
+        if (_disposedValue)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Disposing VectorDatabase asynchronously...");
+
+        try
+        {
+            // Step 1: Stop background indexing gracefully (5 second timeout)
+            await StopIndexServiceAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+            // Step 2: Dispose the PeriodicTimer if not already done
+            _indexingTimer?.Dispose();
+
+            // Step 3: Cleanup vectors and event handlers
+            _rwLock.EnterWriteLock();
+            try
+            {
+                _vectors.Modified -= VectorList_Modified;
+                _vectors.Dispose();
+            }
+            finally
+            {
+                _rwLock.ExitWriteLock();
+            }
+
+            // Step 4: Dispose synchronization primitives
+            _rwLock.Dispose();
+            _shutdownCts.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during async disposal.");
+        }
+        finally
+        {
+            _disposedValue = true;
+        }
+
+        _logger.LogInformation("VectorDatabase disposed.");
     }
 
     /// <summary>
