@@ -1,3 +1,4 @@
+using Neighborly.Tests.Helpers;
 using NUnit.Framework;
 using System.Collections.Concurrent;
 
@@ -11,7 +12,7 @@ public class MemoryMappedListConcurrencyTests
     [SetUp]
     public void Setup()
     {
-        _list = new MemoryMappedList(1000);
+        _list = new MemoryMappedList(TestConstants.MemoryMapped.DefaultCapacity);
     }
     
     [TearDown]
@@ -25,22 +26,22 @@ public class MemoryMappedListConcurrencyTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < TestConstants.Counts.Default; i++)
         {
             var vector = new Vector(new float[] { i, i * 2, i * 3 });
             vectors.Add(vector);
             _list!.Add(vector);
         }
-        
+
         var errors = new ConcurrentBag<Exception>();
         var readResults = new ConcurrentBag<Vector?>();
-        
-        // Act - 10 threads reading concurrently
-        Parallel.For(0, 10, _ =>
+
+        // Act - multiple threads reading concurrently
+        Parallel.For(0, TestConstants.Parallelism.ManyThreads, _ =>
         {
             try
             {
-                for (int i = 0; i < 100; i++)
+                for (int i = 0; i < TestConstants.Counts.Default; i++)
                 {
                     var vector = _list!.GetVector(vectors[i].Id);
                     readResults.Add(vector);
@@ -51,11 +52,12 @@ public class MemoryMappedListConcurrencyTests
                 errors.Add(ex);
             }
         });
-        
+
         // Assert
+        var expectedTotalReads = TestConstants.Counts.Default * TestConstants.Parallelism.ManyThreads;
         Assert.That(errors, Is.Empty, "No exceptions should occur during concurrent reads");
-        Assert.That(readResults.Count, Is.EqualTo(1000), "All reads should complete");
-        Assert.That(readResults.Where(v => v != null).Count(), Is.EqualTo(1000), "All vectors should be found");
+        Assert.That(readResults.Count, Is.EqualTo(expectedTotalReads), "All reads should complete");
+        Assert.That(readResults.Where(v => v != null).Count(), Is.EqualTo(expectedTotalReads), "All vectors should be found");
     }
     
     [Test]
@@ -64,15 +66,16 @@ public class MemoryMappedListConcurrencyTests
         // Arrange
         var addedVectors = new ConcurrentBag<Vector>();
         var errors = new ConcurrentBag<Exception>();
-        
-        // Act - 5 threads adding vectors concurrently
-        Parallel.For(0, 5, threadId =>
+        const int vectorsPerThread = 20;
+
+        // Act - multiple threads adding vectors concurrently
+        Parallel.For(0, TestConstants.Parallelism.DefaultThreads, threadId =>
         {
             try
             {
-                for (int i = 0; i < 20; i++)
+                for (int i = 0; i < vectorsPerThread; i++)
                 {
-                    var vector = new Vector(new float[] { threadId * 100 + i, i, threadId });
+                    var vector = new Vector(new float[] { threadId * TestConstants.Counts.Default + i, i, threadId });
                     _list!.Add(vector);
                     addedVectors.Add(vector);
                 }
@@ -82,11 +85,12 @@ public class MemoryMappedListConcurrencyTests
                 errors.Add(ex);
             }
         });
-        
+
         // Assert
+        var expectedVectorCount = TestConstants.Parallelism.DefaultThreads * vectorsPerThread;
         Assert.That(errors, Is.Empty, "No exceptions should occur during concurrent writes");
-        Assert.That(_list!.Count, Is.EqualTo(100), "Count should match total added vectors");
-        
+        Assert.That(_list!.Count, Is.EqualTo(expectedVectorCount), "Count should match total added vectors");
+
         // Verify all vectors can be retrieved
         foreach (var vector in addedVectors)
         {
@@ -101,18 +105,18 @@ public class MemoryMappedListConcurrencyTests
         // Arrange
         var cts = new CancellationTokenSource();
         var errors = new ConcurrentBag<Exception>();
-        
+
         // Pre-populate with some data
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < TestConstants.MemoryMapped.PrePopulationCount; i++)
         {
             _list!.Add(new Vector(new float[] { i, i * 2 }));
         }
-        
-        // Act - Mixed operations for 2 seconds
+
+        // Act - Mixed operations
         var tasks = new List<Task>();
-        
+
         // Writers
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < TestConstants.Parallelism.TwoThreads; i++)
         {
             tasks.Add(Task.Run(() =>
             {
@@ -122,7 +126,7 @@ public class MemoryMappedListConcurrencyTests
                     while (!cts.Token.IsCancellationRequested)
                     {
                         _list!.Add(new Vector(new float[] { counter++, counter }));
-                        Thread.Sleep(10);
+                        Thread.Sleep(TestConstants.Timeouts.OperationDelayMs);
                     }
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
@@ -131,9 +135,9 @@ public class MemoryMappedListConcurrencyTests
                 }
             }));
         }
-        
+
         // Readers
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < TestConstants.Parallelism.FewThreads; i++)
         {
             tasks.Add(Task.Run(() =>
             {
@@ -146,7 +150,7 @@ public class MemoryMappedListConcurrencyTests
                         {
                             _list.GetVector(Random.Shared.Next(0, (int)count));
                         }
-                        Thread.Sleep(5);
+                        Thread.Sleep(TestConstants.Timeouts.ShortDelayMs);
                     }
                 }
                 catch (Exception ex) when (!(ex is OperationCanceledException))
@@ -155,7 +159,7 @@ public class MemoryMappedListConcurrencyTests
                 }
             }));
         }
-        
+
         // Enumerator
         tasks.Add(Task.Run(() =>
         {
@@ -167,9 +171,9 @@ public class MemoryMappedListConcurrencyTests
                     foreach (var v in _list!)
                     {
                         enumCount++;
-                        if (enumCount > 10) break; // Don't enumerate all
+                        if (enumCount > TestConstants.MemoryMapped.EnumerationBreakCount) break; // Don't enumerate all
                     }
-                    Thread.Sleep(50);
+                    Thread.Sleep(TestConstants.Timeouts.EnumerationDelayMs);
                 }
             }
             catch (Exception ex) when (!(ex is OperationCanceledException))
@@ -177,17 +181,17 @@ public class MemoryMappedListConcurrencyTests
                 errors.Add(ex);
             }
         }));
-        
-        // Let it run for 2 seconds
-        Thread.Sleep(2000);
+
+        // Let it run for the configured duration
+        Thread.Sleep(TestConstants.Timeouts.MixedOperationsDurationMs);
         cts.Cancel();
-        
+
         // Wait for all tasks to complete
-        await Task.WhenAll(tasks.ToArray()).WaitAsync(TimeSpan.FromSeconds(5));
-        
+        await Task.WhenAll(tasks.ToArray()).WaitAsync(TimeSpan.FromSeconds(TestConstants.Timeouts.TaskCompletionTimeoutSeconds));
+
         // Assert
         Assert.That(errors, Is.Empty, "No exceptions should occur during mixed operations");
-        Assert.That(_list!.Count, Is.GreaterThan(50), "Should have added more vectors");
+        Assert.That(_list!.Count, Is.GreaterThan(TestConstants.MemoryMapped.PrePopulationCount), "Should have added more vectors");
     }
     
     [Test]
@@ -195,12 +199,12 @@ public class MemoryMappedListConcurrencyTests
     {
         // Arrange
         _list!.Add(new Vector(new float[] { 1, 2, 3 }));
-        
+
         var enumerationStarted = new ManualResetEventSlim();
         var writeCompleted = new ManualResetEventSlim();
         Exception? enumerationError = null;
         Exception? writeError = null;
-        
+
         // Act
         var enumerationTask = Task.Run(() =>
         {
@@ -210,7 +214,7 @@ public class MemoryMappedListConcurrencyTests
                 {
                     enumerationStarted.Set();
                     // Simulate slow enumeration
-                    Thread.Sleep(100);
+                    Thread.Sleep(TestConstants.Timeouts.EnumerationSleepMs);
                 }
             }
             catch (Exception ex)
@@ -218,7 +222,7 @@ public class MemoryMappedListConcurrencyTests
                 enumerationError = ex;
             }
         });
-        
+
         var writeTask = Task.Run(() =>
         {
             try
@@ -233,13 +237,13 @@ public class MemoryMappedListConcurrencyTests
                 writeError = ex;
             }
         });
-        
+
         // Assert
-        var writeCompletedInTime = writeCompleted.Wait(TimeSpan.FromSeconds(1));
+        var writeCompletedInTime = writeCompleted.Wait(TimeSpan.FromSeconds(TestConstants.Parallelism.SingleThread));
         Assert.That(writeCompletedInTime, Is.True, "Write should complete quickly even during enumeration");
         Assert.That(writeError, Is.Null, "Write should not throw exception");
-        
-        Task.WaitAll(new[] { enumerationTask, writeTask }, TimeSpan.FromSeconds(5));
+
+        Task.WaitAll(new[] { enumerationTask, writeTask }, TimeSpan.FromSeconds(TestConstants.Timeouts.TaskCompletionTimeoutSeconds));
         Assert.That(enumerationError, Is.Null, "Enumeration should not throw exception");
     }
     
@@ -247,12 +251,12 @@ public class MemoryMappedListConcurrencyTests
     public void Disposal_ShouldPreventFurtherOperations()
     {
         // Arrange
-        var list = new MemoryMappedList(100);
+        var list = new MemoryMappedList(TestConstants.Counts.Default);
         list.Add(new Vector(new float[] { 1, 2, 3 }));
-        
+
         // Act
         list.Dispose();
-        
+
         // Assert - All operations should throw ObjectDisposedException
         Assert.Throws<ObjectDisposedException>(() => list.Add(new Vector(new float[] { 4, 5, 6 })), "Add should throw");
         Assert.Throws<ObjectDisposedException>(() => list.GetVector(0), "GetVector(index) should throw");
@@ -266,22 +270,22 @@ public class MemoryMappedListConcurrencyTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < TestConstants.Counts.Small; i++)
         {
-            var v = new Vector(Enumerable.Range(i * 10, 10).Select(x => (float)x).ToArray());
+            var v = new Vector(Enumerable.Range(i * TestConstants.Counts.Small, TestConstants.Counts.Small).Select(x => (float)x).ToArray());
             vectors.Add(v);
             _list!.Add(v);
         }
-        
+
         // Act - Read vectors in parallel at different positions
         var readTasks = vectors.Select((v, index) => Task.Run(() =>
         {
             var retrieved = _list!.GetVector(index);
             return (Expected: v, Retrieved: retrieved);
         })).ToArray();
-        
+
         var results = Task.WhenAll(readTasks).Result;
-        
+
         // Assert
         foreach (var (expected, retrieved) in results)
         {

@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Neighborly;
 using Neighborly.Search;
+using Neighborly.Tests.Helpers;
 
 namespace Tests;
 
@@ -32,23 +33,23 @@ public class HNSWTests
     public void HNSW_Constructor_WithDefaultConfig_CreatesValidInstance()
     {
         var hnsw = new HNSW();
-        
+
         Assert.That(hnsw.Count, Is.EqualTo(0));
         Assert.That(hnsw.MaxLayer, Is.EqualTo(0));
         Assert.That(hnsw.EntryPointId, Is.Null);
         Assert.That(hnsw.Config, Is.Not.Null);
-        Assert.That(hnsw.Config.M, Is.EqualTo(16));
+        Assert.That(hnsw.Config.M, Is.EqualTo(TestConstants.HnswConfig.DefaultM));
     }
 
     [Test]
     public void HNSW_Constructor_WithCustomConfig_UsesProvidedConfig()
     {
-        var config = new HNSWConfig { M = 32, MaxM0 = 64, EfConstruction = 400 };
+        var config = new HNSWConfig { M = TestConstants.HnswConfig.CustomM, MaxM0 = TestConstants.HnswConfig.CustomMaxM0, EfConstruction = TestConstants.HnswConfig.HighEfConstruction };
         var hnsw = new HNSW(config);
-        
-        Assert.That(hnsw.Config.M, Is.EqualTo(32));
-        Assert.That(hnsw.Config.MaxM0, Is.EqualTo(64));
-        Assert.That(hnsw.Config.EfConstruction, Is.EqualTo(400));
+
+        Assert.That(hnsw.Config.M, Is.EqualTo(TestConstants.HnswConfig.CustomM));
+        Assert.That(hnsw.Config.MaxM0, Is.EqualTo(TestConstants.HnswConfig.CustomMaxM0));
+        Assert.That(hnsw.Config.EfConstruction, Is.EqualTo(TestConstants.HnswConfig.HighEfConstruction));
     }
 
     [Test]
@@ -127,7 +128,7 @@ public class HNSWTests
     [Test]
     public void HNSW_Search_WithNullQuery_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => _hnsw.Search(null!, 5));
+        Assert.Throws<ArgumentNullException>(() => _hnsw.Search(null!, TestConstants.Search.DefaultK));
     }
 
     [Test]
@@ -143,9 +144,9 @@ public class HNSWTests
     public void HNSW_Search_WithEmptyGraph_ReturnsEmptyList()
     {
         var query = new Vector(new[] { 1.0f, 2.0f, 3.0f });
-        
-        var results = _hnsw.Search(query, 5);
-        
+
+        var results = _hnsw.Search(query, TestConstants.Search.DefaultK);
+
         Assert.That(results, Is.Not.Null);
         Assert.That(results.Count, Is.EqualTo(0));
     }

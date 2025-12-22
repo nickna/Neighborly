@@ -1,4 +1,5 @@
-﻿using Neighborly;
+using Neighborly;
+using Neighborly.Tests.Helpers;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -30,20 +31,19 @@ namespace Neighborly.Tests.Compression
         public void TestCompress4k()
         {
             var vectors = new List<Vector>();
-            int[,] vectorSize = new int[128,3];
-            float[] compressionRatio= new float[128];
+            int[,] vectorSize = new int[TestConstants.Dimensions.Standard, 3];
+            float[] compressionRatio = new float[TestConstants.Dimensions.Standard];
 
             // Create random Vectors of 4k size
-            for (int i = 0; i < 128; i++)
+            for (int i = 0; i < TestConstants.Dimensions.Standard; i++)
             {
-                float[] floats = new float[4096];
-                for (int j = 0; j < 4096; j++)
+                float[] floats = new float[TestConstants.Dimensions.Compression4K];
+                for (int j = 0; j < TestConstants.Dimensions.Compression4K; j++)
                 {
                     // Random float
                     floats[j] = (float)Random.Shared.NextDouble();
                 }
                 vectors.Add(new Vector(floats));
-
 
                 // Gets size of vectors[i].Values in bytes
                 vectorSize[i, 0] = vectors[i].Values.Length * sizeof(float);
@@ -51,7 +51,7 @@ namespace Neighborly.Tests.Compression
                 // Compress vectors[i].Values and report the compressed byte length
                 vectorSize[i, 1] = vectors[i].ToCompressedBinary().Length;
 
-                // Calculte the compression ratio
+                // Calculate the compression ratio
                 compressionRatio[i] = (float)vectorSize[i, 0] / vectorSize[i, 1];
             }
 
@@ -71,12 +71,9 @@ namespace Neighborly.Tests.Compression
 
             Console.WriteLine($"Median compression ratio: {median:F2}");
 
-            
             // Compare the sizes of the vectors
             // The compressed versions should be at least 20% less than the original
-            Assert.That(median > 1.2f, "Compression ratio is not at least 20% less than the original");
-
-
+            Assert.That(median > TestConstants.Compression.MinRatio4K, "Compression ratio is not at least 20% less than the original");
         }
 
 
@@ -84,20 +81,19 @@ namespace Neighborly.Tests.Compression
         public void TestCompress512()
         {
             var vectors = new List<Vector>();
-            int[,] vectorSize = new int[128, 3];
-            float[] compressionRatio = new float[128];
+            int[,] vectorSize = new int[TestConstants.Dimensions.Standard, 3];
+            float[] compressionRatio = new float[TestConstants.Dimensions.Standard];
 
-            // Create random Vectors of 4k size
-            for (int i = 0; i < 128; i++)
+            // Create random Vectors of 512 size
+            for (int i = 0; i < TestConstants.Dimensions.Standard; i++)
             {
-                float[] floats = new float[512];
-                for (int j = 0; j < 512; j++)
+                float[] floats = new float[TestConstants.Dimensions.XLarge];
+                for (int j = 0; j < TestConstants.Dimensions.XLarge; j++)
                 {
                     // Random float
                     floats[j] = (float)Random.Shared.NextDouble();
                 }
                 vectors.Add(new Vector(floats));
-
 
                 // Gets size of vectors[i].Values in bytes
                 vectorSize[i, 0] = vectors[i].Values.Length * sizeof(float);
@@ -105,7 +101,7 @@ namespace Neighborly.Tests.Compression
                 // Compress vectors[i].Values and report the compressed byte length
                 vectorSize[i, 1] = vectors[i].ToCompressedBinary().Length;
 
-                // Calculte the compression ratio
+                // Calculate the compression ratio
                 compressionRatio[i] = (float)vectorSize[i, 0] / vectorSize[i, 1];
             }
 
@@ -125,12 +121,9 @@ namespace Neighborly.Tests.Compression
 
             Console.WriteLine($"Median compression ratio: {median:F2}");
 
-
             // Compare the sizes of the vectors
             // The compressed versions should be at least 18% less than the original
-            Assert.That(median > 1.18f, "Compression ratio is not at least 18% less than the original");
-
-
+            Assert.That(median > TestConstants.Compression.MinRatio512_768, "Compression ratio is not at least 18% less than the original");
         }
 
 
@@ -138,20 +131,19 @@ namespace Neighborly.Tests.Compression
         public void TestCompress768()
         {
             var vectors = new List<Vector>();
-            int[,] vectorSize = new int[128, 3];
-            float[] compressionRatio = new float[128];
+            int[,] vectorSize = new int[TestConstants.Dimensions.Standard, 3];
+            float[] compressionRatio = new float[TestConstants.Dimensions.Standard];
 
-            // Create random Vectors of 4k size
-            for (int i = 0; i < 128; i++)
+            // Create random Vectors of 768 size
+            for (int i = 0; i < TestConstants.Dimensions.Standard; i++)
             {
-                float[] floats = new float[768];
-                for (int j = 0; j < 768; j++)
+                float[] floats = new float[TestConstants.Dimensions.Embedding768];
+                for (int j = 0; j < TestConstants.Dimensions.Embedding768; j++)
                 {
                     // Random float
                     floats[j] = (float)Random.Shared.NextDouble();
                 }
                 vectors.Add(new Vector(floats));
-
 
                 // Gets size of vectors[i].Values in bytes
                 vectorSize[i, 0] = vectors[i].Values.Length * sizeof(float);
@@ -159,7 +151,7 @@ namespace Neighborly.Tests.Compression
                 // Compress vectors[i].Values and report the compressed byte length
                 vectorSize[i, 1] = vectors[i].ToCompressedBinary().Length;
 
-                // Calculte the compression ratio
+                // Calculate the compression ratio
                 compressionRatio[i] = (float)vectorSize[i, 0] / vectorSize[i, 1];
             }
 
@@ -179,12 +171,9 @@ namespace Neighborly.Tests.Compression
 
             Console.WriteLine($"Median compression ratio: {median:F2}");
 
-
             // Compare the sizes of the vectors
             // The compressed versions should be at least 18% less than the original
-            Assert.That(median > 1.18f, "Compression ratio is not at least 18% less than the original");
-
-
+            Assert.That(median > TestConstants.Compression.MinRatio512_768, "Compression ratio is not at least 18% less than the original");
         }
     }
 }

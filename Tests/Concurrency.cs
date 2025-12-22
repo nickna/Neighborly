@@ -31,8 +31,8 @@ public class VectorDatabaseConcurrencyTests
     public async Task ConcurrencyStressTest()
     {
         // Arrange
-        int operationCount = 10000;
-        int threadCount = 8;
+        int operationCount = TestConstants.Counts.Stress;
+        int threadCount = TestConstants.Parallelism.StressThreads;
         var operationLog = new ConcurrentDictionary<Guid, ConcurrentQueue<(DateTime Timestamp, string Operation, Vector Vector)>>();
         var lockObject = new object();
 
@@ -96,7 +96,7 @@ public class VectorDatabaseConcurrencyTests
                     }
                     break;
                 case 3:
-                    db.Search(CreateRandomVector(random), 5);
+                    db.Search(CreateRandomVector(random), TestConstants.Search.DefaultK);
                     break;
             }
         }
@@ -194,7 +194,7 @@ public class VectorDatabaseConcurrencyTests
 
     private Vector? GetRandomVector(VectorDatabase db, Random random)
     {
-        int maxAttempts = 10;
+        int maxAttempts = TestConstants.Concurrency.MaxRetries;
         for (int i = 0; i < maxAttempts; i++)
         {
             try

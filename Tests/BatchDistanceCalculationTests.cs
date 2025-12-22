@@ -2,6 +2,7 @@ using NUnit.Framework;
 using Neighborly;
 using Neighborly.Distance;
 using Neighborly.Search;
+using Neighborly.Tests.Helpers;
 using System;
 using System.Linq;
 
@@ -10,7 +11,7 @@ namespace Tests;
 [TestFixture]
 public class BatchDistanceCalculationTests
 {
-    private readonly Random _random = new(42);
+    private readonly Random _random = new(TestConstants.RandomSeed);
 
     private float[] GenerateRandomVector(int dimension)
     {
@@ -27,11 +28,11 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 100; i++)
+        for (int i = 0; i < TestConstants.Counts.Default; i++)
         {
-            vectors.Add(new Vector(GenerateRandomVector(128)));
+            vectors.Add(new Vector(GenerateRandomVector(TestConstants.Dimensions.Standard)));
         }
-        var query = new Vector(GenerateRandomVector(128));
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Standard));
 
         var singleCalculator = new EuclideanDistanceCalculator();
         var batchCalculator = BatchEuclideanDistanceCalculator.Instance;
@@ -51,7 +52,7 @@ public class BatchDistanceCalculationTests
         Assert.That(batchResults.Length, Is.EqualTo(singleResults.Length));
         for (int i = 0; i < singleResults.Length; i++)
         {
-            Assert.That(batchResults[i], Is.EqualTo(singleResults[i]).Within(1e-5f),
+            Assert.That(batchResults[i], Is.EqualTo(singleResults[i]).Within(TestConstants.Tolerances.Default),
                 $"Distance mismatch at index {i}");
         }
     }
@@ -61,11 +62,11 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 50; i++)
+        for (int i = 0; i < TestConstants.Counts.SmallMedium; i++)
         {
-            vectors.Add(new Vector(GenerateRandomVector(64)));
+            vectors.Add(new Vector(GenerateRandomVector(TestConstants.Dimensions.Medium)));
         }
-        var query = new Vector(GenerateRandomVector(64));
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Medium));
 
         var singleCalculator = new CosineSimilarityCalculator();
         var batchCalculator = BatchCosineSimilarityCalculator.Instance;
@@ -83,7 +84,7 @@ public class BatchDistanceCalculationTests
         Assert.That(batchResults.Length, Is.EqualTo(singleResults.Length));
         for (int i = 0; i < singleResults.Length; i++)
         {
-            Assert.That(batchResults[i], Is.EqualTo(singleResults[i]).Within(1e-5f),
+            Assert.That(batchResults[i], Is.EqualTo(singleResults[i]).Within(TestConstants.Tolerances.Default),
                 $"Similarity mismatch at index {i}");
         }
     }
@@ -93,23 +94,23 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 20; i++)
+        for (int i = 0; i < TestConstants.Counts.MediumSmall; i++)
         {
-            vectors.Add(new Vector(GenerateRandomVector(32)));
+            vectors.Add(new Vector(GenerateRandomVector(TestConstants.Dimensions.Small)));
         }
-        var query = new Vector(GenerateRandomVector(32));
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Small));
 
         // Act
         float[] batchResults = query.BatchDistance(vectors);
 
         // Assert
         Assert.That(batchResults.Length, Is.EqualTo(vectors.Count));
-        
+
         // Verify results match individual calculations
         for (int i = 0; i < vectors.Count; i++)
         {
             float expected = query.Distance(vectors[i]);
-            Assert.That(batchResults[i], Is.EqualTo(expected).Within(1e-5f));
+            Assert.That(batchResults[i], Is.EqualTo(expected).Within(TestConstants.Tolerances.Default));
         }
     }
 
@@ -119,31 +120,31 @@ public class BatchDistanceCalculationTests
         // Arrange
         var vectorList = new VectorList();
         var vectors = new List<Vector>();
-        
-        for (int i = 0; i < 100; i++)
+
+        for (int i = 0; i < TestConstants.Counts.Default; i++)
         {
-            var vector = new Vector(GenerateRandomVector(64));
+            var vector = new Vector(GenerateRandomVector(TestConstants.Dimensions.Medium));
             vectorList.Add(vector);
             vectors.Add(vector);
         }
-        
-        var query = new Vector(GenerateRandomVector(64));
-        int k = 10;
+
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Medium));
+        int k = TestConstants.Search.LargeK;
 
         // Act
         var originalResults = LinearSearch.Search(vectorList, query, k);
-        
+
         var batchSearch = new BatchOptimizedLinearSearch();
         var batchResults = batchSearch.Search(vectorList, query, k);
 
         // Assert
         Assert.That(batchResults.Count, Is.EqualTo(originalResults.Count));
         Assert.That(batchResults.Count, Is.EqualTo(k));
-        
+
         // Both should return the same vectors (though order might differ slightly due to floating point)
         var originalIds = originalResults.Select(v => v.Id).ToHashSet();
         var batchIds = batchResults.Select(v => v.Id).ToHashSet();
-        
+
         Assert.That(batchIds.SetEquals(originalIds), Is.True,
             "Batch search should return the same vectors as original search");
     }
@@ -153,14 +154,14 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         var vectorList = new VectorList();
-        
-        for (int i = 0; i < 50; i++)
+
+        for (int i = 0; i < TestConstants.Counts.SmallMedium; i++)
         {
-            vectorList.Add(new Vector(GenerateRandomVector(32)));
+            vectorList.Add(new Vector(GenerateRandomVector(TestConstants.Dimensions.Small)));
         }
-        
-        var query = new Vector(GenerateRandomVector(32));
-        float radius = 5.0f;
+
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Small));
+        float radius = 5.0f; // Range search radius - specific to this test's data distribution
 
         // Act
         var originalResults = LinearRangeSearch.Search(vectorList, query, radius);
@@ -168,11 +169,11 @@ public class BatchDistanceCalculationTests
 
         // Assert
         Assert.That(batchResults.Count, Is.EqualTo(originalResults.Count));
-        
+
         // Both should return the same vectors
         var originalIds = originalResults.Select(v => v.Id).ToHashSet();
         var batchIds = batchResults.Select(v => v.Id).ToHashSet();
-        
+
         Assert.That(batchIds.SetEquals(originalIds), Is.True,
             "Batch range search should return the same vectors as original search");
     }
@@ -198,7 +199,7 @@ public class BatchDistanceCalculationTests
     public void BatchCalculation_WithEmptyVectorList_ReturnsEmptyResults()
     {
         // Arrange
-        var query = new Vector(GenerateRandomVector(32));
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Small));
         var emptyList = new List<Vector>();
         var calculator = BatchEuclideanDistanceCalculator.Instance;
 
@@ -214,11 +215,11 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         Vector? nullQuery = null;
-        var vectors = new List<Vector> { new Vector(GenerateRandomVector(32)) };
+        var vectors = new List<Vector> { new Vector(GenerateRandomVector(TestConstants.Dimensions.Small)) };
         var calculator = BatchEuclideanDistanceCalculator.Instance;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             calculator.CalculateDistances(nullQuery!, vectors));
     }
 
@@ -226,15 +227,15 @@ public class BatchDistanceCalculationTests
     public void BatchCalculation_WithDifferentDimensions_ThrowsException()
     {
         // Arrange
-        var query = new Vector(GenerateRandomVector(32));
-        var vectors = new List<Vector> 
-        { 
-            new Vector(GenerateRandomVector(64)) // Different dimension
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Small));
+        var vectors = new List<Vector>
+        {
+            new Vector(GenerateRandomVector(TestConstants.Dimensions.Medium)) // Different dimension
         };
         var calculator = BatchEuclideanDistanceCalculator.Instance;
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => 
+        Assert.Throws<ArgumentException>(() =>
             calculator.CalculateDistances(query, vectors));
     }
 
@@ -245,13 +246,13 @@ public class BatchDistanceCalculationTests
         var calculator = BatchEuclideanDistanceCalculator.Instance;
 
         // Act & Assert
-        Assert.That(calculator.GetOptimalBatchSize(128), Is.GreaterThan(0));
-        Assert.That(calculator.GetOptimalBatchSize(512), Is.GreaterThan(0));
-        Assert.That(calculator.GetOptimalBatchSize(1536), Is.GreaterThan(0));
-        
+        Assert.That(calculator.GetOptimalBatchSize(TestConstants.Dimensions.Standard), Is.GreaterThan(0));
+        Assert.That(calculator.GetOptimalBatchSize(TestConstants.Dimensions.XLarge), Is.GreaterThan(0));
+        Assert.That(calculator.GetOptimalBatchSize(TestConstants.Dimensions.OpenAIEmbedding), Is.GreaterThan(0));
+
         // Larger dimensions should generally have smaller batch sizes
-        Assert.That(calculator.GetOptimalBatchSize(1536), 
-            Is.LessThanOrEqualTo(calculator.GetOptimalBatchSize(128)));
+        Assert.That(calculator.GetOptimalBatchSize(TestConstants.Dimensions.OpenAIEmbedding),
+            Is.LessThanOrEqualTo(calculator.GetOptimalBatchSize(TestConstants.Dimensions.Standard)));
     }
 
     [Test]
@@ -259,11 +260,11 @@ public class BatchDistanceCalculationTests
     {
         // Arrange
         var vectors = new List<Vector>();
-        for (int i = 0; i < 1000; i++)
+        for (int i = 0; i < TestConstants.Counts.Large; i++)
         {
-            vectors.Add(new Vector(GenerateRandomVector(128)));
+            vectors.Add(new Vector(GenerateRandomVector(TestConstants.Dimensions.Standard)));
         }
-        var query = new Vector(GenerateRandomVector(128));
+        var query = new Vector(GenerateRandomVector(TestConstants.Dimensions.Standard));
 
         // Act
         float[] sequentialResults = query.BatchDistance(vectors);
@@ -271,11 +272,11 @@ public class BatchDistanceCalculationTests
 
         // Assert
         Assert.That(parallelResults.Length, Is.EqualTo(sequentialResults.Length));
-        
+
         // Results should be the same (within floating point tolerance)
         for (int i = 0; i < sequentialResults.Length; i++)
         {
-            Assert.That(parallelResults[i], Is.EqualTo(sequentialResults[i]).Within(1e-5f));
+            Assert.That(parallelResults[i], Is.EqualTo(sequentialResults[i]).Within(TestConstants.Tolerances.Default));
         }
     }
 }
