@@ -2,32 +2,33 @@ namespace Neighborly;
 
 internal static class CorruptionDetector
 {
-    public static bool ValidateIndexFile(MemoryMappedFileHolder indexFile, long expectedCount)
+    public static bool ValidateIndexFile(RandomAccessFileHolder indexFile, long expectedCount)
     {
         try
         {
-            indexFile.Stream.Seek(indexFile.GetDataStartPosition(), SeekOrigin.Begin);
-            
             long validEntries = 0;
             long position = indexFile.GetDataStartPosition();
-            
+            long fileLength = indexFile.GetLength();
+
             Span<byte> entry = stackalloc byte[MemoryMappedList.IndexEntryByteLength];
-            while (position + MemoryMappedList.IndexEntryByteLength <= indexFile.Stream.Length)
+            while (position + MemoryMappedList.IndexEntryByteLength <= fileLength)
             {
-                indexFile.Stream.ReadExactly(entry);
-                
+                int bytesRead = indexFile.Read(position, entry);
+                if (bytesRead != MemoryMappedList.IndexEntryByteLength)
+                    break;
+
                 Guid id = new(entry[..MemoryMappedList.IdBytesLength]);
                 if (id.Equals(Guid.Empty))
                     break;
-                    
+
                 if (!id.Equals(MemoryMappedList.TombStone))
                 {
                     validEntries++;
                 }
-                
+
                 position += MemoryMappedList.IndexEntryByteLength;
             }
-            
+
             return validEntries <= expectedCount;
         }
         catch (Exception ex)
@@ -36,20 +37,15 @@ internal static class CorruptionDetector
             return false;
         }
     }
-    
-    public static bool ValidateDataFile(MemoryMappedFileHolder dataFile)
+
+    public static bool ValidateDataFile(RandomAccessFileHolder dataFile)
     {
         try
         {
             // Basic sanity checks
-            if (dataFile.Stream.Length < dataFile.GetDataStartPosition())
+            if (dataFile.GetLength() < dataFile.GetDataStartPosition())
                 return false;
-                
-            // Could add more sophisticated checks here like:
-            // - Validate vector data structure integrity
-            // - Check for reasonable data sizes
-            // - Verify checksums if implemented
-            
+
             return true;
         }
         catch (Exception ex)
@@ -58,25 +54,25 @@ internal static class CorruptionDetector
             return false;
         }
     }
-    
-    public static void AttemptRepair(MemoryMappedFileHolder indexFile, MemoryMappedFileHolder dataFile)
+
+    public static void AttemptRepair(RandomAccessFileHolder indexFile, RandomAccessFileHolder dataFile)
     {
         try
         {
             Logging.Logger.Warning("Attempting to repair corrupted files");
-            
+
             // Truncate to valid data only
             long lastValidIndexPosition = FindLastValidIndexEntry(indexFile);
             if (lastValidIndexPosition > indexFile.GetDataStartPosition())
             {
-                indexFile.Stream.SetLength(lastValidIndexPosition);
+                indexFile.SetLength(lastValidIndexPosition);
                 Logging.Logger.Information("Truncated index file to position: {Position}", lastValidIndexPosition);
             }
-            
+
             long lastValidDataPosition = FindLastValidDataPosition(indexFile, dataFile);
             if (lastValidDataPosition > dataFile.GetDataStartPosition())
             {
-                dataFile.Stream.SetLength(lastValidDataPosition);
+                dataFile.SetLength(lastValidDataPosition);
                 Logging.Logger.Information("Truncated data file to position: {Position}", lastValidDataPosition);
             }
         }
@@ -86,26 +82,25 @@ internal static class CorruptionDetector
             throw;
         }
     }
-    
-    private static long FindLastValidIndexEntry(MemoryMappedFileHolder indexFile)
+
+    private static long FindLastValidIndexEntry(RandomAccessFileHolder indexFile)
     {
         long position = indexFile.GetDataStartPosition();
         long lastValidPosition = position;
-        
+        long fileLength = indexFile.GetLength();
+
         try
         {
-            indexFile.Stream.Seek(position, SeekOrigin.Begin);
-            
             Span<byte> entry = stackalloc byte[MemoryMappedList.IndexEntryByteLength];
-            while (position + MemoryMappedList.IndexEntryByteLength <= indexFile.Stream.Length)
+            while (position + MemoryMappedList.IndexEntryByteLength <= fileLength)
             {
-                if (indexFile.Stream.Read(entry) != MemoryMappedList.IndexEntryByteLength)
+                if (indexFile.Read(position, entry) != MemoryMappedList.IndexEntryByteLength)
                     break;
-                
+
                 Guid id = new(entry[..MemoryMappedList.IdBytesLength]);
                 if (id.Equals(Guid.Empty))
                     break;
-                
+
                 lastValidPosition = position + MemoryMappedList.IndexEntryByteLength;
                 position += MemoryMappedList.IndexEntryByteLength;
             }
@@ -114,40 +109,40 @@ internal static class CorruptionDetector
         {
             Logging.Logger.Warning(ex, "Error while finding last valid index entry");
         }
-        
+
         return lastValidPosition;
     }
-    
-    private static long FindLastValidDataPosition(MemoryMappedFileHolder indexFile, MemoryMappedFileHolder dataFile)
+
+    private static long FindLastValidDataPosition(RandomAccessFileHolder indexFile, RandomAccessFileHolder dataFile)
     {
         long lastValidDataPosition = dataFile.GetDataStartPosition();
-        
+        long indexFileLength = indexFile.GetLength();
+        long dataFileLength = dataFile.GetLength();
+
         try
         {
-            indexFile.Stream.Seek(indexFile.GetDataStartPosition(), SeekOrigin.Begin);
-            
             long position = indexFile.GetDataStartPosition();
             Span<byte> entry = stackalloc byte[MemoryMappedList.IndexEntryByteLength];
-            while (position + MemoryMappedList.IndexEntryByteLength <= indexFile.Stream.Length)
+            while (position + MemoryMappedList.IndexEntryByteLength <= indexFileLength)
             {
-                if (indexFile.Stream.Read(entry) != MemoryMappedList.IndexEntryByteLength)
+                if (indexFile.Read(position, entry) != MemoryMappedList.IndexEntryByteLength)
                     break;
-                
+
                 Guid id = new(entry[..MemoryMappedList.IdBytesLength]);
                 if (id.Equals(Guid.Empty))
                     break;
-                
+
                 if (!id.Equals(MemoryMappedList.TombStone))
                 {
                     long offset = BitConverter.ToInt64(entry.Slice(MemoryMappedList.IdBytesLength, sizeof(long)));
                     int length = BitConverter.ToInt32(entry.Slice(MemoryMappedList.IdBytesLength + sizeof(long), sizeof(int)));
-                    
-                    if (offset >= dataFile.GetDataStartPosition() && length > 0 && offset + length <= dataFile.Stream.Length)
+
+                    if (offset >= dataFile.GetDataStartPosition() && length > 0 && offset + length <= dataFileLength)
                     {
                         lastValidDataPosition = Math.Max(lastValidDataPosition, offset + length);
                     }
                 }
-                
+
                 position += MemoryMappedList.IndexEntryByteLength;
             }
         }
@@ -155,7 +150,7 @@ internal static class CorruptionDetector
         {
             Logging.Logger.Warning(ex, "Error while finding last valid data position");
         }
-        
+
         return lastValidDataPosition;
     }
 }

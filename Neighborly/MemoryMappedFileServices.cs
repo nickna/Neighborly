@@ -123,7 +123,7 @@ internal static class MemoryMappedFileServices
     /// [3] = total (sparce) capacity of Data file
     /// </returns>
     /// <seealso cref="ForceFlush"/>
-    internal static long[] GetFileInfo(MemoryMappedFileHolder indexFile, MemoryMappedFileHolder dataFile)
+    internal static long[] GetFileInfo(RandomAccessFileHolder indexFile, RandomAccessFileHolder dataFile)
     {
         // Return the disk info for _indexFile and _dataFile as a long[] array
         long[] fileInfo = new long[4];
@@ -134,6 +134,7 @@ internal static class MemoryMappedFileServices
         fileInfo[3] = dataFile.Capacity;
         return fileInfo;
     }
+
     internal static long GetActualDiskSpaceUsed(string fileName)
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

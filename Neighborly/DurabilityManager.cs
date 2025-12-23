@@ -1,6 +1,3 @@
-using System.Runtime.InteropServices;
-using Microsoft.Win32.SafeHandles;
-
 namespace Neighborly;
 
 public enum FlushPolicy
@@ -18,18 +15,8 @@ internal class DurabilityManager : IDisposable
     private readonly int _timerInterval;
     private readonly Timer? _flushTimer;
     private int _operationCount;
-    private readonly List<MemoryMappedFileHolder> _files = new();
+    private readonly List<RandomAccessFileHolder> _randomAccessFiles = new();
     private bool _disposedValue;
-
-    // Platform-specific P/Invoke declarations
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool FlushFileBuffers(SafeFileHandle hFile);
-
-    [DllImport("libc", SetLastError = true)]
-    private static extern int fsync(int fd);
-
-    [DllImport("libc", SetLastError = true)]
-    private static extern int fdatasync(int fd);
 
     public DurabilityManager(FlushPolicy policy = FlushPolicy.Batched, int batchSize = 100, int timerInterval = 5000)
     {
@@ -43,9 +30,9 @@ internal class DurabilityManager : IDisposable
         }
     }
 
-    public void RegisterFile(MemoryMappedFileHolder file)
+    public void RegisterFile(RandomAccessFileHolder file)
     {
-        _files.Add(file);
+        _randomAccessFiles.Add(file);
     }
 
     public void RecordOperation()
@@ -66,42 +53,16 @@ internal class DurabilityManager : IDisposable
 
     public void ForceFlush()
     {
-        foreach (var file in _files)
+        foreach (var file in _randomAccessFiles)
         {
             try
             {
-                file.Stream.Flush();
-                PlatformSpecificSync(file);
+                file.FlushToDisk();
             }
             catch (Exception ex)
             {
                 Logging.Logger.Warning(ex, "Failed to flush file: {FileName}", file.Filename);
             }
-        }
-    }
-
-    private void PlatformSpecificSync(MemoryMappedFileHolder file)
-    {
-        try
-        {
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            {
-                // Use FlushFileBuffers on Windows
-                using var fileStream = new FileStream(file.Filename, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-                FlushFileBuffers(fileStream.SafeFileHandle);
-            }
-            else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || 
-                     RuntimeInformation.IsOSPlatform(OSPlatform.FreeBSD) ||
-                     RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            {
-                // Use fsync on Unix-like systems
-                using var fileStream = new FileStream(file.Filename, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
-                fsync(fileStream.SafeFileHandle.DangerousGetHandle().ToInt32());
-            }
-        }
-        catch (Exception ex)
-        {
-            Logging.Logger.Warning(ex, "Platform-specific sync failed for file: {FileName}", file.Filename);
         }
     }
 
