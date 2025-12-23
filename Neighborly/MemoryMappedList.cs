@@ -150,11 +150,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            var location = FindVectorLocationByIndex(index);
-            if (!location.HasValue)
+            if (!TryFindVectorByIndex(index, out var result))
                 return null;
 
-            return ReadVectorAtLocation(location.Value);
+            return ReadVectorAtLocation((result.IndexPosition, result.DataOffset, result.Length));
         }
     }
 
@@ -164,11 +163,10 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            var location = FindVectorLocation(id);
-            if (!location.HasValue)
+            if (!TryFindVectorById(id, out var result))
                 return null;
 
-            return ReadVectorAtLocation(location.Value);
+            return ReadVectorAtLocation((result.IndexPosition, result.DataOffset, result.Length));
         }
     }
 
@@ -222,8 +220,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         using (_lock.EnterScope())
         {
-            (long index, _, _) = SearchVectorInIndex(id);
-            return index;
+            return TryFindVectorById(id, out var result) ? result.LogicalIndex : -1L;
         }
     }
 
@@ -233,8 +230,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            (long index, _, _) = SearchVectorInIndex(item.Id);
-            return index;
+            return TryFindVectorById(item.Id, out var result) ? result.LogicalIndex : -1L;
         }
     }
 
@@ -245,31 +241,37 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            // Get next positions - O(1) operation
-            long indexPosition = _nextIndexPosition;
-            long dataPosition = _nextDataPosition;
-            var data = vector.ToBinary();
-
-            // Log operation before performing it
-            _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
-
-            // Write data using position-independent operations
-            WriteVectorData(dataPosition, data);
-            WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
-
-            // Update positions
-            _nextIndexPosition += s_indexEntryByteLength;
-            _nextDataPosition += data.Length;
-
-            // Record operation for durability management
-            _durabilityManager.RecordOperation();
-
-            // Commit WAL after successful operation
-            _wal.Commit();
-
-            // Increment count atomically
-            Interlocked.Increment(ref _count);
+            AddCore(vector, logToWAL: true);
         }
+    }
+
+    /// <summary>
+    /// Core add implementation. Caller must hold the lock.
+    /// </summary>
+    private void AddCore(Vector vector, bool logToWAL)
+    {
+        long indexPosition = _nextIndexPosition;
+        long dataPosition = _nextDataPosition;
+        byte[] data = vector.ToBinary();
+
+        if (logToWAL)
+        {
+            _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
+        }
+
+        WriteVectorData(dataPosition, data);
+        WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
+
+        _nextIndexPosition += s_indexEntryByteLength;
+        _nextDataPosition += data.Length;
+
+        if (logToWAL)
+        {
+            _durabilityManager.RecordOperation();
+            _wal.Commit();
+        }
+
+        Interlocked.Increment(ref _count);
     }
 
     public bool Remove(Vector vector)
@@ -279,15 +281,14 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            var location = FindVectorLocation(vector.Id);
-            if (!location.HasValue)
+            if (!TryFindVectorById(vector.Id, out var result))
                 return false;
 
             // Log operation before performing it
-            _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, location.Value.IndexPosition, -1);
+            _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, result.IndexPosition, -1);
 
             // Mark as tombstone
-            WriteTombstone(location.Value.IndexPosition);
+            WriteTombstone(result.IndexPosition);
 
             // Record operation for durability management
             _durabilityManager.RecordOperation();
@@ -307,18 +308,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            // Find the vector using position-independent search
-            var location = FindVectorLocation(vector.Id);
-            if (!location.HasValue)
+            // Find the vector using unified search method
+            if (!TryFindVectorById(vector.Id, out var result))
                 return false;
 
             byte[] newData = vector.ToBinary();
             long newDataPosition;
 
-            if (newData.Length <= location.Value.Length)
+            if (newData.Length <= result.Length)
             {
                 // Reuse existing space
-                newDataPosition = location.Value.DataOffset;
+                newDataPosition = result.DataOffset;
             }
             else
             {
@@ -336,13 +336,13 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             }
 
             // Log operation before performing it
-            _wal.LogOperation(WALOperationType.Update, vector.Id, newData, location.Value.IndexPosition, newDataPosition);
+            _wal.LogOperation(WALOperationType.Update, vector.Id, newData, result.IndexPosition, newDataPosition);
 
             // Write new data
             WriteVectorData(newDataPosition, newData);
 
             // Update index entry with new offset and length
-            UpdateIndexEntry(location.Value.IndexPosition, newDataPosition, newData.Length);
+            UpdateIndexEntry(result.IndexPosition, newDataPosition, newData.Length);
 
             // Record operation for durability management
             _durabilityManager.RecordOperation();
@@ -615,35 +615,44 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    private (long index, long offset, int length) SearchVectorInIndex(Guid id)
-    {
-        long maxIndexPos = _nextIndexPosition;
-        long position = 0;
-        long index = 0L;
+    /// <summary>
+    /// Unified vector search result containing both logical index and physical location.
+    /// </summary>
+    private readonly record struct VectorSearchResult(
+        long LogicalIndex,
+        long IndexPosition,
+        long DataOffset,
+        int Length);
 
-        while (position < maxIndexPos)
+    /// <summary>
+    /// Core search method that returns both logical index and physical location.
+    /// </summary>
+    private bool TryFindVectorById(Guid id, out VectorSearchResult result)
+    {
+        long position = 0;
+        long logicalIndex = 0L;
+
+        while (position < _nextIndexPosition)
         {
             var entry = ReadIndexEntryAt(position);
 
-            if (id == entry.Id)
+            if (entry.Id == id)
             {
-                return (index, entry.DataOffset, entry.Length);
+                result = new VectorSearchResult(logicalIndex, position, entry.DataOffset, entry.Length);
+                return true;
             }
-            else if (entry.Id.Equals(Guid.Empty))
-            {
-                // Hit the end of actual entries
+
+            if (entry.Id.Equals(Guid.Empty))
                 break;
-            }
-            else if (!entry.Id.Equals(s_tombStone))
-            {
-                // Only increment index for non-tombstone entries
-                ++index;
-            }
+
+            if (!entry.Id.Equals(s_tombStone))
+                logicalIndex++;
 
             position += s_indexEntryByteLength;
         }
 
-        return (-1L, -1L, -1);
+        result = default;
+        return false;
     }
 
     /// <summary>
@@ -681,9 +690,12 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         }
     }
 
+    /// <summary>
+    /// Scans the index file to initialize append positions and count.
+    /// Caller must hold the lock.
+    /// </summary>
     private void InitializeAppendMetadataInternal()
     {
-        // Internal version that doesn't acquire lock (caller must hold lock)
         long maxIndexPos = 0;
         long maxDataPos = 0;
         long fileLength = _indexFile.GetLength();
@@ -758,21 +770,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     private void AddWithoutWAL(Vector vector)
     {
-        // Get positions (caller must hold lock)
-        long indexPosition = _nextIndexPosition;
-        long dataPosition = _nextDataPosition;
-        byte[] data = vector.ToBinary();
-
-        // Write data first
-        WriteVectorData(dataPosition, data);
-
-        // Write index entry
-        WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
-
-        // Update positions
-        _nextIndexPosition += s_indexEntryByteLength;
-        _nextDataPosition += data.Length;
-        Interlocked.Increment(ref _count);
+        // Caller must hold lock
+        AddCore(vector, logToWAL: false);
     }
 
     private void ValidateFileIntegrity()
@@ -851,39 +850,33 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     // Helper methods for position-independent operations
 
-    private (long IndexPosition, long DataOffset, int Length)? FindVectorLocation(Guid id)
-    {
-        // Position-independent search through index
-        for (long pos = 0; pos < _nextIndexPosition; pos += s_indexEntryByteLength)
-        {
-            var entry = ReadIndexEntryAt(pos);
-            if (entry.Id == id)
-                return (pos, entry.DataOffset, entry.Length);
-        }
-        
-        return null;
-    }
-    
-    private (long IndexPosition, long DataOffset, int Length)? FindVectorLocationByIndex(long targetIndex)
+    /// <summary>
+    /// Finds a vector by its logical index position.
+    /// </summary>
+    private bool TryFindVectorByIndex(long targetIndex, out VectorSearchResult result)
     {
         long currentIndex = 0;
 
         for (long pos = 0; pos < _nextIndexPosition; pos += s_indexEntryByteLength)
         {
             var entry = ReadIndexEntryAt(pos);
-            
+
             if (entry.Id.Equals(Guid.Empty))
                 break;
-                
+
             if (!entry.Id.Equals(s_tombStone))
             {
                 if (currentIndex == targetIndex)
-                    return (pos, entry.DataOffset, entry.Length);
+                {
+                    result = new VectorSearchResult(currentIndex, pos, entry.DataOffset, entry.Length);
+                    return true;
+                }
                 currentIndex++;
             }
         }
-        
-        return null;
+
+        result = default;
+        return false;
     }
     
     private Vector ReadVectorAtLocation((long IndexPosition, long DataOffset, int Length) location)
@@ -977,35 +970,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     {
         using (_lock.EnterScope())
         {
-            // Scan once at startup to find append positions
-            long maxIndexPos = 0;
-            long maxDataPos = 0;
-            long fileLength = _indexFile.GetLength();
-
-            // Find the first empty slot in index
-            for (long pos = 0; pos < fileLength; pos += s_indexEntryByteLength)
-            {
-                var entry = ReadIndexEntryAt(pos);
-
-                if (entry.Id.Equals(Guid.Empty))
-                {
-                    maxIndexPos = pos;
-                    break;
-                }
-
-                // Track the highest data position for non-tombstone entries
-                if (!entry.Id.Equals(s_tombStone))
-                {
-                    var endOfData = entry.DataOffset + entry.Length;
-                    if (endOfData > maxDataPos)
-                        maxDataPos = endOfData;
-
-                    Interlocked.Increment(ref _count);
-                }
-            }
-
-            _nextIndexPosition = maxIndexPos;
-            _nextDataPosition = maxDataPos;
+            InitializeAppendMetadataInternal();
         }
     }
     
