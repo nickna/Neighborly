@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Collections;
-using System.Runtime.CompilerServices;
 
 namespace Neighborly;
 
@@ -124,9 +123,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         }
     }
 
-#pragma warning disable CA1822 // Mark members as static - mimicking ICollection<Vector>
+#pragma warning disable CA1822 // Mark members as static - kept as instance member for API consistency with collection patterns
     public bool IsReadOnly => false;
-#pragma warning restore CA1822 // Mark members as static - mimicking ICollection<Vector>
+#pragma warning restore CA1822
 
     protected virtual void Dispose(bool disposing)
     {
@@ -856,7 +855,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
     /// <summary>
     /// Asynchronously enumerates all vectors in the list.
     /// </summary>
-    public async IAsyncEnumerator<Vector> GetAsyncEnumerator([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerator<Vector> GetAsyncEnumerator(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
 
@@ -1149,12 +1148,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         }
 
         Logging.Logger.Debug("Recovered Update for vector {VectorId}", entry.VectorId);
-    }
-
-    private void AddWithoutWAL(Vector vector)
-    {
-        // Caller must hold lock
-        AddCore(vector, logToWAL: false);
     }
 
     private void ValidateFileIntegrity()

@@ -191,13 +191,10 @@ public struct EmbeddingGenerationInfo
 {
     public EmbeddingSource Source { get; set; }
 
-    #pragma warning disable CS0649 // Field is never assigned to, and will always have its default value
-    private string? _url;
-    private string? _model;
-    #pragma warning restore CS0649
-    public string Url => string.IsNullOrEmpty(_url) ? "http://localhost:11434/api/embeddings" : _url;        
-    public string Model => string.IsNullOrEmpty(_model) ? "llama3.1:latest" : _model;
+    public string Url { get; set; } = "http://localhost:11434/api/embeddings";
+    public string Model { get; set; } = "llama3.1:latest";
 
+    public EmbeddingGenerationInfo() { }
 }
 
 public class OllamaEmbeddingResponse
