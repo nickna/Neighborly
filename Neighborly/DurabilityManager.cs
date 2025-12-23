@@ -8,6 +8,15 @@ public enum FlushPolicy
     Timer           // Flush every N milliseconds
 }
 
+/// <summary>
+/// Manages file flush operations with configurable flush policies.
+/// </summary>
+/// <remarks>
+/// This class is deprecated in favor of <see cref="CheckpointManager"/> which provides
+/// proper WAL-based durability with ACID guarantees. CheckpointManager ensures that
+/// the WAL is only truncated after data files are confirmed flushed to disk.
+/// </remarks>
+[Obsolete("Use CheckpointManager for WAL-based durability with ACID guarantees. This class is retained for backward compatibility only.")]
 internal class DurabilityManager : IDisposable
 {
     private readonly FlushPolicy _policy;

@@ -19,7 +19,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     private readonly RandomAccessFileHolder _indexFile;
     private readonly RandomAccessFileHolder _dataFile;
     private readonly WriteAheadLog _wal;
-    private readonly DurabilityManager _durabilityManager;
+    private readonly CheckpointManager _checkpointManager;
     private static readonly MemoryPressureMonitor s_memoryMonitor = new();
 
     // Single lock for all synchronization - uses .NET 9+ Lock class for efficiency
@@ -38,7 +38,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
   
     /// <summary>
-    /// Flush the memory-mapped files to disk
+    /// Flush the memory-mapped files to disk and checkpoint the WAL.
     /// </summary>
     public void Flush()
     {
@@ -46,7 +46,7 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         using (_lock.EnterScope())
         {
-            _durabilityManager.ForceFlush();
+            _checkpointManager.ForceCheckpoint();
         }
     }
 
@@ -69,11 +69,13 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         // Based on typical vector dimensions, 4096 bytes should be enough for most cases as of 2024-06
         _dataFile = new RandomAccessFileHolder(4096L * capacity);
         _wal = new WriteAheadLog(_indexFile.Filename);
-        _durabilityManager = new DurabilityManager(flushPolicy);
 
-        // Register files with durability manager
-        _durabilityManager.RegisterFile(_indexFile);
-        _durabilityManager.RegisterFile(_dataFile);
+        // Create CheckpointManager with WAL reference for coordinated durability
+        _checkpointManager = new CheckpointManager(_wal, flushPolicy);
+
+        // Register files with checkpoint manager
+        _checkpointManager.RegisterFile(_indexFile);
+        _checkpointManager.RegisterFile(_dataFile);
 
         // Initialize defrag tracking
         _newDataPosition = 0;
@@ -115,7 +117,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 using (_lock.EnterScope())
                 {
                     // Dispose in reverse order of creation
-                    _durabilityManager?.Dispose();
+                    // CheckpointManager will perform final checkpoint before disposal
+                    _checkpointManager?.Dispose();
                     _wal?.Dispose();
                     _dataFile?.Dispose();
                     _indexFile?.Dispose();
@@ -254,11 +257,14 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         long dataPosition = _nextDataPosition;
         byte[] data = vector.ToBinary();
 
+        long lsn = 0;
         if (logToWAL)
         {
-            _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
+            // Step 1: Log to WAL first (WAL is fsynced in LogOperation)
+            lsn = _wal.LogOperation(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition);
         }
 
+        // Step 2: Write to data files (in OS buffer)
         WriteVectorData(dataPosition, data);
         WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
 
@@ -267,8 +273,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
         if (logToWAL)
         {
-            _durabilityManager.RecordOperation();
-            _wal.Commit();
+            // Step 3: Record operation with LSN (may trigger checkpoint based on policy)
+            // CheckpointManager handles WAL truncation after confirmed data flush
+            _checkpointManager.RecordOperation(lsn);
         }
 
         Interlocked.Increment(ref _count);
@@ -284,17 +291,14 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             if (!TryFindVectorById(vector.Id, out var result))
                 return false;
 
-            // Log operation before performing it
-            _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, result.IndexPosition, -1);
+            // Step 1: Log operation to WAL (WAL is fsynced in LogOperation)
+            long lsn = _wal.LogOperation(WALOperationType.Remove, vector.Id, s_tombStoneBytes, result.IndexPosition, -1);
 
-            // Mark as tombstone
+            // Step 2: Mark as tombstone in data file
             WriteTombstone(result.IndexPosition);
 
-            // Record operation for durability management
-            _durabilityManager.RecordOperation();
-
-            // Commit WAL after successful operation
-            _wal.Commit();
+            // Step 3: Record operation (may trigger checkpoint based on policy)
+            _checkpointManager.RecordOperation(lsn);
 
             // Decrement count atomically
             Interlocked.Decrement(ref _count);
@@ -335,20 +339,17 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 _nextDataPosition += newData.Length;
             }
 
-            // Log operation before performing it
-            _wal.LogOperation(WALOperationType.Update, vector.Id, newData, result.IndexPosition, newDataPosition);
+            // Step 1: Log operation to WAL (WAL is fsynced in LogOperation)
+            long lsn = _wal.LogOperation(WALOperationType.Update, vector.Id, newData, result.IndexPosition, newDataPosition);
 
-            // Write new data
+            // Step 2: Write new data
             WriteVectorData(newDataPosition, newData);
 
-            // Update index entry with new offset and length
+            // Step 3: Update index entry with new offset and length
             UpdateIndexEntry(result.IndexPosition, newDataPosition, newData.Length);
 
-            // Record operation for durability management
-            _durabilityManager.RecordOperation();
-
-            // Commit WAL after successful operation
-            _wal.Commit();
+            // Step 4: Record operation (may trigger checkpoint based on policy)
+            _checkpointManager.RecordOperation(lsn);
 
             return true;
         }
@@ -735,37 +736,146 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
             Logging.Logger.Information("Recovering {EntryCount} operations from WAL", entries.Count);
 
-            foreach (var entry in entries)
+            // Sort by LSN to ensure correct replay order
+            var sortedEntries = entries.OrderBy(e => e.LSN).ToList();
+            long lastRecoveredLSN = 0;
+
+            foreach (var entry in sortedEntries)
             {
                 try
                 {
                     switch (entry.Operation)
                     {
                         case WALOperationType.Add:
-                            if (entry.VectorData != null)
-                            {
-                                var vector = new Vector(entry.VectorData);
-                                // Replay the add operation without WAL logging to avoid recursion
-                                AddWithoutWAL(vector);
-                            }
+                            RecoverAdd(entry);
                             break;
                         case WALOperationType.Remove:
-                            // Implement remove recovery if needed
+                            RecoverRemove(entry);
                             break;
                         case WALOperationType.Update:
-                            // Implement update recovery if needed
+                            RecoverUpdate(entry);
                             break;
                     }
+                    lastRecoveredLSN = entry.LSN;
                 }
                 catch (Exception ex)
                 {
-                    Logging.Logger.Error(ex, "Failed to recover WAL entry for vector {VectorId}", entry.VectorId);
+                    Logging.Logger.Error(ex, "Failed to recover WAL entry for vector {VectorId} (LSN: {LSN})",
+                        entry.VectorId, entry.LSN);
                 }
             }
 
-            _wal.Commit(); // Clear WAL after recovery
+            // After successful recovery, checkpoint to truncate recovered entries
+            if (lastRecoveredLSN > 0)
+            {
+                // Flush data files first, then checkpoint WAL
+                _indexFile.FlushToDisk();
+                _dataFile.FlushToDisk();
+                _wal.Checkpoint(lastRecoveredLSN);
+            }
+
             Logging.Logger.Information("WAL recovery completed");
         }
+    }
+
+    private void RecoverAdd(WALEntry entry)
+    {
+        if (entry.VectorData == null)
+        {
+            Logging.Logger.Warning("Skipping Add recovery for {VectorId}: no vector data", entry.VectorId);
+            return;
+        }
+
+        // Check if vector already exists (idempotency)
+        if (TryFindVectorById(entry.VectorId, out _))
+        {
+            Logging.Logger.Debug("Vector {VectorId} already exists, skipping Add recovery", entry.VectorId);
+            return;
+        }
+
+        var vector = new Vector(entry.VectorData);
+
+        // Use the recorded positions if valid, otherwise append
+        long indexPosition = entry.IndexPosition >= 0 ? entry.IndexPosition : _nextIndexPosition;
+        long dataPosition = entry.DataPosition >= 0 ? entry.DataPosition : _nextDataPosition;
+        byte[] data = vector.ToBinary();
+
+        WriteVectorData(dataPosition, data);
+        WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
+
+        // Update positions if we used new positions
+        if (indexPosition >= _nextIndexPosition)
+            _nextIndexPosition = indexPosition + s_indexEntryByteLength;
+        if (dataPosition >= _nextDataPosition)
+            _nextDataPosition = dataPosition + data.Length;
+
+        Interlocked.Increment(ref _count);
+
+        Logging.Logger.Debug("Recovered Add for vector {VectorId}", entry.VectorId);
+    }
+
+    private void RecoverRemove(WALEntry entry)
+    {
+        // Find the vector by ID
+        if (!TryFindVectorById(entry.VectorId, out var result))
+        {
+            Logging.Logger.Debug("Vector {VectorId} not found for Remove recovery (already removed?)", entry.VectorId);
+            return;
+        }
+
+        // Check if already tombstoned
+        var currentEntry = ReadIndexEntryAt(result.IndexPosition);
+        if (currentEntry.Id.Equals(s_tombStone))
+        {
+            Logging.Logger.Debug("Vector {VectorId} already tombstoned, skipping Remove recovery", entry.VectorId);
+            return;
+        }
+
+        // Apply the tombstone
+        WriteTombstone(result.IndexPosition);
+        Interlocked.Decrement(ref _count);
+
+        Logging.Logger.Debug("Recovered Remove for vector {VectorId}", entry.VectorId);
+    }
+
+    private void RecoverUpdate(WALEntry entry)
+    {
+        if (entry.VectorData == null)
+        {
+            Logging.Logger.Warning("Skipping Update recovery for {VectorId}: no vector data", entry.VectorId);
+            return;
+        }
+
+        // Find the vector by ID
+        if (!TryFindVectorById(entry.VectorId, out var result))
+        {
+            Logging.Logger.Warning("Vector {VectorId} not found for Update recovery", entry.VectorId);
+            return;
+        }
+
+        byte[] newData = entry.VectorData;
+        long newDataPosition = entry.DataPosition;
+
+        // Validate positions from WAL entry
+        if (newDataPosition < 0)
+        {
+            // Invalid position in WAL, use current append position
+            newDataPosition = _nextDataPosition;
+        }
+
+        // Write new data
+        WriteVectorData(newDataPosition, newData);
+
+        // Update index entry with new offset and length
+        UpdateIndexEntry(result.IndexPosition, newDataPosition, newData.Length);
+
+        // Update data position if needed
+        if (newDataPosition + newData.Length > _nextDataPosition)
+        {
+            _nextDataPosition = newDataPosition + newData.Length;
+        }
+
+        Logging.Logger.Debug("Recovered Update for vector {VectorId}", entry.VectorId);
     }
 
     private void AddWithoutWAL(Vector vector)
