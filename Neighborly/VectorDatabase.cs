@@ -766,11 +766,27 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     {
         var vectorCount = reader.ReadInt32();
 
+        // Sanity check: vector count should be reasonable
+        if (vectorCount < 0 || vectorCount > 100_000_000)
+            throw new InvalidDataException($"Invalid vector count in file: {vectorCount}");
+
         for (int i = 0; i < vectorCount; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var nextVector = reader.ReadInt32();
-            var vector = new Vector(reader.ReadBytes(nextVector));
+            var nextVectorSize = reader.ReadInt32();
+
+            // Sanity check: vector size should be reasonable
+            if (nextVectorSize <= 0 || nextVectorSize > 100_000_000)
+                throw new InvalidDataException($"Invalid vector size at index {i}: {nextVectorSize}");
+
+            var bytes = reader.ReadBytes(nextVectorSize);
+
+            // Validate that we got all expected bytes (detects truncated files)
+            if (bytes.Length != nextVectorSize)
+                throw new InvalidDataException(
+                    $"Truncated file: expected {nextVectorSize} bytes for vector {i}, got {bytes.Length}");
+
+            var vector = new Vector(bytes);
             targetDict.TryAdd(vector.Id, vector);
         }
 
@@ -836,11 +852,27 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         _logger.LogInformation("Loading vectors from the original (V0) layout.");
         var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
 
+        // Sanity check: vector count should be reasonable
+        if (vectorCount < 0 || vectorCount > 100_000_000)
+            throw new InvalidDataException($"Invalid vector count in file: {vectorCount}");
+
         for (int i = 0; i < vectorCount; i++)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var nextVector = reader.ReadInt32();    // File offset of the next Vector
-            var vector = new Vector(reader.ReadBytes(nextVector));
+            var nextVectorSize = reader.ReadInt32();    // Size of the next Vector
+
+            // Sanity check: vector size should be reasonable
+            if (nextVectorSize <= 0 || nextVectorSize > 100_000_000)
+                throw new InvalidDataException($"Invalid vector size at index {i}: {nextVectorSize}");
+
+            var bytes = reader.ReadBytes(nextVectorSize);
+
+            // Validate that we got all expected bytes (detects truncated files)
+            if (bytes.Length != nextVectorSize)
+                throw new InvalidDataException(
+                    $"Truncated file: expected {nextVectorSize} bytes for vector {i}, got {bytes.Length}");
+
+            var vector = new Vector(bytes);
             targetDict.TryAdd(vector.Id, vector);  // Add to temp dictionary
         }
 

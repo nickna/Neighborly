@@ -282,10 +282,12 @@ public class ResilienceTests
 
     /// <summary>
     /// Verifies proper exception handling when loading truncated files.
-    /// Note: Currently reveals a bug where LoadAsync hangs on truncated files.
+    /// Note: GZipStream can hang on truncated gzip files. LoadAsync now has a 5-second
+    /// decompression timeout protection, but this test is marked Explicit because the
+    /// timeout adds overhead to the test suite.
     /// </summary>
     [Test]
-    [Explicit("Known issue: LoadAsync hangs on truncated files instead of throwing")]
+    [Explicit("Requires 5+ second decompression timeout to detect truncated gzip files")]
     public async Task TruncatedFile_FailsGracefully()
     {
         // Arrange - Use separate database for saving to avoid state issues
@@ -294,37 +296,23 @@ public class ResilienceTests
         saveDb.Vectors.Add(new Vector(new float[] { 4, 5, 6 }));
         await saveDb.SaveAsync(_testDirectory);
 
-        // Truncate the file
+        // Truncate the file to corrupt the gzip stream
         var filePath = Path.Combine(_testDirectory, "vectors.bin");
         var originalBytes = await File.ReadAllBytesAsync(filePath);
         await File.WriteAllBytesAsync(filePath, originalBytes.Take(originalBytes.Length / 2).ToArray());
 
-        // Act & Assert - Create new database to test loading with timeout
+        // Act & Assert - Should throw exception for truncated file
+        // The LoadAsync method has a 30-second decompression timeout for corrupted/truncated files
         using var loadDb = new VectorDatabase(new MockLogger<VectorDatabase>(), null);
 
-        Exception? caughtException = null;
-        try
+        var ex = Assert.CatchAsync<Exception>(async () =>
         {
-            // Wrap in Task.Run since LoadAsync may block synchronously
-            var loadTask = Task.Run(async () => await loadDb.LoadAsync(_testDirectory, createOnNew: false));
-            var completedTask = await Task.WhenAny(loadTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            await loadDb.LoadAsync(_testDirectory, createOnNew: false);
+        });
 
-            if (completedTask != loadTask)
-            {
-                caughtException = new TimeoutException("LoadAsync hung on truncated file");
-            }
-            else
-            {
-                await loadTask; // Re-await to get the result/exception
-            }
-        }
-        catch (Exception ex)
-        {
-            caughtException = ex;
-            Console.WriteLine($"Exception type: {ex.GetType().Name}");
-        }
-
-        Assert.That(caughtException, Is.Not.Null, "Should throw exception or timeout for truncated file");
+        Assert.That(ex, Is.Not.Null, "Should throw exception for truncated file");
+        Console.WriteLine($"Exception type: {ex!.GetType().Name}");
+        Console.WriteLine($"Exception message: {ex.Message}");
     }
 
     #region Helper Methods
