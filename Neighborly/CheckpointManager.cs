@@ -14,6 +14,7 @@ internal class CheckpointManager : IDisposable
     private readonly WriteAheadLog _wal;
 
     private readonly Lock _lock = new();
+    private readonly SemaphoreSlim _asyncLock = new(1, 1);
     private int _unflushedOperationCount;
     private long _lastUnflushedLSN;
     private long _firstUnflushedLSN;
@@ -101,6 +102,62 @@ internal class CheckpointManager : IDisposable
         }
     }
 
+    /// <summary>
+    /// Asynchronously records an operation with its LSN for checkpoint tracking.
+    /// May trigger an immediate checkpoint based on FlushPolicy.
+    /// </summary>
+    /// <param name="lsn">The LSN returned from WriteAheadLog.LogOperationAsync()</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async ValueTask RecordOperationAsync(long lsn, CancellationToken cancellationToken = default)
+    {
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_firstUnflushedLSN == 0)
+            {
+                _firstUnflushedLSN = lsn;
+            }
+            _lastUnflushedLSN = lsn;
+            _unflushedOperationCount++;
+
+            switch (_policy)
+            {
+                case FlushPolicy.Immediate:
+                    await PerformCheckpointInternalAsync(cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case FlushPolicy.Batched when _unflushedOperationCount >= _batchSize:
+                    await PerformCheckpointInternalAsync(cancellationToken).ConfigureAwait(false);
+                    break;
+
+                case FlushPolicy.None:
+                case FlushPolicy.Timer:
+                    // No immediate action
+                    break;
+            }
+        }
+        finally
+        {
+            _asyncLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously forces a checkpoint: flushes all data files to disk, then truncates WAL.
+    /// </summary>
+    public async ValueTask ForceCheckpointAsync(CancellationToken cancellationToken = default)
+    {
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await PerformCheckpointInternalAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _asyncLock.Release();
+        }
+    }
+
     private void PerformCheckpointInternal()
     {
         if (_unflushedOperationCount == 0 || _lastUnflushedLSN == 0)
@@ -125,6 +182,39 @@ internal class CheckpointManager : IDisposable
         // Step 2: Only after successful flush, checkpoint WAL up to last LSN
         long checkpointLSN = _lastUnflushedLSN;
         _wal.Checkpoint(checkpointLSN);
+
+        Logging.Logger.Debug("Checkpoint completed up to LSN {LSN}", checkpointLSN);
+
+        // Reset tracking
+        _unflushedOperationCount = 0;
+        _firstUnflushedLSN = 0;
+        _lastUnflushedLSN = 0;
+    }
+
+    private async ValueTask PerformCheckpointInternalAsync(CancellationToken cancellationToken)
+    {
+        if (_unflushedOperationCount == 0 || _lastUnflushedLSN == 0)
+            return;
+
+        // Step 1: Flush all data files to disk
+        foreach (var file in _dataFiles)
+        {
+            try
+            {
+                await file.FlushToDiskAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logging.Logger.Warning(ex, "Failed to flush file during checkpoint: {FileName}", file.Filename);
+                // If any file fails to flush, don't checkpoint WAL
+                // This maintains the invariant that WAL is only cleared after confirmed flush
+                return;
+            }
+        }
+
+        // Step 2: Only after successful flush, checkpoint WAL up to last LSN
+        long checkpointLSN = _lastUnflushedLSN;
+        await _wal.CheckpointAsync(checkpointLSN, cancellationToken).ConfigureAwait(false);
 
         Logging.Logger.Debug("Checkpoint completed up to LSN {LSN}", checkpointLSN);
 
@@ -172,6 +262,8 @@ internal class CheckpointManager : IDisposable
                 {
                     PerformCheckpointInternal();
                 }
+
+                _asyncLock.Dispose();
             }
             _disposedValue = true;
         }

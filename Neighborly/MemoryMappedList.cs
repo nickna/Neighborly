@@ -1,9 +1,10 @@
 using System.Buffers;
 using System.Collections;
+using System.Runtime.CompilerServices;
 
 namespace Neighborly;
 
-public class MemoryMappedList : IDisposable, IEnumerable<Vector>
+public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerable<Vector>
 {
     private const int s_idBytesLength = 16;
     private const int s_offsetBytesLength = sizeof(long);
@@ -24,6 +25,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
 
     // Single lock for all synchronization - uses .NET 9+ Lock class for efficiency
     private readonly Lock _lock = new();
+    // Async-compatible lock for async operations
+    private readonly SemaphoreSlim _asyncLock = new(1, 1);
 
     private long _count;
     private volatile bool _disposedValue;
@@ -47,6 +50,24 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         using (_lock.EnterScope())
         {
             _checkpointManager.ForceCheckpoint();
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously flush the memory-mapped files to disk and checkpoint the WAL.
+    /// </summary>
+    public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _checkpointManager.ForceCheckpointAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _asyncLock.Release();
         }
     }
 
@@ -123,6 +144,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                     _dataFile?.Dispose();
                     _indexFile?.Dispose();
                 }
+
+                _asyncLock.Dispose();
             }
 
             _disposedValue = true;
@@ -170,6 +193,53 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
                 return null;
 
             return ReadVectorAtLocation((result.IndexPosition, result.DataOffset, result.Length));
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously gets a vector by its logical index.
+    /// </summary>
+    public async ValueTask<Vector?> GetVectorAsync(long index, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        if (index < 0L || index >= Interlocked.Read(ref _count))
+        {
+            return null;
+        }
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!TryFindVectorByIndex(index, out var result))
+                return null;
+
+            return await ReadVectorAtLocationAsync((result.IndexPosition, result.DataOffset, result.Length), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _asyncLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously gets a vector by its ID.
+    /// </summary>
+    public async ValueTask<Vector?> GetVectorAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!TryFindVectorById(id, out var result))
+                return null;
+
+            return await ReadVectorAtLocationAsync((result.IndexPosition, result.DataOffset, result.Length), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _asyncLock.Release();
         }
     }
 
@@ -249,6 +319,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     }
 
     /// <summary>
+    /// Asynchronously adds a vector to the list.
+    /// </summary>
+    public async ValueTask AddAsync(Vector vector, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        ThrowIfDisposed();
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await AddCoreAsync(vector, logToWAL: true, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _asyncLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Core add implementation. Caller must hold the lock.
     /// </summary>
     private void AddCore(Vector vector, bool logToWAL)
@@ -281,6 +370,39 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         Interlocked.Increment(ref _count);
     }
 
+    /// <summary>
+    /// Async core add implementation. Caller must hold the async lock.
+    /// </summary>
+    private async ValueTask AddCoreAsync(Vector vector, bool logToWAL, CancellationToken cancellationToken)
+    {
+        long indexPosition = _nextIndexPosition;
+        long dataPosition = _nextDataPosition;
+        byte[] data = vector.ToBinary();
+
+        long lsn = 0;
+        if (logToWAL)
+        {
+            // Step 1: Log to WAL first (WAL is fsynced in LogOperationAsync)
+            lsn = await _wal.LogOperationAsync(WALOperationType.Add, vector.Id, data, indexPosition, dataPosition, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Step 2: Write to data files (async I/O)
+        await WriteVectorDataAsync(dataPosition, data, cancellationToken).ConfigureAwait(false);
+        await WriteIndexEntryAsync(indexPosition, vector.Id, dataPosition, data.Length, cancellationToken).ConfigureAwait(false);
+
+        _nextIndexPosition += s_indexEntryByteLength;
+        _nextDataPosition += data.Length;
+
+        if (logToWAL)
+        {
+            // Step 3: Record operation with LSN (may trigger checkpoint based on policy)
+            // CheckpointManager handles WAL truncation after confirmed data flush
+            await _checkpointManager.RecordOperationAsync(lsn, cancellationToken).ConfigureAwait(false);
+        }
+
+        Interlocked.Increment(ref _count);
+    }
+
     public bool Remove(Vector vector)
     {
         ArgumentNullException.ThrowIfNull(vector);
@@ -303,6 +425,39 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             // Decrement count atomically
             Interlocked.Decrement(ref _count);
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously removes a vector from the list.
+    /// </summary>
+    public async ValueTask<bool> RemoveAsync(Vector vector, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        ThrowIfDisposed();
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!TryFindVectorById(vector.Id, out var result))
+                return false;
+
+            // Step 1: Log operation to WAL (WAL is fsynced in LogOperationAsync)
+            long lsn = await _wal.LogOperationAsync(WALOperationType.Remove, vector.Id, s_tombStoneBytes, result.IndexPosition, -1, cancellationToken).ConfigureAwait(false);
+
+            // Step 2: Mark as tombstone in data file
+            await WriteTombstoneAsync(result.IndexPosition, cancellationToken).ConfigureAwait(false);
+
+            // Step 3: Record operation (may trigger checkpoint based on policy)
+            await _checkpointManager.RecordOperationAsync(lsn, cancellationToken).ConfigureAwait(false);
+
+            // Decrement count atomically
+            Interlocked.Decrement(ref _count);
+            return true;
+        }
+        finally
+        {
+            _asyncLock.Release();
         }
     }
 
@@ -352,6 +507,64 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             _checkpointManager.RecordOperation(lsn);
 
             return true;
+        }
+    }
+
+    /// <summary>
+    /// Asynchronously updates a vector in the list.
+    /// </summary>
+    public async ValueTask<bool> UpdateAsync(Vector vector, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vector);
+        ThrowIfDisposed();
+
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Find the vector using unified search method
+            if (!TryFindVectorById(vector.Id, out var result))
+                return false;
+
+            byte[] newData = vector.ToBinary();
+            long newDataPosition;
+
+            if (newData.Length <= result.Length)
+            {
+                // Reuse existing space
+                newDataPosition = result.DataOffset;
+            }
+            else
+            {
+                // Need more space - append at end of data
+                newDataPosition = _nextDataPosition;
+
+                // Check if we have enough capacity
+                if (newDataPosition + newData.Length > _dataFile.Capacity)
+                {
+                    return false;
+                }
+
+                // Update data position
+                _nextDataPosition += newData.Length;
+            }
+
+            // Step 1: Log operation to WAL (WAL is fsynced in LogOperationAsync)
+            long lsn = await _wal.LogOperationAsync(WALOperationType.Update, vector.Id, newData, result.IndexPosition, newDataPosition, cancellationToken).ConfigureAwait(false);
+
+            // Step 2: Write new data
+            await WriteVectorDataAsync(newDataPosition, newData, cancellationToken).ConfigureAwait(false);
+
+            // Step 3: Update index entry with new offset and length
+            await UpdateIndexEntryAsync(result.IndexPosition, newDataPosition, newData.Length, cancellationToken).ConfigureAwait(false);
+
+            // Step 4: Record operation (may trigger checkpoint based on policy)
+            await _checkpointManager.RecordOperationAsync(lsn, cancellationToken).ConfigureAwait(false);
+
+            return true;
+        }
+        finally
+        {
+            _asyncLock.Release();
         }
     }
 
@@ -615,6 +828,34 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    /// <summary>
+    /// Asynchronously enumerates all vectors in the list.
+    /// </summary>
+    public async IAsyncEnumerator<Vector> GetAsyncEnumerator([EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+
+        // Snapshot approach - read all valid locations under lock
+        List<(long offset, int length)> locations;
+        await _asyncLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            locations = GetAllValidLocations();
+        }
+        finally
+        {
+            _asyncLock.Release();
+        }
+
+        // Yield vectors without holding lock
+        foreach (var (offset, length) in locations)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var data = await ReadDataAtAsync(offset, length, cancellationToken).ConfigureAwait(false);
+            yield return new Vector(data);
+        }
+    }
 
     /// <summary>
     /// Unified vector search result containing both logical index and physical location.
@@ -994,12 +1235,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         var data = ReadDataAt(location.DataOffset, location.Length);
         return new Vector(data);
     }
-    
+
+    private async ValueTask<Vector> ReadVectorAtLocationAsync((long IndexPosition, long DataOffset, int Length) location, CancellationToken cancellationToken)
+    {
+        var data = await ReadDataAtAsync(location.DataOffset, location.Length, cancellationToken).ConfigureAwait(false);
+        return new Vector(data);
+    }
+
     private byte[] ReadDataAt(long offset, int length)
     {
         // RandomAccess is thread-safe for position-independent reads
         var buffer = new byte[length];
         _dataFile.ReadExactly(offset, buffer);
+        return buffer;
+    }
+
+    private async ValueTask<byte[]> ReadDataAtAsync(long offset, int length, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[length];
+        await _dataFile.ReadExactlyAsync(offset, buffer, cancellationToken).ConfigureAwait(false);
         return buffer;
     }
 
@@ -1021,6 +1275,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _dataFile.Write(position, data);
     }
 
+    private ValueTask WriteVectorDataAsync(long position, byte[] data, CancellationToken cancellationToken)
+    {
+        return _dataFile.WriteAsync(position, data, cancellationToken);
+    }
+
     private void WriteIndexEntry(long position, Guid id, long dataOffset, int dataLength)
     {
         Span<byte> entry = stackalloc byte[s_indexEntryByteLength];
@@ -1037,9 +1296,30 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
         _indexFile.Write(position, entry);
     }
 
+    private async ValueTask WriteIndexEntryAsync(long position, Guid id, long dataOffset, int dataLength, CancellationToken cancellationToken)
+    {
+        var entry = new byte[s_indexEntryByteLength];
+
+        if (!id.TryWriteBytes(entry.AsSpan(0, s_idBytesLength)))
+            throw new InvalidOperationException("Failed to write ID to bytes");
+
+        if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength), dataOffset))
+            throw new InvalidOperationException("Failed to write offset to bytes");
+
+        if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength + s_offsetBytesLength), dataLength))
+            throw new InvalidOperationException("Failed to write length to bytes");
+
+        await _indexFile.WriteAsync(position, entry, cancellationToken).ConfigureAwait(false);
+    }
+
     private void WriteTombstone(long indexPosition)
     {
         _indexFile.Write(indexPosition, s_tombStoneBytes);
+    }
+
+    private ValueTask WriteTombstoneAsync(long indexPosition, CancellationToken cancellationToken)
+    {
+        return _indexFile.WriteAsync(indexPosition, s_tombStoneBytes, cancellationToken);
     }
 
     private void UpdateIndexEntry(long position, long newDataOffset, int newDataLength)
@@ -1053,6 +1333,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>
             throw new InvalidOperationException("Failed to write length to bytes");
 
         _indexFile.Write(position + s_idBytesLength, buffer);
+    }
+
+    private async ValueTask UpdateIndexEntryAsync(long position, long newDataOffset, int newDataLength, CancellationToken cancellationToken)
+    {
+        var buffer = new byte[s_offsetBytesLength + s_lengthBytesLength];
+
+        if (!BitConverter.TryWriteBytes(buffer.AsSpan(0, s_offsetBytesLength), newDataOffset))
+            throw new InvalidOperationException("Failed to write offset to bytes");
+
+        if (!BitConverter.TryWriteBytes(buffer.AsSpan(s_offsetBytesLength), newDataLength))
+            throw new InvalidOperationException("Failed to write length to bytes");
+
+        await _indexFile.WriteAsync(position + s_idBytesLength, buffer, cancellationToken).ConfigureAwait(false);
     }
     
     private List<(long offset, int length)> GetAllValidLocations()

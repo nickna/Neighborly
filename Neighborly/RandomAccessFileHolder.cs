@@ -122,6 +122,25 @@ internal class RandomAccessFileHolder : IDisposable
     }
 
     /// <summary>
+    /// Asynchronously reads exactly the requested number of bytes at the specified position.
+    /// Throws if fewer bytes are available.
+    /// </summary>
+    public async ValueTask ReadExactlyAsync(long offset, Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+        if (_handle == null)
+            throw new ObjectDisposedException(nameof(RandomAccessFileHolder));
+
+        int totalRead = 0;
+        while (totalRead < buffer.Length)
+        {
+            int read = await RandomAccess.ReadAsync(_handle, buffer[totalRead..], offset + totalRead, cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+                throw new EndOfStreamException($"Unable to read {buffer.Length} bytes at offset {offset}");
+            totalRead += read;
+        }
+    }
+
+    /// <summary>
     /// Gets the current length of the file.
     /// </summary>
     public long GetLength()
@@ -149,6 +168,17 @@ internal class RandomAccessFileHolder : IDisposable
         if (_handle == null)
             throw new ObjectDisposedException(nameof(RandomAccessFileHolder));
         RandomAccess.FlushToDisk(_handle);
+    }
+
+    /// <summary>
+    /// Asynchronously flushes all file buffers to disk, ensuring data durability.
+    /// Note: RandomAccess.FlushToDisk is synchronous, so this offloads to the thread pool.
+    /// </summary>
+    public ValueTask FlushToDiskAsync(CancellationToken cancellationToken = default)
+    {
+        if (_handle == null)
+            throw new ObjectDisposedException(nameof(RandomAccessFileHolder));
+        return new ValueTask(Task.Run(() => RandomAccess.FlushToDisk(_handle), cancellationToken));
     }
 
     /// <summary>
