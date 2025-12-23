@@ -279,4 +279,37 @@ public static class TestConstants
         /// <summary>Small iteration limit (3).</summary>
         public const int SmallIterationLimit = 3;
     }
+
+    /// <summary>
+    /// Enterprise-scale test configuration.
+    /// </summary>
+    public static class Enterprise
+    {
+        /// <summary>Read:Write ratio for realistic workload (1000:1).</summary>
+        public const int ReadWriteRatio = 1000;
+
+        /// <summary>Number of vectors for large dataset tests (10000).</summary>
+        public const int LargeDatasetSize = 10000;
+
+        /// <summary>Duration in milliseconds for sustained load tests (30000ms = 30 seconds).</summary>
+        public const int SustainedLoadDurationMs = 30000;
+
+        /// <summary>Maximum performance degradation percentage allowed (20%).</summary>
+        public const double MaxPerformanceDegradationPercent = 20.0;
+
+        /// <summary>Number of threads for high read load (16).</summary>
+        public const int HighReadLoadThreads = 16;
+
+        /// <summary>Number of concurrent searches for save-while-searching test (8).</summary>
+        public const int ConcurrentSearchThreads = 8;
+
+        /// <summary>Number of dispose/recreate cycles for resource leak test (100).</summary>
+        public const int DisposeRecreateCycles = 100;
+
+        /// <summary>Maximum memory growth percentage allowed for leak detection (10%).</summary>
+        public const double MaxMemoryGrowthPercent = 10.0;
+
+        /// <summary>Number of orphaned temp files to create for cleanup test (5).</summary>
+        public const int OrphanedTempFileCount = 5;
+    }
 }
