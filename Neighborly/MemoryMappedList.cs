@@ -281,8 +281,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
 
             if (!entry.Id.Equals(s_tombStone))
             {
-                byte[] bytes = ReadDataAt(entry.DataOffset, entry.Length);
-                array[arrayIndex++] = new Vector(bytes);
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(entry.Length);
+                try
+                {
+                    ReadDataIntoSpan(entry.DataOffset, buffer.AsSpan(0, entry.Length));
+                    array[arrayIndex++] = new Vector(buffer.AsSpan(0, entry.Length));
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
             }
 
             position += s_indexEntryByteLength;
@@ -634,17 +642,25 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
 
                 if (!entry.Id.Equals(s_tombStone))
                 {
-                    // Read data from old position
-                    byte[] data = ReadDataAt(entry.DataOffset, entry.Length);
+                    // Read data from old position using pooled buffer
+                    byte[] buffer = ArrayPool<byte>.Shared.Rent(entry.Length);
+                    try
+                    {
+                        ReadDataIntoSpan(entry.DataOffset, buffer.AsSpan(0, entry.Length));
 
-                    // Write data to new position
-                    WriteVectorData(newDataPosition, data);
+                        // Write data to new position
+                        _dataFile.Write(newDataPosition, buffer.AsSpan(0, entry.Length));
 
-                    // Write updated index entry at new position
-                    WriteIndexEntry(newIndexPosition * s_indexEntryByteLength, entry.Id, newDataPosition, entry.Length);
+                        // Write updated index entry at new position
+                        WriteIndexEntry(newIndexPosition * s_indexEntryByteLength, entry.Id, newDataPosition, entry.Length);
 
-                    newIndexPosition++;
-                    newDataPosition += entry.Length;
+                        newIndexPosition++;
+                        newDataPosition += entry.Length;
+                    }
+                    finally
+                    {
+                        ArrayPool<byte>.Shared.Return(buffer);
+                    }
                 }
 
                 readPosition += s_indexEntryByteLength;
@@ -822,8 +838,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         // Yield vectors without holding lock
         foreach (var (offset, length) in locations)
         {
-            var data = ReadDataAt(offset, length);
-            yield return new Vector(data);
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(length);
+            try
+            {
+                ReadDataIntoSpan(offset, buffer.AsSpan(0, length));
+                yield return new Vector(buffer.AsSpan(0, length));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
     }
 
@@ -852,8 +876,16 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         foreach (var (offset, length) in locations)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var data = await ReadDataAtAsync(offset, length, cancellationToken).ConfigureAwait(false);
-            yield return new Vector(data);
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(length);
+            try
+            {
+                await ReadDataIntoMemoryAsync(offset, buffer.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
+                yield return new Vector(buffer.AsSpan(0, length));
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
     }
 
@@ -1232,29 +1264,40 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
     
     private Vector ReadVectorAtLocation((long IndexPosition, long DataOffset, int Length) location)
     {
-        var data = ReadDataAt(location.DataOffset, location.Length);
-        return new Vector(data);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(location.Length);
+        try
+        {
+            ReadDataIntoSpan(location.DataOffset, buffer.AsSpan(0, location.Length));
+            return new Vector(buffer.AsSpan(0, location.Length));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     private async ValueTask<Vector> ReadVectorAtLocationAsync((long IndexPosition, long DataOffset, int Length) location, CancellationToken cancellationToken)
     {
-        var data = await ReadDataAtAsync(location.DataOffset, location.Length, cancellationToken).ConfigureAwait(false);
-        return new Vector(data);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(location.Length);
+        try
+        {
+            await ReadDataIntoMemoryAsync(location.DataOffset, buffer.AsMemory(0, location.Length), cancellationToken).ConfigureAwait(false);
+            return new Vector(buffer.AsSpan(0, location.Length));
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
-    private byte[] ReadDataAt(long offset, int length)
+    private void ReadDataIntoSpan(long offset, Span<byte> buffer)
     {
-        // RandomAccess is thread-safe for position-independent reads
-        var buffer = new byte[length];
         _dataFile.ReadExactly(offset, buffer);
-        return buffer;
     }
 
-    private async ValueTask<byte[]> ReadDataAtAsync(long offset, int length, CancellationToken cancellationToken)
+    private ValueTask ReadDataIntoMemoryAsync(long offset, Memory<byte> buffer, CancellationToken cancellationToken)
     {
-        var buffer = new byte[length];
-        await _dataFile.ReadExactlyAsync(offset, buffer, cancellationToken).ConfigureAwait(false);
-        return buffer;
+        return _dataFile.ReadExactlyAsync(offset, buffer, cancellationToken);
     }
 
     private (Guid Id, long DataOffset, int Length) ReadIndexEntryAt(long position)
@@ -1298,18 +1341,24 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
 
     private async ValueTask WriteIndexEntryAsync(long position, Guid id, long dataOffset, int dataLength, CancellationToken cancellationToken)
     {
-        var entry = new byte[s_indexEntryByteLength];
+        byte[] entry = ArrayPool<byte>.Shared.Rent(s_indexEntryByteLength);
+        try
+        {
+            if (!id.TryWriteBytes(entry.AsSpan(0, s_idBytesLength)))
+                throw new InvalidOperationException("Failed to write ID to bytes");
 
-        if (!id.TryWriteBytes(entry.AsSpan(0, s_idBytesLength)))
-            throw new InvalidOperationException("Failed to write ID to bytes");
+            if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength), dataOffset))
+                throw new InvalidOperationException("Failed to write offset to bytes");
 
-        if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength), dataOffset))
-            throw new InvalidOperationException("Failed to write offset to bytes");
+            if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength + s_offsetBytesLength), dataLength))
+                throw new InvalidOperationException("Failed to write length to bytes");
 
-        if (!BitConverter.TryWriteBytes(entry.AsSpan(s_idBytesLength + s_offsetBytesLength), dataLength))
-            throw new InvalidOperationException("Failed to write length to bytes");
-
-        await _indexFile.WriteAsync(position, entry, cancellationToken).ConfigureAwait(false);
+            await _indexFile.WriteAsync(position, entry.AsMemory(0, s_indexEntryByteLength), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(entry);
+        }
     }
 
     private void WriteTombstone(long indexPosition)
@@ -1337,15 +1386,22 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
 
     private async ValueTask UpdateIndexEntryAsync(long position, long newDataOffset, int newDataLength, CancellationToken cancellationToken)
     {
-        var buffer = new byte[s_offsetBytesLength + s_lengthBytesLength];
+        const int updateBufferSize = s_offsetBytesLength + s_lengthBytesLength;
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(updateBufferSize);
+        try
+        {
+            if (!BitConverter.TryWriteBytes(buffer.AsSpan(0, s_offsetBytesLength), newDataOffset))
+                throw new InvalidOperationException("Failed to write offset to bytes");
 
-        if (!BitConverter.TryWriteBytes(buffer.AsSpan(0, s_offsetBytesLength), newDataOffset))
-            throw new InvalidOperationException("Failed to write offset to bytes");
+            if (!BitConverter.TryWriteBytes(buffer.AsSpan(s_offsetBytesLength), newDataLength))
+                throw new InvalidOperationException("Failed to write length to bytes");
 
-        if (!BitConverter.TryWriteBytes(buffer.AsSpan(s_offsetBytesLength), newDataLength))
-            throw new InvalidOperationException("Failed to write length to bytes");
-
-        await _indexFile.WriteAsync(position + s_idBytesLength, buffer, cancellationToken).ConfigureAwait(false);
+            await _indexFile.WriteAsync(position + s_idBytesLength, buffer.AsMemory(0, updateBufferSize), cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
     
     private List<(long offset, int length)> GetAllValidLocations()
