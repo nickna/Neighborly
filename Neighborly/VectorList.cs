@@ -265,4 +265,62 @@ public class VectorList : IList<Vector>, IDisposable
             Modified?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    #region Transaction Support (Internal)
+
+    /// <summary>
+    /// Adds a vector without firing the Modified event.
+    /// Used by transactions to batch operations.
+    /// </summary>
+    internal void AddWithoutEvent(Vector item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        if (_vectors.TryAdd(item.Id, item))
+        {
+            InvalidateCache();
+        }
+    }
+
+    /// <summary>
+    /// Updates a vector without firing the Modified event.
+    /// Used by transactions to batch operations.
+    /// </summary>
+    internal bool UpdateWithoutEvent(Guid id, Vector vector)
+    {
+        while (_vectors.TryGetValue(id, out Vector? existingVector))
+        {
+            var updatedVector = new Vector(vector.Values, vector.OriginalText);
+            updatedVector.Id = id;
+
+            if (_vectors.TryUpdate(id, updatedVector, existingVector))
+            {
+                InvalidateCache();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Removes a vector by ID without firing the Modified event.
+    /// Used by transactions to batch operations.
+    /// </summary>
+    internal void RemoveByIdWithoutEvent(Guid guid)
+    {
+        if (_vectors.TryRemove(guid, out _))
+        {
+            InvalidateCache();
+        }
+    }
+
+    /// <summary>
+    /// Raises the Modified event.
+    /// Used by transactions to fire a single event after all operations.
+    /// </summary>
+    internal void RaiseModifiedEvent()
+    {
+        Modified?.Invoke(this, EventArgs.Empty);
+    }
+
+    #endregion
 }

@@ -109,6 +109,90 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
             _rwLock.ExitReadLock();
         }
     }
+
+    #region Transaction Support
+
+    /// <summary>
+    /// Begins a new transaction for batched operations.
+    /// </summary>
+    /// <returns>A new transaction instance.</returns>
+    /// <remarks>
+    /// Operations within a transaction are buffered and applied atomically on commit.
+    /// The database write lock is only acquired during commit, allowing concurrent reads.
+    /// </remarks>
+    public IVectorTransaction BeginTransaction()
+    {
+        ObjectDisposedException.ThrowIf(_disposedValue, this);
+        return new VectorTransaction(this, _logger);
+    }
+
+    /// <summary>
+    /// Commits a transaction's operations atomically.
+    /// Internal method called by VectorTransaction.Commit().
+    /// </summary>
+    internal void CommitTransaction(
+        IReadOnlyList<Vector> adds,
+        IReadOnlyList<KeyValuePair<Guid, Vector>> updates,
+        IReadOnlyList<Guid> deletes,
+        VectorTransaction transaction)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+
+        using var activity = StartActivity(
+            name: "CommitTransaction",
+            tags:
+            [
+                new("transaction.id", transaction.TransactionId.ToString()),
+                new("transaction.adds", adds.Count),
+                new("transaction.updates", updates.Count),
+                new("transaction.deletes", deletes.Count)
+            ]);
+
+        _rwLock.EnterWriteLock();
+        try
+        {
+            // Apply deletes first (to handle update-then-delete correctly)
+            foreach (var id in deletes)
+            {
+                _vectors.RemoveByIdWithoutEvent(id);
+            }
+
+            // Apply updates
+            foreach (var update in updates)
+            {
+                _vectors.UpdateWithoutEvent(update.Key, update.Value);
+            }
+
+            // Apply adds last
+            foreach (var vector in adds)
+            {
+                _vectors.AddWithoutEvent(vector);
+            }
+
+            // Fire single Modified event
+            _vectors.RaiseModifiedEvent();
+
+            activity?.SetStatus(ActivityStatusCode.Ok);
+            _logger.LogInformation(
+                "Transaction {TransactionId} committed: {Adds} adds, {Updates} updates, {Deletes} deletes.",
+                transaction.TransactionId, adds.Count, updates.Count, deletes.Count);
+        }
+        catch (Exception ex)
+        {
+            activity?.SetStatus(ActivityStatusCode.Error, ex.Message);
+            _logger.LogError(ex, "Transaction {TransactionId} commit failed.", transaction.TransactionId);
+            throw new TransactionException(
+                "Transaction commit failed unexpectedly.",
+                transaction.TransactionId, ex);
+        }
+        finally
+        {
+            _rwLock.ExitWriteLock();
+        }
+    }
+
+    #endregion
+
     private Search.SearchService _searchService = null!;
     private ReaderWriterLockSlim _rwLock = new();
 
