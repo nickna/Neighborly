@@ -187,6 +187,17 @@ public static class MetadataFilterEvaluator
     /// </summary>
     private static bool EvaluateExpression(object metadataValue, FilterValue filterValue)
     {
+        // Handle null filter value early - avoids null checks in every helper method
+        if (filterValue.Value is null)
+        {
+            return filterValue.Operator switch
+            {
+                FilterOperator.Equals => metadataValue is null,
+                FilterOperator.NotEquals => metadataValue is not null,
+                _ => false  // Comparison/contains/regex with null is undefined
+            };
+        }
+
         try
         {
             return filterValue.Operator switch
