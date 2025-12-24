@@ -47,9 +47,9 @@ namespace Neighborly.API
             foreach (var expression in protoFilter.Expressions)
             {
                 var filterValue = ConvertToFilterValue(expression.Value);
-                if (filterValue != null)
+                if (filterValue.HasValue)
                 {
-                    domainFilter.Filters[expression.Key] = filterValue;
+                    domainFilter.Filters[expression.Key] = filterValue.Value;
                 }
             }
 

@@ -1,12 +1,44 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Neighborly;
 
 public static class MetadataFilterEvaluator
 {
+    /// <summary>
+    /// Thread-safe cache for compiled regex patterns.
+    /// Provides significant performance improvement for repeated regex evaluations.
+    /// </summary>
+    private static readonly ConcurrentDictionary<string, Regex> s_regexCache = new();
+
+    /// <summary>
+    /// Maximum number of cached regex patterns to prevent unbounded memory growth.
+    /// </summary>
+    private const int MaxCachedPatterns = 1000;
+
+    /// <summary>
+    /// Frozen lookup for legacy field names with case-insensitive matching.
+    /// Maps various field name variants to their canonical form.
+    /// </summary>
+    private static readonly FrozenDictionary<string, string> s_legacyFieldMappings =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["tags"] = "tags",
+            ["tag"] = "tags",
+            ["userid"] = "userid",
+            ["user_id"] = "userid",
+            ["orgid"] = "orgid",
+            ["org_id"] = "orgid",
+            ["priority"] = "priority",
+            ["originaltext"] = "originaltext",
+            ["original_text"] = "originaltext",
+            ["text"] = "originaltext",
+            ["id"] = "id"
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Creates a predicate function from a MetadataFilter that can be used to filter vectors.
     /// </summary>
@@ -15,14 +47,48 @@ public static class MetadataFilterEvaluator
     public static Func<Vector, bool> CreatePredicate(MetadataFilter? filter)
     {
         if (filter == null || !filter.HasFilters)
-            return _ => true; // No filter means accept all
-        
-        var expressions = filter.Filters.Select(kvp => 
-            CreateExpressionPredicate(kvp.Key, kvp.Value)).ToArray();
-        
+            return static _ => true; // No filter means accept all - static lambda avoids allocation
+
+        // Pre-allocate array to avoid LINQ allocation
+        var filters = filter.Filters;
+        var expressions = new Func<Vector, bool>[filters.Count];
+        int index = 0;
+        foreach (var kvp in filters)
+        {
+            expressions[index++] = CreateExpressionPredicate(kvp.Key, kvp.Value);
+        }
+
         return filter.Logic == FilterLogic.And
-            ? vector => expressions.All(predicate => predicate(vector))
-            : vector => expressions.Any(predicate => predicate(vector));
+            ? vector => EvaluateAll(expressions, vector)
+            : vector => EvaluateAny(expressions, vector);
+    }
+
+    /// <summary>
+    /// Evaluates all predicates against a vector (AND logic).
+    /// Uses foreach loop to avoid LINQ All() allocation.
+    /// </summary>
+    private static bool EvaluateAll(Func<Vector, bool>[] predicates, Vector vector)
+    {
+        foreach (var predicate in predicates)
+        {
+            if (!predicate(vector))
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Evaluates any predicate against a vector (OR logic).
+    /// Uses foreach loop to avoid LINQ Any() allocation.
+    /// </summary>
+    private static bool EvaluateAny(Func<Vector, bool>[] predicates, Vector vector)
+    {
+        foreach (var predicate in predicates)
+        {
+            if (predicate(vector))
+                return true;
+        }
+        return false;
     }
     
     /// <summary>
@@ -56,33 +122,26 @@ public static class MetadataFilterEvaluator
     
     /// <summary>
     /// Checks if a key refers to a legacy field (Tags, Attributes, etc.) rather than metadata.
+    /// Uses FrozenDictionary for O(1) case-insensitive lookup without string allocation.
     /// </summary>
-    private static bool IsLegacyField(string key)
-    {
-        return key.ToLowerInvariant() switch
-        {
-            "tags" or "tag" => true,
-            "userid" or "user_id" => true,
-            "orgid" or "org_id" => true,
-            "priority" => true,
-            "originaltext" or "original_text" or "text" => true,
-            "id" => true,
-            _ => false
-        };
-    }
+    private static bool IsLegacyField(string key) => s_legacyFieldMappings.ContainsKey(key);
     
     /// <summary>
     /// Evaluates filter expressions against legacy Vector fields.
+    /// Uses FrozenDictionary for normalized field name lookup without string allocation.
     /// </summary>
     private static bool EvaluateLegacyField(Vector vector, string key, FilterValue filterValue)
     {
-        return key.ToLowerInvariant() switch
+        if (!s_legacyFieldMappings.TryGetValue(key, out var normalizedKey))
+            return false;
+
+        return normalizedKey switch
         {
-            "tags" or "tag" => EvaluateTagsField(vector.Tags, filterValue),
-            "userid" or "user_id" => EvaluateExpression(vector.Attributes.UserId, filterValue),
-            "orgid" or "org_id" => EvaluateExpression(vector.Attributes.OrgId, filterValue),
+            "tags" => EvaluateTagsField(vector.Tags, filterValue),
+            "userid" => EvaluateExpression(vector.Attributes.UserId, filterValue),
+            "orgid" => EvaluateExpression(vector.Attributes.OrgId, filterValue),
             "priority" => EvaluateExpression(vector.Attributes.Priority, filterValue),
-            "originaltext" or "original_text" or "text" => EvaluateExpression(vector.OriginalText, filterValue),
+            "originaltext" => EvaluateExpression(vector.OriginalText, filterValue),
             "id" => EvaluateExpression(vector.Id.ToString(), filterValue),
             _ => false
         };
@@ -148,9 +207,21 @@ public static class MetadataFilterEvaluator
                 _ => false
             };
         }
-        catch
+        catch (InvalidCastException ex)
         {
-            // If evaluation fails (e.g., type conversion), return false
+            Logging.Logger.Debug(ex, "Type conversion failed during filter evaluation. MetadataType: {MetadataType}, FilterValueType: {FilterType}",
+                metadataValue?.GetType().Name ?? "null",
+                filterValue.Value?.GetType().Name ?? "null");
+            return false;
+        }
+        catch (FormatException ex)
+        {
+            Logging.Logger.Debug(ex, "Format conversion failed during filter evaluation");
+            return false;
+        }
+        catch (OverflowException ex)
+        {
+            Logging.Logger.Debug(ex, "Numeric overflow during filter evaluation");
             return false;
         }
     }
@@ -263,19 +334,34 @@ public static class MetadataFilterEvaluator
     
     private static bool MatchesRegex(object text, object pattern)
     {
-        if (text is string textStr && pattern is string patternStr)
+        if (text is not string textStr || pattern is not string patternStr)
+            return false;
+
+        try
         {
-            try
+            // Get or create cached compiled regex
+            var regex = s_regexCache.GetOrAdd(patternStr, p =>
             {
-                return Regex.IsMatch(textStr, patternStr, RegexOptions.IgnoreCase);
-            }
-            catch
-            {
-                return false;
-            }
+                // Prevent unbounded cache growth
+                if (s_regexCache.Count >= MaxCachedPatterns)
+                {
+                    s_regexCache.Clear();
+                }
+                return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1));
+            });
+
+            return regex.IsMatch(textStr);
         }
-        
-        return false;
+        catch (RegexMatchTimeoutException ex)
+        {
+            Logging.Logger.Warning(ex, "Regex match timeout for pattern: {Pattern}", patternStr);
+            return false;
+        }
+        catch (ArgumentException ex)
+        {
+            Logging.Logger.Warning(ex, "Invalid regex pattern: {Pattern}", patternStr);
+            return false;
+        }
     }
     
     private static bool StartsWith(object text, object prefix)

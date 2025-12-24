@@ -52,7 +52,7 @@ Run the PowerShell setup script to configure development environment:
 ### Key Subsystems
 
 - **Distance Calculators**: Multiple algorithms (Euclidean, Cosine, Manhattan, Chebyshev, Minkowski) in `Neighborly/Distance/`
-- **ETL System**: Data import/export for CSV, JSON, Parquet, HDF5 formats in `Neighborly/ETL/`
+- **ETL System**: Data import/export for CSV, JSON, JSONZ (compressed), and Parquet formats in `Neighborly/ETL/`
 - **Search Algorithms**: KD-Tree, Ball Tree, LSH, and Linear Search in `Neighborly/Search/`
 - **Compression**: FpZip compression with native libraries for multiple platforms
 - **Memory Management**: Memory-mapped files for efficient large dataset handling
@@ -62,9 +62,11 @@ Run the PowerShell setup script to configure development environment:
 - `Neighborly/`: Core vector database library
 - `API.gRPC/`: gRPC API server with Docker support
 - `Tests/`: NUnit test suite with integration and unit tests
+- `Benchmarks/`: Performance benchmarks
 - `Adapters.SemanticKernel/`: Semantic Kernel integration adapter
-- `samples/`: Example implementations including OTEL observability
+- `samples/`: Example implementations (OTEL observability, SemanticKernel, BatchOptimization, CacheOptimization)
 - `Neighborly.Python/`: Python bindings (experimental)
+- `docs/`: Documentation files
 
 ### Thread Safety and Concurrency
 
