@@ -20,7 +20,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
     private readonly RandomAccessFileHolder _dataFile;
     private readonly WriteAheadLog _wal;
     private readonly CheckpointManager _checkpointManager;
-    private static readonly MemoryPressureMonitor s_memoryMonitor = new();
 
     // Single lock for all synchronization - uses .NET 9+ Lock class for efficiency
     private readonly Lock _lock = new();
@@ -108,9 +107,6 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
 
         // Initialize append metadata after recovery
         InitializeAppendMetadata();
-
-        // Register with memory pressure monitor
-        s_memoryMonitor.RegisterList(this);
     }
 
 
@@ -679,7 +675,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         long fragmentation = CalculateFragmentation();
         long totalDataSize = GetTotalDataSize();
 
-        return SSDOptimizer.ShouldDefragmentForSSD(fragmentation, totalDataSize);
+        // Only defragment if fragmentation is high (>75%) and data size is significant
+        return totalDataSize >= 128 * 1024 && fragmentation > 75;
     }
 
     /// <summary>

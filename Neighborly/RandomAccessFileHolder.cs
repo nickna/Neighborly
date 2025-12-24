@@ -44,8 +44,6 @@ internal class RandomAccessFileHolder : IDisposable
                 FileOptions.RandomAccess,
                 _capacity);
 
-            // Apply SSD optimizations
-            SSDOptimizer.OptimizeFileForSSD(_fileName);
         }
         catch (IOException ex)
         {

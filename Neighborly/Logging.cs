@@ -66,13 +66,10 @@ namespace Neighborly
             }
         }
 
-        public static ILoggerFactory LoggerFactory
-        {
-            get
-            {
-                return new LoggerFactory().AddSerilog(Logger);
-            }
-        }
+        private static readonly Lazy<ILoggerFactory> _loggerFactory =
+            new(() => new LoggerFactory().AddSerilog(Logger));
+
+        public static ILoggerFactory LoggerFactory => _loggerFactory.Value;
 
     }
 
