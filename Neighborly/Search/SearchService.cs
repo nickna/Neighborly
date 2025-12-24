@@ -4,6 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Neighborly.Distance;
+using Neighborly.Search.Configuration;
+using Neighborly.Search.Filtering;
 
 namespace Neighborly.Search
 {
@@ -16,9 +18,15 @@ namespace Neighborly.Search
         private const int s_numberOfStorableIndexes = 3;
 
         protected readonly VectorList _vectors;
+        private readonly SearchServiceConfiguration _configuration;
+        private readonly MetadataFilteringService _filteringService;
         private Search.KDTree _kdTree;
         private Search.BallTree _ballTree;
         private Search.HNSW _hnsw;
+        private LinearSearch? _linearSearch;
+        private LSHSearch? _lshSearch;
+        private BinaryQuantization? _binaryQuantization;
+        private ProductQuantization? _productQuantization;
         private EmbeddingGenerator embeddingGenerator = EmbeddingGenerator.Instance;
 
         // Immutable tree roots for lock-free reads
@@ -26,25 +34,29 @@ namespace Neighborly.Search
         private volatile ImmutableBallTree? _immutableBallTree;
 
         /// <summary>
-        /// Gets or sets whether to use immutable index structures for lock-free reads.
-        /// When enabled, search operations on KDTree and BallTree do not require locks.
+        /// Gets the configuration for this SearchService instance.
         /// </summary>
-        public static bool UseImmutableIndexes { get; set; } = false;
+        public SearchServiceConfiguration Configuration => _configuration;
+
         public EmbeddingGenerator EmbeddingGenerator
         {
             get => embeddingGenerator;
             set => embeddingGenerator = value;
         }
 
-        public SearchService(VectorList vectors)
+        public SearchService(VectorList vectors, SearchServiceConfiguration? configuration = null)
         {
             ArgumentNullException.ThrowIfNull(vectors);
 
             _vectors = vectors;
-            _kdTree = new();
+            _configuration = configuration ?? SearchServiceConfiguration.Default;
+            _configuration.Validate();
+
+            _kdTree = new(_configuration.KDTree);
             _ballTree = new();
-            _hnsw = new();
+            _hnsw = new(_configuration.HNSW);
             embeddingGenerator = EmbeddingGenerator.Instance;
+            _filteringService = new MetadataFilteringService(_vectors, Search);
         }
 
         /// <summary>
@@ -61,9 +73,15 @@ namespace Neighborly.Search
 
         public void Clear()
         {
-            _kdTree = new();
+            _kdTree = new(_configuration.KDTree);
             _ballTree = new();
-            _hnsw = new();
+            _hnsw = new(_configuration.HNSW);
+            _linearSearch = null;
+            _lshSearch = null;
+            _binaryQuantization = null;
+            _productQuantization = null;
+            _immutableKdTree = null;
+            _immutableBallTree = null;
         }
 
         internal async Task BuildIndexes(SearchAlgorithm method, CancellationToken cancellationToken = default)
@@ -75,29 +93,21 @@ namespace Neighborly.Search
 
             switch (method)
             {
+                case SearchAlgorithm.KDTree when _configuration.UseImmutableIndexes:
+                    // Build immutable tree and atomically swap the reference
+                    var newImmutableKdTree = await ImmutableKDTree.BuildAsync(_vectors, _configuration.KDTree, cancellationToken).ConfigureAwait(false);
+                    _immutableKdTree = newImmutableKdTree;
+                    break;
                 case SearchAlgorithm.KDTree:
-                    if (UseImmutableIndexes)
-                    {
-                        // Build immutable tree and atomically swap the reference
-                        var newImmutableKdTree = await ImmutableKDTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
-                        _immutableKdTree = newImmutableKdTree;
-                    }
-                    else
-                    {
-                        await _kdTree.Build(_vectors, cancellationToken).ConfigureAwait(false);
-                    }
+                    await _kdTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                    break;
+                case SearchAlgorithm.BallTree when _configuration.UseImmutableIndexes:
+                    // Build immutable tree and atomically swap the reference
+                    var newImmutableBallTree = await ImmutableBallTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
+                    _immutableBallTree = newImmutableBallTree;
                     break;
                 case SearchAlgorithm.BallTree:
-                    if (UseImmutableIndexes)
-                    {
-                        // Build immutable tree and atomically swap the reference
-                        var newImmutableBallTree = await ImmutableBallTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
-                        _immutableBallTree = newImmutableBallTree;
-                    }
-                    else
-                    {
-                        await _ballTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
-                    }
+                    await _ballTree.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
                     break;
                 case SearchAlgorithm.HNSW:
                     await _hnsw.BuildAsync(_vectors, cancellationToken).ConfigureAwait(false);
@@ -190,40 +200,36 @@ namespace Neighborly.Search
             IList<Vector> results;
             switch (method)
             {
+                case SearchAlgorithm.KDTree when _configuration.UseImmutableIndexes && _immutableKdTree is { } kdTree:
+                    results = kdTree.Search(query, k);
+                    break;
                 case SearchAlgorithm.KDTree:
-                    if (UseImmutableIndexes && _immutableKdTree is { } kdTree)
-                    {
-                        results = kdTree.NearestNeighbors(query, k);
-                    }
-                    else
-                    {
-                        results = _kdTree.NearestNeighbors(query, k);
-                    }
+                    results = _kdTree.Search(query, k);
+                    break;
+                case SearchAlgorithm.BallTree when _configuration.UseImmutableIndexes && _immutableBallTree is { } ballTree:
+                    results = ballTree.Search(query, k);
                     break;
                 case SearchAlgorithm.BallTree:
-                    if (UseImmutableIndexes && _immutableBallTree is { } ballTree)
-                    {
-                        results = ballTree.Search(query, k);
-                    }
-                    else
-                    {
-                        results = _ballTree.Search(query, k);
-                    }
+                    results = _ballTree.Search(query, k);
                     break;
                 case SearchAlgorithm.Linear:
-                    results = LinearSearch.Search(_vectors, query, k);
+                    _linearSearch ??= new LinearSearch(_vectors);
+                    results = _linearSearch.Search(query, k);
                     break;
                 case SearchAlgorithm.LSH:
-                    results = LSHSearch.Search(_vectors, query, k);
+                    _lshSearch ??= new LSHSearch(_vectors);
+                    results = _lshSearch.Search(query, k);
                     break;
                 case SearchAlgorithm.HNSW:
                     results = _hnsw.Search(query, k);
                     break;
                 case SearchAlgorithm.BinaryQuantization:
-                    results = BinaryQuantization.Search(_vectors, query, k);
+                    _binaryQuantization ??= new BinaryQuantization(_vectors);
+                    results = _binaryQuantization.Search(query, k);
                     break;
                 case SearchAlgorithm.ProductQuantization:
-                    results = ProductQuantization.Search(_vectors, query, k);
+                    _productQuantization ??= new ProductQuantization(_vectors);
+                    results = _productQuantization.Search(query, k);
                     break;
                 default:
                     return [];  // Other SearchMethods do not support search
@@ -301,15 +307,11 @@ namespace Neighborly.Search
                 case SearchAlgorithm.Range:
                     results = LinearRangeSearch.Search(_vectors, query, radius, distanceCalculator);
                     break;
+                case SearchAlgorithm.KDTree when _configuration.UseImmutableIndexes && _immutableKdTree is { } kdTree:
+                    results = kdTree.RangeNeighbors(query, radius, distanceCalculator);
+                    break;
                 case SearchAlgorithm.KDTree:
-                    if (UseImmutableIndexes && _immutableKdTree is { } kdTree)
-                    {
-                        results = kdTree.RangeNeighbors(query, radius, distanceCalculator);
-                    }
-                    else
-                    {
-                        results = _kdTree.RangeNeighbors(query, radius, distanceCalculator);
-                    }
+                    results = _kdTree.RangeNeighbors(query, radius, distanceCalculator);
                     break;
                 default:
                     throw new NotSupportedException($"Range search is not yet supported for {method} algorithm");
@@ -336,7 +338,7 @@ namespace Neighborly.Search
                 switch (method)
                 {
                     case SearchAlgorithm.KDTree:
-                        _kdTree.Load(reader, _vectors);
+                        await _kdTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
                         break;
                     case SearchAlgorithm.BallTree:
                         await _ballTree.LoadAsync(reader, _vectors, cancellationToken).ConfigureAwait(false);
@@ -396,7 +398,7 @@ namespace Neighborly.Search
             switch (method)
             {
                 case SearchAlgorithm.KDTree:
-                    _kdTree.Save(writer, _vectors);
+                    await _kdTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
                     break;
                 case SearchAlgorithm.BallTree:
                     await _ballTree.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
@@ -482,8 +484,8 @@ namespace Neighborly.Search
             // Create filter predicate
             var filterPredicate = MetadataFilterEvaluator.CreatePredicate(metadataFilter);
 
-            // Apply filtering strategy based on algorithm
-            return SearchWithMetadataFilter(query, k, method, similarityThreshold, filterPredicate);
+            // Delegate to filtering service
+            return _filteringService.SearchWithFilter(query, k, method, similarityThreshold, filterPredicate);
         }
 
         /// <summary>
@@ -538,226 +540,9 @@ namespace Neighborly.Search
             // Create filter predicate
             var filterPredicate = MetadataFilterEvaluator.CreatePredicate(metadataFilter);
 
-            // Apply filtering strategy for range search
-            return RangeSearchWithMetadataFilter(query, radius, method, distanceCalculator, filterPredicate);
-        }
-
-        #endregion
-
-        #region Private Metadata Filtering Implementation
-
-        /// <summary>
-        /// Performs search with metadata filtering using the optimal strategy for the given algorithm.
-        /// </summary>
-        private IList<Vector> SearchWithMetadataFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
-        {
-            switch (method)
-            {
-                case SearchAlgorithm.Linear:
-                    // For linear search, apply filter during iteration for optimal performance
-                    return LinearSearchWithFilter(query, k, filterPredicate);
-
-                case SearchAlgorithm.KDTree:
-                case SearchAlgorithm.BallTree:
-                    // For tree-based algorithms, we need to potentially expand search to find enough filtered results
-                    return TreeSearchWithFilter(query, k, method, similarityThreshold, filterPredicate);
-
-                case SearchAlgorithm.LSH:
-                case SearchAlgorithm.HNSW:
-                case SearchAlgorithm.BinaryQuantization:
-                case SearchAlgorithm.ProductQuantization:
-                    // For approximate algorithms, use post-filtering with expanded search
-                    return ApproximateSearchWithFilter(query, k, method, similarityThreshold, filterPredicate);
-
-                default:
-                    throw new NotSupportedException($"Metadata filtering is not supported for algorithm: {method}");
-            }
-        }
-
-        /// <summary>
-        /// Performs range search with metadata filtering.
-        /// </summary>
-        private IList<Vector> RangeSearchWithMetadataFilter(Vector query, float radius, SearchAlgorithm method, IDistanceCalculator? distanceCalculator, Func<Vector, bool> filterPredicate)
-        {
-            // For range search, we typically need to filter during the search process
+            // Delegate to filtering service
             distanceCalculator ??= new EuclideanDistanceCalculator();
-
-            var candidates = new List<Vector>();
-            
-            // Apply filter during candidate collection
-            foreach (var vector in _vectors)
-            {
-                if (!filterPredicate(vector))
-                    continue;
-
-                var distance = distanceCalculator.CalculateDistance(query, vector);
-                if (distance <= radius)
-                {
-                    candidates.Add(vector);
-                }
-            }
-
-            // Sort by distance
-            return candidates.OrderBy(v => distanceCalculator.CalculateDistance(query, v)).ToList();
-        }
-
-        /// <summary>
-        /// Linear search with integrated metadata filtering.
-        /// </summary>
-        private IList<Vector> LinearSearchWithFilter(Vector query, int k, Func<Vector, bool> filterPredicate)
-        {
-            var candidates = new List<(Vector vector, float distance)>();
-
-            foreach (var vector in _vectors)
-            {
-                if (!filterPredicate(vector))
-                    continue;
-
-                var distance = vector.Distance(query);
-                candidates.Add((vector, distance));
-            }
-
-            return candidates
-                .OrderBy(c => c.distance)
-                .Take(k)
-                .Select(c => c.vector)
-                .ToList();
-        }
-
-        /// <summary>
-        /// Tree-based search with metadata filtering using dynamic expansion and selectivity optimization.
-        /// For tree algorithms, we may need to search beyond k to find enough filtered results.
-        /// </summary>
-        private IList<Vector> TreeSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
-        {
-            // Estimate filter selectivity to optimize search strategy
-            var selectivity = EstimateFilterSelectivity(filterPredicate, Math.Min(1000, _vectors.Count));
-            
-            // Dynamic expansion based on estimated selectivity
-            int expandedK = CalculateOptimalExpansion(k, selectivity, _vectors.Count);
-            
-            // Special handling for very low selectivity - use linear search directly
-            if (selectivity < 0.01 && _vectors.Count > 5000)
-            {
-                return LinearSearchWithFilter(query, k, filterPredicate);
-            }
-            
-            var candidates = Search(query, expandedK, method, similarityThreshold);
-            var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
-
-            // Progressive expansion if we need more results
-            int maxAttempts = 3;
-            int attempt = 1;
-            
-            while (filteredResults.Count < k && expandedK < _vectors.Count && attempt < maxAttempts)
-            {
-                // Increase expansion factor progressively
-                int newExpandedK = Math.Min(_vectors.Count, expandedK * 2);
-                if (newExpandedK == expandedK) break; // No more expansion possible
-                
-                candidates = Search(query, newExpandedK, method, similarityThreshold);
-                filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
-                
-                expandedK = newExpandedK;
-                attempt++;
-            }
-
-            // Final fallback to linear search if still insufficient results
-            if (filteredResults.Count < k / 2) // Only if we have very few results
-            {
-                return LinearSearchWithFilter(query, k, filterPredicate);
-            }
-
-            return filteredResults;
-        }
-
-        /// <summary>
-        /// Approximate search algorithms with metadata filtering using dynamic expansion.
-        /// </summary>
-        private IList<Vector> ApproximateSearchWithFilter(Vector query, int k, SearchAlgorithm method, float similarityThreshold, Func<Vector, bool> filterPredicate)
-        {
-            // Estimate filter selectivity for approximate algorithms
-            var selectivity = EstimateFilterSelectivity(filterPredicate, Math.Min(500, _vectors.Count));
-            
-            // Conservative expansion for approximate algorithms (they're already approximate)
-            int baseExpansion = (int)(CalculateOptimalExpansion(k, selectivity, _vectors.Count) * 0.7);
-            int expandedK = Math.Max(k * 2, Math.Min(baseExpansion, _vectors.Count));
-            
-            var candidates = Search(query, expandedK, method, similarityThreshold);
-            var filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
-
-            // For approximate algorithms, be more aggressive about fallback due to quality trade-offs
-            if (filteredResults.Count < k * 0.6) // If we have less than 60% of what we need
-            {
-                // Try one more expansion before falling back to linear
-                if (expandedK < _vectors.Count)
-                {
-                    int secondExpansion = Math.Min(_vectors.Count, expandedK * 2);
-                    candidates = Search(query, secondExpansion, method, similarityThreshold);
-                    filteredResults = candidates.Where(filterPredicate).Take(k).ToList();
-                }
-                
-                // Final fallback to linear search if still insufficient
-                if (filteredResults.Count < k * 0.4)
-                {
-                    return LinearSearchWithFilter(query, k, filterPredicate);
-                }
-            }
-
-            return filteredResults;
-        }
-
-        /// <summary>
-        /// Estimates the selectivity of a metadata filter by sampling a subset of vectors.
-        /// </summary>
-        /// <param name="filterPredicate">The filter predicate to test</param>
-        /// <param name="sampleSize">Number of vectors to sample for estimation</param>
-        /// <returns>Estimated selectivity as a ratio between 0 and 1</returns>
-        private double EstimateFilterSelectivity(Func<Vector, bool> filterPredicate, int sampleSize)
-        {
-            if (_vectors.Count == 0) return 0.0;
-            
-            sampleSize = Math.Min(sampleSize, _vectors.Count);
-            int matches = 0;
-            
-            // Use systematic sampling for better representation
-            int step = Math.Max(1, _vectors.Count / sampleSize);
-            int sampledCount = 0;
-            
-            for (int i = 0; i < _vectors.Count && sampledCount < sampleSize; i += step)
-            {
-                if (filterPredicate(_vectors[i]))
-                {
-                    matches++;
-                }
-                sampledCount++;
-            }
-            
-            return sampledCount > 0 ? (double)matches / sampledCount : 0.0;
-        }
-
-        /// <summary>
-        /// Calculates the optimal expansion factor based on filter selectivity.
-        /// </summary>
-        /// <param name="k">Requested number of results</param>
-        /// <param name="selectivity">Estimated filter selectivity (0-1)</param>
-        /// <param name="totalVectors">Total number of vectors in the collection</param>
-        /// <returns>Optimal number of candidates to search</returns>
-        private int CalculateOptimalExpansion(int k, double selectivity, int totalVectors)
-        {
-            if (selectivity <= 0.0) return totalVectors; // No matches expected, search all
-            
-            // Calculate expansion factor based on selectivity with safety margin
-            double safetyMargin = 1.5; // 50% safety margin
-            double requiredExpansion = (k / selectivity) * safetyMargin;
-            
-            // Apply reasonable bounds
-            int minExpansion = k * 2;     // At least 2x expansion
-            int maxExpansion = k * 20;    // At most 20x expansion
-            
-            int expansion = (int)Math.Ceiling(Math.Max(minExpansion, Math.Min(maxExpansion, requiredExpansion)));
-            
-            return Math.Min(expansion, totalVectors);
+            return _filteringService.RangeSearchWithFilter(query, radius, distanceCalculator, filterPredicate);
         }
 
         #endregion

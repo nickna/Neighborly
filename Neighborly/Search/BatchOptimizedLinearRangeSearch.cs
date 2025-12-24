@@ -23,7 +23,7 @@ public class BatchOptimizedLinearRangeSearch
 
         if (vectors.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         distanceCalculator ??= BatchEuclideanDistanceCalculator.Instance;
@@ -75,7 +75,7 @@ public class BatchOptimizedLinearRangeSearch
 
         if (vectors.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         distanceCalculator ??= BatchEuclideanDistanceCalculator.Instance;

@@ -1,8 +1,8 @@
 ﻿using Microsoft.Extensions.Logging;
 using Neighborly.ETL;
 using Neighborly.Search;
+using Neighborly.Search.Configuration;
 using Neighborly.Distance;
-using static Neighborly.Search.SearchService;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Compression;
@@ -257,9 +257,9 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
     /// <summary>
     /// Checks if the given search method can use lock-free immutable indexes.
     /// </summary>
-    private static bool CanUseLockFreeSearch(SearchAlgorithm searchMethod)
+    private bool CanUseLockFreeSearch(SearchAlgorithm searchMethod)
     {
-        return UseImmutableIndexes &&
+        return _searchService.Configuration.UseImmutableIndexes &&
                (searchMethod == SearchAlgorithm.KDTree || searchMethod == SearchAlgorithm.BallTree);
     }
 
@@ -889,34 +889,36 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
 
         try
         {
-            // READ lock - only reading vector data to serialize
+            // Snapshot data while holding READ lock (no await inside lock!)
+            // ReaderWriterLockSlim is NOT async-safe - must not await while holding lock
+            List<Vector> vectorSnapshot;
             _rwLock.EnterReadLock();
             try
             {
-                await using var outputStream = new FileStream(
-                    tempFilePath,
-                    FileMode.Create,
-                    FileAccess.Write,
-                    FileShare.None,
-                    bufferSize: 4096,
-                    useAsync: true);
-
-                await using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest, leaveOpen: true))
-                await using (var writer = new BinaryWriter(compressionStream, System.Text.Encoding.UTF8, leaveOpen: true))
-                {
-                    await WriteToAsync(writer, includeIndexes: true, cancellationToken).ConfigureAwait(false);
-                }
-
-                // Flush to disk before rename to ensure durability
-                outputStream.Flush(flushToDisk: true);
+                vectorSnapshot = _vectors.ToList();
             }
             finally
             {
-                if (_rwLock.IsReadLockHeld)
-                {
-                    _rwLock.ExitReadLock();
-                }
+                _rwLock.ExitReadLock();
             }
+
+            // Now write the snapshot asynchronously (lock released)
+            await using var outputStream = new FileStream(
+                tempFilePath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 4096,
+                useAsync: true);
+
+            await using (var compressionStream = new GZipStream(outputStream, CompressionLevel.Fastest, leaveOpen: true))
+            await using (var writer = new BinaryWriter(compressionStream, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                await WriteSnapshotToAsync(writer, vectorSnapshot, includeIndexes: true, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Flush to disk before rename to ensure durability
+            outputStream.Flush(flushToDisk: true);
 
             // Atomic rename - this is the commit point
             File.Move(tempFilePath, filePath, overwrite: true);
@@ -971,6 +973,28 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         writer.Write(Persistence.VersionHandlerRegistry.CurrentVersion);
         writer.Write(_vectors.Count);
         foreach (Vector v in _vectors)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[] bytes = v.ToBinary();
+            writer.Write(bytes.Length);    // File offset of the next Vector
+            writer.Write(bytes);           // The Vector itself
+        }
+
+        if (includeIndexes)
+        {
+            await _searchService.SaveAsync(writer, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Writes a snapshot of vectors to the writer (used by SaveAsync to avoid holding locks during async I/O).
+    /// </summary>
+    internal async Task WriteSnapshotToAsync(BinaryWriter writer, List<Vector> vectorSnapshot, bool includeIndexes, CancellationToken cancellationToken = default)
+    {
+        // Write current file format version
+        writer.Write(Persistence.VersionHandlerRegistry.CurrentVersion);
+        writer.Write(vectorSnapshot.Count);
+        foreach (Vector v in vectorSnapshot)
         {
             cancellationToken.ThrowIfCancellationRequested();
             byte[] bytes = v.ToBinary();

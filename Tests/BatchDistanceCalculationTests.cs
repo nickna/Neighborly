@@ -132,7 +132,8 @@ public class BatchDistanceCalculationTests
         int k = TestConstants.Search.LargeK;
 
         // Act
-        var originalResults = LinearSearch.Search(vectorList, query, k);
+        var linearSearch = new LinearSearch(vectorList);
+        var originalResults = linearSearch.Search(query, k);
 
         var batchSearch = new BatchOptimizedLinearSearch();
         var batchResults = batchSearch.Search(vectorList, query, k);

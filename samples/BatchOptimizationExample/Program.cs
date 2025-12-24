@@ -101,7 +101,8 @@ class Program
         // Original linear search
         Console.WriteLine("Running original linear search...");
         var sw = Stopwatch.StartNew();
-        var originalResults = LinearSearch.Search(vectorList, query, k);
+        var linearSearch = new LinearSearch(vectorList);
+        var originalResults = linearSearch.Search(query, k);
         sw.Stop();
         var originalTime = sw.ElapsedMilliseconds;
         

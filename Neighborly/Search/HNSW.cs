@@ -10,7 +10,7 @@ namespace Neighborly.Search;
 /// Hierarchical Navigable Small World (HNSW) implementation for approximate nearest neighbor search
 /// Based on the paper by Malkov and Yashunin: "Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs"
 /// </summary>
-public class HNSW
+public class HNSW : ISerializableSearchIndex, IDisposable
 {
     /// <summary>
     /// The version of the database file format that this class writes.
@@ -20,9 +20,11 @@ public class HNSW
     private readonly HNSWConfig _config;
     private readonly Random _random;
     private readonly Dictionary<int, HNSWNode> _nodes;
+    private readonly ReaderWriterLockSlim _lock = new();
     private int _nextNodeId;
     private int? _entryPointId;
     private int _maxLayer;
+    private bool _disposed;
 
     /// <summary>
     /// Current configuration used by this HNSW instance
@@ -32,7 +34,21 @@ public class HNSW
     /// <summary>
     /// Number of nodes in the graph
     /// </summary>
-    public int Count => _nodes.Count;
+    public int Count
+    {
+        get
+        {
+            _lock.EnterReadLock();
+            try
+            {
+                return _nodes.Count;
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
+        }
+    }
 
     /// <summary>
     /// Maximum layer in the graph
@@ -43,6 +59,16 @@ public class HNSW
     /// Entry point node ID (if any)
     /// </summary>
     public int? EntryPointId => _entryPointId;
+
+    /// <summary>
+    /// Returns true if the index has been built and is ready for searches.
+    /// </summary>
+    public bool IsBuilt => _nodes.Count > 0;
+
+    /// <summary>
+    /// The file format version this implementation writes.
+    /// </summary>
+    public int FileFormatVersion => s_currentFileVersion;
 
     public HNSW() : this(new HNSWConfig())
     {
@@ -109,9 +135,30 @@ public class HNSW
     }
 
     /// <summary>
+    /// Interface implementation for Search with 2 parameters. Delegates to the full implementation.
+    /// </summary>
+    IList<Vector> ISearchIndex.Search(Vector query, int k)
+    {
+        return Search(query, k, null);
+    }
+
+    /// <summary>
     /// Clear all nodes and reset the graph
     /// </summary>
     public void Clear()
+    {
+        _lock.EnterWriteLock();
+        try
+        {
+            ClearInternal();
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
+    }
+
+    private void ClearInternal()
     {
         _nodes.Clear();
         _nextNodeId = 0;
@@ -127,49 +174,57 @@ public class HNSW
         if (vector == null)
             throw new ArgumentNullException(nameof(vector));
 
-        int nodeId = _nextNodeId++;
-        int level = GetRandomLevel();
-        var newNode = new HNSWNode(vector, nodeId, level);
-        
-        _nodes[nodeId] = newNode;
-
-        // If this is the first node or it has a higher level than current entry point
-        if (_entryPointId == null || level > _maxLayer)
+        _lock.EnterWriteLock();
+        try
         {
-            _entryPointId = nodeId;
-            _maxLayer = level;
-        }
+            int nodeId = _nextNodeId++;
+            int level = GetRandomLevel();
+            var newNode = new HNSWNode(vector, nodeId, level);
 
-        // Search for closest nodes starting from entry point
-        var entryPoint = _entryPointId.Value;
-        var currentClosest = new List<int> { entryPoint };
+            _nodes[nodeId] = newNode;
 
-        // Search from top layer down to level + 1
-        for (int lc = _maxLayer; lc > level; lc--)
-        {
-            currentClosest = SearchLayer(vector, currentClosest, 1, lc);
-        }
-
-        // Search and connect from level down to 0
-        for (int lc = Math.Min(level, _maxLayer); lc >= 0; lc--)
-        {
-            var candidates = SearchLayer(vector, currentClosest, _config.EfConstruction, lc);
-            
-            // Select neighbors and create connections
-            int maxConnections = lc == 0 ? _config.MaxM0 : _config.M;
-            var selectedNeighbors = SelectNeighbors(nodeId, candidates, maxConnections, lc);
-            
-            // Add connections
-            foreach (var neighborId in selectedNeighbors)
+            // If this is the first node or it has a higher level than current entry point
+            if (_entryPointId == null || level > _maxLayer)
             {
-                newNode.AddConnection(neighborId, lc);
-                _nodes[neighborId].AddConnection(nodeId, lc);
-                
-                // Prune connections if necessary
-                PruneConnections(neighborId, lc);
+                _entryPointId = nodeId;
+                _maxLayer = level;
             }
-            
-            currentClosest = selectedNeighbors;
+
+            // Search for closest nodes starting from entry point
+            var entryPoint = _entryPointId.Value;
+            var currentClosest = new List<int> { entryPoint };
+
+            // Search from top layer down to level + 1
+            for (int lc = _maxLayer; lc > level; lc--)
+            {
+                currentClosest = SearchLayer(vector, currentClosest, 1, lc);
+            }
+
+            // Search and connect from level down to 0
+            for (int lc = Math.Min(level, _maxLayer); lc >= 0; lc--)
+            {
+                var candidates = SearchLayer(vector, currentClosest, _config.EfConstruction, lc);
+
+                // Select neighbors and create connections
+                int maxConnections = lc == 0 ? _config.MaxM0 : _config.M;
+                var selectedNeighbors = SelectNeighbors(nodeId, candidates, maxConnections, lc);
+
+                // Add connections
+                foreach (var neighborId in selectedNeighbors)
+                {
+                    newNode.AddConnection(neighborId, lc);
+                    _nodes[neighborId].AddConnection(nodeId, lc);
+
+                    // Prune connections if necessary
+                    PruneConnections(neighborId, lc);
+                }
+
+                currentClosest = selectedNeighbors;
+            }
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
         }
     }
 
@@ -182,27 +237,36 @@ public class HNSW
             throw new ArgumentNullException(nameof(query));
         if (k <= 0)
             throw new ArgumentException("k must be positive", nameof(k));
-        if (_entryPointId == null)
-            return new List<Vector>();
 
-        int searchEf = ef ?? Math.Max(k, _config.Ef);
-        var entryPoint = _entryPointId.Value;
-        var currentClosest = new List<int> { entryPoint };
-
-        // Search from top layer down to layer 1
-        for (int lc = _maxLayer; lc > 0; lc--)
+        _lock.EnterReadLock();
+        try
         {
-            currentClosest = SearchLayer(query, currentClosest, 1, lc);
-        }
+            if (_entryPointId == null)
+                return [];
 
-        // Search layer 0 with ef
-        var candidates = SearchLayer(query, currentClosest, searchEf, 0);
-        
-        // Return top k results
-        return candidates
-            .Take(k)
-            .Select(nodeId => _nodes[nodeId].Vector)
-            .ToList();
+            int searchEf = ef ?? Math.Max(k, _config.Ef);
+            var entryPoint = _entryPointId.Value;
+            var currentClosest = new List<int> { entryPoint };
+
+            // Search from top layer down to layer 1
+            for (int lc = _maxLayer; lc > 0; lc--)
+            {
+                currentClosest = SearchLayer(query, currentClosest, 1, lc);
+            }
+
+            // Search layer 0 with ef
+            var candidates = SearchLayer(query, currentClosest, searchEf, 0);
+
+            // Return top k results
+            return candidates
+                .Take(k)
+                .Select(nodeId => _nodes[nodeId].Vector)
+                .ToList();
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
     }
 
     /// <summary>
@@ -339,23 +403,31 @@ public class HNSW
         if (writer == null)
             throw new ArgumentNullException(nameof(writer));
 
-        writer.Write(s_currentFileVersion);
-        writer.Write(_nodes.Count);
-        writer.Write(_maxLayer);
-        writer.Write(_entryPointId ?? -1);
-
-        // Write configuration
-        writer.Write(_config.M);
-        writer.Write(_config.MaxM0);
-        writer.Write(_config.EfConstruction);
-        writer.Write(_config.Ef);
-        writer.Write(_config.Ml);
-
-        // Write nodes
-        foreach (var kvp in _nodes)
+        _lock.EnterReadLock();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await WriteNodeAsync(writer, kvp.Value, cancellationToken);
+            writer.Write(s_currentFileVersion);
+            writer.Write(_nodes.Count);
+            writer.Write(_maxLayer);
+            writer.Write(_entryPointId ?? -1);
+
+            // Write configuration
+            writer.Write(_config.M);
+            writer.Write(_config.MaxM0);
+            writer.Write(_config.EfConstruction);
+            writer.Write(_config.Ef);
+            writer.Write(_config.Ml);
+
+            // Write nodes
+            foreach (var kvp in _nodes)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await WriteNodeAsync(writer, kvp.Value, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _lock.ExitReadLock();
         }
     }
 
@@ -373,28 +445,36 @@ public class HNSW
         if (version != s_currentFileVersion)
             throw new InvalidDataException($"Invalid HNSW version: {version}");
 
-        Clear();
-
-        int nodeCount = reader.ReadInt32();
-        _maxLayer = reader.ReadInt32();
-        int entryPointId = reader.ReadInt32();
-        _entryPointId = entryPointId >= 0 ? entryPointId : null;
-
-        // Read configuration (but don't override current config)
-        reader.ReadInt32(); // M
-        reader.ReadInt32(); // MaxM0  
-        reader.ReadInt32(); // EfConstruction
-        reader.ReadInt32(); // Ef
-        reader.ReadDouble(); // Ml
-
-        // Read nodes
-        for (int i = 0; i < nodeCount; i++)
+        _lock.EnterWriteLock();
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            await ReadNodeAsync(reader, vectors, cancellationToken);
-        }
+            ClearInternal();
 
-        _nextNodeId = _nodes.Count > 0 ? _nodes.Keys.Max() + 1 : 0;
+            int nodeCount = reader.ReadInt32();
+            _maxLayer = reader.ReadInt32();
+            int entryPointId = reader.ReadInt32();
+            _entryPointId = entryPointId >= 0 ? entryPointId : null;
+
+            // Read configuration (but don't override current config)
+            reader.ReadInt32(); // M
+            reader.ReadInt32(); // MaxM0
+            reader.ReadInt32(); // EfConstruction
+            reader.ReadInt32(); // Ef
+            reader.ReadDouble(); // Ml
+
+            // Read nodes
+            for (int i = 0; i < nodeCount; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await ReadNodeAsync(reader, vectors, cancellationToken).ConfigureAwait(false);
+            }
+
+            _nextNodeId = _nodes.Count > 0 ? _nodes.Keys.Max() + 1 : 0;
+        }
+        finally
+        {
+            _lock.ExitWriteLock();
+        }
     }
 
     private Task WriteNodeAsync(BinaryWriter writer, HNSWNode node, CancellationToken cancellationToken)
@@ -458,5 +538,23 @@ public class HNSW
     public override int GetHashCode()
     {
         return _nodes.Count.GetHashCode();
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!_disposed)
+        {
+            if (disposing)
+            {
+                _lock?.Dispose();
+            }
+            _disposed = true;
+        }
     }
 }

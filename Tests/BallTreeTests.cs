@@ -12,7 +12,7 @@ public class BallTreeTests
         // Arrange
         BallTree originalTree = new();
         using VectorList vectors = [new Vector([1f, 2, 3]), new Vector([4f, 5, 6]), new Vector([7f, 8, 9])];
-        originalTree.Build(vectors);
+        await originalTree.BuildAsync(vectors);
 
         // Act
         using var stream = new MemoryStream();

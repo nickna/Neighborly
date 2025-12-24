@@ -4,45 +4,15 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Neighborly.Distance;
+using Neighborly.Search.Configuration;
+using Neighborly.Search.Utilities;
 
 namespace Neighborly.Search;
 
 /// <summary>
-/// Configuration options for KDTree parallel processing
-/// </summary>
-public static class KDTreeParallelConfig
-{
-    /// <summary>
-    /// Minimum dataset size to enable parallel tree construction
-    /// </summary>
-    public static int ParallelConstructionThreshold { get; set; } = 1000;
-
-    /// <summary>
-    /// Minimum subtree size to continue parallel processing during construction
-    /// </summary>
-    public static int MinParallelSubtreeSize { get; set; } = 100;
-
-    /// <summary>
-    /// Maximum depth for parallel search operations (k-NN and range)
-    /// Beyond this depth, operations become sequential to avoid task overhead
-    /// </summary>
-    public static int MaxParallelSearchDepth { get; set; } = 4;
-
-    /// <summary>
-    /// Enable or disable parallel tree construction globally
-    /// </summary>
-    public static bool EnableParallelConstruction { get; set; } = true;
-
-    /// <summary>
-    /// Enable or disable parallel search operations globally
-    /// </summary>
-    public static bool EnableParallelSearch { get; set; } = true;
-}
-
-/// <summary>
 /// K-D Tree search (see Wikipedia: https://en.wikipedia.org/wiki/K-d_tree)
 /// </summary>
-public class KDTree
+public class KDTree : ISerializableSearchIndex
 {
     /// <summary>
     /// The version of the database file format that this class writes.
@@ -51,158 +21,31 @@ public class KDTree
 
     private KDTreeNode? root;
     private readonly IDistanceCalculator _distanceCalculator;
+    private readonly KDTreeConfiguration _configuration;
 
-    public KDTree()
+    /// <summary>
+    /// Returns true if the index has been built and is ready for searches.
+    /// </summary>
+    public bool IsBuilt => root != null;
+
+    /// <summary>
+    /// The file format version this implementation writes.
+    /// </summary>
+    public int FileFormatVersion => s_currentFileVersion;
+
+    /// <summary>
+    /// Gets the configuration for this KDTree instance.
+    /// </summary>
+    public KDTreeConfiguration Configuration => _configuration;
+
+    public KDTree(KDTreeConfiguration? configuration = null)
     {
         _distanceCalculator = EuclideanDistanceCalculator.Instance;
+        _configuration = configuration ?? KDTreeConfiguration.Default;
+        _configuration.Validate();
     }
 
-    /// <summary>
-    /// Bounded priority queue that efficiently maintains the k best candidates
-    /// Uses a max-heap to keep the worst element at the top for easy removal
-    /// </summary>
-    private sealed class BoundedPriorityQueue
-    {
-        private readonly int _capacity;
-        private readonly PriorityQueue<Vector, float> _heap;
-
-        public BoundedPriorityQueue(int capacity)
-        {
-            _capacity = capacity;
-            _heap = new PriorityQueue<Vector, float>();
-        }
-
-        public bool IsFull => _heap.Count >= _capacity;
-
-        public float WorstDistance
-        {
-            get
-            {
-                if (_heap.Count == 0)
-                    return float.MaxValue;
-                
-                _heap.TryPeek(out _, out var priority);
-                return -priority; // Convert back from negated value
-            }
-        }
-
-        public void TryAdd(Vector vector, float distance)
-        {
-            if (_heap.Count < _capacity)
-            {
-                // Use negative distance to create max-heap behavior (worst at top)
-                _heap.Enqueue(vector, -distance);
-            }
-            else if (_heap.TryPeek(out _, out var worstPriority) && distance < -worstPriority)
-            {
-                _heap.Dequeue(); // Remove worst
-                _heap.Enqueue(vector, -distance);
-            }
-        }
-
-        public IList<Vector> GetResults()
-        {
-            var results = new List<Vector>(_heap.Count);
-            var tempQueue = new PriorityQueue<Vector, float>();
-            
-            // Extract all elements and re-negate to get correct distances for sorting
-            while (_heap.TryDequeue(out var vector, out var priority))
-            {
-                tempQueue.Enqueue(vector, priority); // Keep negative for min-heap ordering
-            }
-            
-            // Dequeue in ascending distance order (best first)
-            while (tempQueue.TryDequeue(out var vector, out _))
-            {
-                results.Add(vector);
-            }
-            
-            return results;
-        }
-    }
-
-    /// <summary>
-    /// Thread-safe bounded priority queue for parallel k-NN search operations
-    /// Uses concurrent data structures and locking for thread safety
-    /// </summary>
-    private sealed class ThreadSafeBoundedPriorityQueue
-    {
-        private readonly int _capacity;
-        private readonly ConcurrentQueue<(Vector vector, float distance)> _candidates;
-        private readonly object _lock = new object();
-        private volatile int _count = 0;
-
-        public ThreadSafeBoundedPriorityQueue(int capacity)
-        {
-            _capacity = capacity;
-            _candidates = new ConcurrentQueue<(Vector, float)>();
-        }
-
-        public bool IsFull => _count >= _capacity;
-        
-        public int Count => _count;
-
-        public float WorstDistance
-        {
-            get
-            {
-                lock (_lock)
-                {
-                    if (_count == 0) return float.MaxValue;
-                    
-                    var items = _candidates.ToArray();
-                    if (items.Length == 0) return float.MaxValue;
-                    
-                    return items.Max(item => item.distance);
-                }
-            }
-        }
-
-        public void TryAdd(Vector vector, float distance)
-        {
-            lock (_lock)
-            {
-                _candidates.Enqueue((vector, distance));
-                _count++;
-
-                // If we exceed capacity, remove the worst element
-                if (_count > _capacity)
-                {
-                    var items = new List<(Vector vector, float distance)>();
-                    
-                    // Drain the queue
-                    while (_candidates.TryDequeue(out var item))
-                    {
-                        items.Add(item);
-                    }
-
-                    // Sort by distance and keep only the best k
-                    items.Sort((a, b) => a.distance.CompareTo(b.distance));
-                    items = items.Take(_capacity).ToList();
-
-                    // Re-enqueue the best items
-                    foreach (var item in items)
-                    {
-                        _candidates.Enqueue(item);
-                    }
-
-                    _count = items.Count;
-                }
-            }
-        }
-
-        public IList<Vector> GetResults()
-        {
-            lock (_lock)
-            {
-                var items = _candidates.ToArray();
-                Array.Sort(items, (a, b) => a.distance.CompareTo(b.distance));
-                return items.Select(item => item.vector).ToList();
-            }
-        }
-    }
-
-    public async Task Build(VectorList vectors, CancellationToken cancellationToken = default)
+    public async Task BuildAsync(VectorList vectors, CancellationToken cancellationToken = default)
     {
         if (vectors == null)
         {
@@ -216,12 +59,12 @@ public class KDTree
         cancellationToken.ThrowIfCancellationRequested();
 
         // Use parallel construction for large datasets if enabled
-        bool useParallel = KDTreeParallelConfig.EnableParallelConstruction &&
-                          vectors.Count >= KDTreeParallelConfig.ParallelConstructionThreshold;
-        root = useParallel ? await BuildParallel(vectors, 0, cancellationToken) : Build(vectors, 0, cancellationToken);
+        bool useParallel = _configuration.EnableParallelConstruction &&
+                          vectors.Count >= _configuration.ParallelConstructionThreshold;
+        root = useParallel ? await BuildParallel(vectors, 0, cancellationToken).ConfigureAwait(false) : Build(vectors, 0, cancellationToken);
     }
 
-    public void Load(BinaryReader reader, VectorList vectors)
+    public Task LoadAsync(BinaryReader reader, VectorList vectors, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(reader);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -236,16 +79,19 @@ public class KDTree
         Span<byte> guidBuffer = stackalloc byte[16];
         // Read the tree starting at the root node
         root = KDTreeNode.ReadFrom(reader, vectors, guidBuffer);
+
+        return Task.CompletedTask;
     }
 
-    public void Save(BinaryWriter writer, VectorList vectors)
+    public Task SaveAsync(BinaryWriter writer, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(writer);
-        ArgumentNullException.ThrowIfNull(vectors);
 
         writer.Write(s_currentFileVersion); // Write the version number
 
         root?.WriteTo(writer);
+
+        return Task.CompletedTask;
     }
 
     private KDTreeNode? Build(IList<Vector> vectors, int depth, CancellationToken cancellationToken = default)
@@ -303,7 +149,7 @@ public class KDTree
         Task<KDTreeNode?> leftChildTask;
         Task<KDTreeNode?> rightChildTask;
 
-        if (leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        if (leftVectors.Count >= _configuration.MinParallelSubtreeSize)
         {
             leftChildTask = BuildParallel(leftVectors, depth + 1, cancellationToken);
         }
@@ -312,7 +158,7 @@ public class KDTree
             leftChildTask = Task.FromResult(Build(leftVectors, depth + 1, cancellationToken));
         }
 
-        if (rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        if (rightVectors.Count >= _configuration.MinParallelSubtreeSize)
         {
             rightChildTask = BuildParallel(rightVectors, depth + 1, cancellationToken);
         }
@@ -321,7 +167,7 @@ public class KDTree
             rightChildTask = Task.FromResult(Build(rightVectors, depth + 1, cancellationToken));
         }
 
-        await Task.WhenAll(leftChildTask, rightChildTask);
+        await Task.WhenAll(leftChildTask, rightChildTask).ConfigureAwait(false);
 
         return new KDTreeNode
         {
@@ -342,9 +188,9 @@ public class KDTree
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
         }
 
-        var candidates = new ThreadSafeBoundedPriorityQueue(k);
+        var candidates = new ThreadSafeBoundedPriorityQueue<Vector>(k);
         NearestNeighbors(root, query, k, 0, candidates);
-        
+
         return candidates.GetResults();
     }
 
@@ -363,9 +209,9 @@ public class KDTree
             throw new ArgumentOutOfRangeException(nameof(k), "Number of neighbors must be greater than 0");
         }
 
-        var candidates = new ThreadSafeBoundedPriorityQueue(k);
-        await NearestNeighborsParallel(root, query, k, 0, candidates);
-        
+        var candidates = new ThreadSafeBoundedPriorityQueue<Vector>(k);
+        await NearestNeighborsParallel(root, query, k, 0, candidates).ConfigureAwait(false);
+
         return candidates.GetResults();
     }
 
@@ -416,8 +262,8 @@ public class KDTree
 
         distanceCalculator ??= EuclideanDistanceCalculator.Instance;
         var results = new ConcurrentBag<(Vector vector, float distance)>();
-        await RangeNeighborsParallel(root, query, radius, 0, distanceCalculator, results);
-        
+        await RangeNeighborsParallel(root, query, radius, 0, distanceCalculator, results).ConfigureAwait(false);
+
         // Sort by distance, then by vector ID for consistent ordering when distances are equal
         return results
             .OrderBy(r => r.distance)
@@ -482,7 +328,7 @@ public class KDTree
 
         float axisDistance = Math.Abs(queryAxisValue - node.Vector.Values[axis]);
 
-        if (depth < KDTreeParallelConfig.MaxParallelSearchDepth)
+        if (depth < _configuration.MaxParallelSearchDepth)
         {
             List<Task> tasks = new();
             tasks.Add(RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results));
@@ -492,21 +338,21 @@ public class KDTree
                 tasks.Add(RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results));
             }
 
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).ConfigureAwait(false);
         }
         else
         {
             // Use sequential execution for deeper levels to avoid task overhead
-            await RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results);
+            await RangeNeighborsParallel(nearChild, query, radius, depth + 1, distanceCalculator, results).ConfigureAwait(false);
 
             if (axisDistance <= radius)
             {
-                await RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results);
+                await RangeNeighborsParallel(farChild, query, radius, depth + 1, distanceCalculator, results).ConfigureAwait(false);
             }
         }
     }
 
-    private void NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue candidates)
+    private void NearestNeighbors(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue<Vector> candidates)
     {
         if (node == null)
         {
@@ -537,7 +383,7 @@ public class KDTree
         }
     }
 
-    private async Task NearestNeighborsParallel(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue candidates)
+    private async Task NearestNeighborsParallel(KDTreeNode? node, Vector query, int k, int depth, ThreadSafeBoundedPriorityQueue<Vector> candidates)
     {
         if (node?.Vector == null)
             return;
@@ -563,7 +409,7 @@ public class KDTree
         if (!candidates.IsFull || axisDistance < candidates.WorstDistance)
         {
             // For shallow levels, use parallel execution to search the far child
-            if (depth <= KDTreeParallelConfig.MaxParallelSearchDepth)
+            if (depth <= _configuration.MaxParallelSearchDepth)
             {
                 tasks.Add(NearestNeighborsParallel(farChild, query, k, depth + 1, candidates));
             }
@@ -588,7 +434,7 @@ public class KDTree
     public async Task<IList<Vector>> SearchParallel(Vector query, int k)
     {
         // Perform the nearest neighbor search in parallel
-        var results = await NearestNeighborsParallel(query, k);
+        var results = await NearestNeighborsParallel(query, k).ConfigureAwait(false);
 
         return results;
     }

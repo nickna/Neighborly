@@ -26,6 +26,7 @@ public class HNSWTests
     [TearDown]
     public void TearDown()
     {
+        _hnsw?.Dispose();
         _vectors?.Dispose();
     }
 
@@ -61,31 +62,31 @@ public class HNSWTests
     [Test]
     public void HNSW_Build_WithEmptyVectorList_DoesNotThrow()
     {
-        Assert.DoesNotThrow(() => _hnsw.Build(_vectors));
+        Assert.DoesNotThrowAsync(async () => await _hnsw.BuildAsync(_vectors));
         Assert.That(_hnsw.Count, Is.EqualTo(0));
     }
 
     [Test]
     public void HNSW_Build_WithNullVectorList_ThrowsArgumentNullException()
     {
-        Assert.Throws<ArgumentNullException>(() => _hnsw.Build(null!));
+        Assert.ThrowsAsync<ArgumentNullException>(async () => await _hnsw.BuildAsync(null!));
     }
 
     [Test]
-    public void HNSW_Build_WithSingleVector_CreatesValidGraph()
+    public async Task HNSW_Build_WithSingleVector_CreatesValidGraph()
     {
         var vector = new Vector(new[] { 1.0f, 2.0f, 3.0f });
         _vectors.Add(vector);
-        
-        _hnsw.Build(_vectors);
-        
+
+        await _hnsw.BuildAsync(_vectors);
+
         Assert.That(_hnsw.Count, Is.EqualTo(1));
         Assert.That(_hnsw.EntryPointId, Is.Not.Null);
         Assert.That(_hnsw.MaxLayer, Is.GreaterThanOrEqualTo(0));
     }
 
     [Test]
-    public void HNSW_Build_WithMultipleVectors_CreatesValidGraph()
+    public async Task HNSW_Build_WithMultipleVectors_CreatesValidGraph()
     {
         var vectors = new[]
         {
@@ -100,9 +101,9 @@ public class HNSWTests
         {
             _vectors.Add(vector);
         }
-        
-        _hnsw.Build(_vectors);
-        
+
+        await _hnsw.BuildAsync(_vectors);
+
         Assert.That(_hnsw.Count, Is.EqualTo(5));
         Assert.That(_hnsw.EntryPointId, Is.Not.Null);
         Assert.That(_hnsw.MaxLayer, Is.GreaterThanOrEqualTo(0));
@@ -262,7 +263,7 @@ public class HNSWTests
         await _hnsw.SaveAsync(writer);
 
         // Create new HNSW and load
-        var newHnsw = new HNSW();
+        using var newHnsw = new HNSW();
         memoryStream.Position = 0;
         using var reader = new BinaryReader(memoryStream);
         await newHnsw.LoadAsync(reader, _vectors);
@@ -369,17 +370,17 @@ public class HNSWTests
     [Test]
     public void HNSW_Equals_WithSameContent_ReturnsTrue()
     {
-        var hnsw1 = new HNSW();
-        var hnsw2 = new HNSW();
-        
+        using var hnsw1 = new HNSW();
+        using var hnsw2 = new HNSW();
+
         // Both empty
         Assert.That(hnsw1.Equals(hnsw2), Is.True);
-        
+
         // Add same content
         var vector = new Vector(new[] { 1.0f, 2.0f });
         hnsw1.Insert(vector);
         hnsw2.Insert(vector);
-        
+
         Assert.That(hnsw1.Equals(hnsw2), Is.True);
     }
 
@@ -507,15 +508,6 @@ public class HNSWConfigTests
 [TestFixture]
 public class HNSWNodeTests
 {
-    [Test]
-    public void HNSWNode_DefaultConstructor_InitializesCorrectly()
-    {
-        var node = new HNSWNode();
-        
-        Assert.That(node.Connections, Is.Not.Null);
-        Assert.That(node.Connections.Count, Is.EqualTo(0));
-    }
-
     [Test]
     public void HNSWNode_ParameterizedConstructor_InitializesCorrectly()
     {

@@ -315,7 +315,8 @@ public class ProductQuantizationTests
             vectors.Add(new Vector(new[] { 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f }, "test3"));
 
             var query = new Vector(new[] { 1.5f, 2.5f, 3.5f, 4.5f, 5.5f, 6.5f, 7.5f, 8.5f });
-            var results = ProductQuantization.Search(vectors, query, 2);
+            var productQuantization = new ProductQuantization(vectors);
+            var results = productQuantization.Search(query, 2);
 
             Assert.That(results, Is.Not.Null);
             Assert.That(results.Count, Is.GreaterThan(0));

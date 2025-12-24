@@ -6,7 +6,7 @@ namespace Neighborly.Search;
 /// Binary Quantization (BQ) for efficient vector storage and fast approximate search.
 /// Converts floating-point vectors to binary representations, reducing memory usage by ~32x.
 /// </summary>
-public class BinaryQuantization
+public class BinaryQuantization : IBuildableSearchIndex
 {
     /// <summary>
     /// Represents a binary-quantized vector
@@ -58,6 +58,12 @@ public class BinaryQuantization
     private readonly List<BinaryVector> binaryVectors;
     private readonly IDistanceCalculator distanceCalculator;
     private readonly float threshold;
+    private readonly VectorList? _originalVectors;
+
+    /// <summary>
+    /// Returns true if the index has been built and is ready for searches.
+    /// </summary>
+    public bool IsBuilt => binaryVectors.Count > 0;
 
     /// <summary>
     /// Initializes Binary Quantization with a list of vectors
@@ -68,10 +74,11 @@ public class BinaryQuantization
     public BinaryQuantization(VectorList vectors, float? threshold = null, IDistanceCalculator? distanceCalculator = null)
     {
         ArgumentNullException.ThrowIfNull(vectors);
-        
+
         this.distanceCalculator = distanceCalculator ?? EuclideanDistanceCalculator.Instance;
         this.binaryVectors = new List<BinaryVector>();
-        
+        this._originalVectors = vectors;
+
         if (vectors.Count == 0)
         {
             this.threshold = 0.0f;
@@ -80,13 +87,37 @@ public class BinaryQuantization
 
         // Calculate threshold (mean of all dimensions across all vectors)
         this.threshold = threshold ?? CalculateGlobalMean(vectors);
-        
+
         // Quantize all vectors
         foreach (var vector in vectors)
         {
             var binaryVector = Quantize(vector, this.threshold);
             binaryVectors.Add(binaryVector);
         }
+    }
+
+    /// <summary>
+    /// Builds the binary quantization index asynchronously.
+    /// </summary>
+    public Task BuildAsync(VectorList vectors, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vectors);
+
+        if (vectors != _originalVectors)
+        {
+            throw new InvalidOperationException("BinaryQuantization does not support rebuilding with different vectors. Create a new instance instead.");
+        }
+
+        // Index is built in constructor, so this is a no-op if already built
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Interface implementation for Search with 2 parameters. Delegates to the full implementation.
+    /// </summary>
+    IList<Vector> ISearchIndex.Search(Vector query, int k)
+    {
+        return Search(query, k, null);
     }
 
     private static float CalculateGlobalMean(VectorList vectors)
@@ -147,7 +178,7 @@ public class BinaryQuantization
             throw new ArgumentOutOfRangeException(nameof(k), "k must be greater than 0");
 
         if (binaryVectors.Count == 0)
-            return new List<Vector>();
+            return [];
 
         // Quantize the query
         var queryBinary = Quantize(query, threshold);
@@ -156,8 +187,9 @@ public class BinaryQuantization
         int maxHamming = maxHammingDistance ?? Math.Min(query.Values.Length / 4, 64);
 
         // Find candidates using Hamming distance
-        var candidates = new List<(BinaryVector binaryVec, int hammingDist)>();
-        
+        // Pre-allocate with estimated capacity to avoid resizing
+        var candidates = new List<(BinaryVector binaryVec, int hammingDist)>(Math.Min(binaryVectors.Count, k * 5));
+
         foreach (var binaryVec in binaryVectors)
         {
             int hammingDist = queryBinary.HammingDistance(binaryVec);
@@ -178,7 +210,8 @@ public class BinaryQuantization
         }
 
         // Calculate exact distances for candidates and sort
-        var exactDistances = new List<(Vector vector, float distance)>();
+        // Pre-allocate with exact capacity needed
+        var exactDistances = new List<(Vector vector, float distance)>(candidates.Count);
         foreach (var (binaryVec, hammingDist) in candidates)
         {
             float exactDist = distanceCalculator.CalculateDistance(query, binaryVec.OriginalVector);
@@ -201,7 +234,7 @@ public class BinaryQuantization
     public static IList<Vector> GetCandidates(VectorList vectors, Vector query, float threshold = 0.0f, int? maxHammingDistance = null)
     {
         if (vectors.Count == 0)
-            return new List<Vector>();
+            return [];
 
         // Quantize all vectors
         var binaryVectors = new List<BinaryVector>(vectors.Count);
@@ -218,8 +251,9 @@ public class BinaryQuantization
         int maxHamming = maxHammingDistance ?? Math.Min(query.Values.Length / 4, 64);
 
         // Find candidates using Hamming distance
-        var candidates = new List<Vector>();
-        
+        // Pre-allocate with estimated capacity to avoid resizing
+        var candidates = new List<Vector>(Math.Min(binaryVectors.Count, 100));
+
         foreach (var binaryVec in binaryVectors)
         {
             int hammingDist = queryBinary.HammingDistance(binaryVec);
@@ -268,14 +302,5 @@ public class BinaryQuantization
         float ratio = (float)originalBytes / compressedBytes;
 
         return (originalBytes, compressedBytes, ratio);
-    }
-
-    /// <summary>
-    /// Static search method for compatibility with SearchService pattern
-    /// </summary>
-    public static IList<Vector> Search(VectorList vectors, Vector query, int k)
-    {
-        var bq = new BinaryQuantization(vectors);
-        return bq.Search(query, k);
     }
 }

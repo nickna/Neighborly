@@ -7,7 +7,7 @@ namespace Neighborly.Search;
 /// Divides high-dimensional vectors into sub-vectors and quantizes each independently,
 /// achieving better compression than binary quantization while maintaining good accuracy.
 /// </summary>
-public class ProductQuantization
+public class ProductQuantization : IBuildableSearchIndex
 {
     /// <summary>
     /// Represents a product-quantized vector
@@ -89,6 +89,12 @@ public class ProductQuantization
     private readonly int numSubVectors;
     private readonly int subVectorDimensions;
     private readonly int numCentroids;
+    private readonly VectorList? _originalVectors;
+
+    /// <summary>
+    /// Returns true if the index has been built and is ready for searches.
+    /// </summary>
+    public bool IsBuilt => pqVectors.Count > 0;
 
     /// <summary>
     /// Initializes Product Quantization with a list of vectors
@@ -102,24 +108,25 @@ public class ProductQuantization
                               IDistanceCalculator? distanceCalculator = null, int maxIterations = 50)
     {
         ArgumentNullException.ThrowIfNull(vectors);
-        
+
         if (numCentroids > 256)
             throw new ArgumentException("Number of centroids cannot exceed 256 (byte limit)");
 
         this.distanceCalculator = distanceCalculator ?? EuclideanDistanceCalculator.Instance;
         this.numCentroids = numCentroids;
         this.pqVectors = new List<PQVector>();
+        this._originalVectors = vectors;
 
         if (vectors.Count == 0)
         {
             this.numSubVectors = 1;
             this.subVectorDimensions = 1;
-            this.codebooks = Array.Empty<Codebook>();
+            this.codebooks = [];
             return;
         }
 
         int vectorDimensions = vectors[0].Values.Length;
-        
+
         // Auto-determine number of sub-vectors if not specified
         this.numSubVectors = numSubVectors ?? CalculateOptimalSubVectors(vectorDimensions);
         this.subVectorDimensions = vectorDimensions / this.numSubVectors;
@@ -139,6 +146,22 @@ public class ProductQuantization
             var pqVector = Quantize(vector);
             pqVectors.Add(pqVector);
         }
+    }
+
+    /// <summary>
+    /// Builds the product quantization index asynchronously.
+    /// </summary>
+    public Task BuildAsync(VectorList vectors, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vectors);
+
+        if (vectors != _originalVectors)
+        {
+            throw new InvalidOperationException("ProductQuantization does not support rebuilding with different vectors. Create a new instance instead.");
+        }
+
+        // Index is built in constructor, so this is a no-op if already built
+        return Task.CompletedTask;
     }
 
     private static int CalculateOptimalSubVectors(int dimensions)
@@ -172,7 +195,8 @@ public class ProductQuantization
         for (int subVectorIndex = 0; subVectorIndex < numSubVectors; subVectorIndex++)
         {
             // Extract sub-vectors for this position
-            var subVectors = new List<float[]>();
+            // Pre-allocate with exact capacity needed
+            var subVectors = new List<float[]>(vectors.Count);
             for (int vectorIndex = 0; vectorIndex < vectors.Count; vectorIndex++)
             {
                 var subVector = ExtractSubVector(vectors[vectorIndex].Values, subVectorIndex);
@@ -189,7 +213,7 @@ public class ProductQuantization
 
     private float[][] TrainKMeans(List<float[]> data, int k, int maxIterations, Random random)
     {
-        if (data.Count == 0) return Array.Empty<float[]>();
+        if (data.Count == 0) return [];
         if (k >= data.Count) k = data.Count;
 
         int dimensions = data[0].Length;
@@ -278,9 +302,8 @@ public class ProductQuantization
     private float[] ExtractSubVector(float[] vector, int subVectorIndex)
     {
         int start = subVectorIndex * subVectorDimensions;
-        var subVector = new float[subVectorDimensions];
-        Array.Copy(vector, start, subVector, 0, subVectorDimensions);
-        return subVector;
+        // Use Span<T> for efficient slicing without allocation, then ToArray() once
+        return vector.AsSpan(start, subVectorDimensions).ToArray();
     }
 
     /// <summary>
@@ -335,7 +358,7 @@ public class ProductQuantization
             throw new ArgumentOutOfRangeException(nameof(k), "k must be greater than 0");
 
         if (pqVectors.Count == 0)
-            return new List<Vector>();
+            return [];
 
         // Pre-compute distances from query sub-vectors to all centroids
         var lookupTables = new float[numSubVectors][];
@@ -406,14 +429,5 @@ public class ProductQuantization
         float ratio = (float)originalBytes / (compressedBytes + codebookBytes);
 
         return (originalBytes, compressedBytes + codebookBytes, ratio);
-    }
-
-    /// <summary>
-    /// Static search method for compatibility with SearchService pattern
-    /// </summary>
-    public static IList<Vector> Search(VectorList vectors, Vector query, int k)
-    {
-        var pq = new ProductQuantization(vectors, numSubVectors: null, numCentroids: 256);
-        return pq.Search(query, k);
     }
 }

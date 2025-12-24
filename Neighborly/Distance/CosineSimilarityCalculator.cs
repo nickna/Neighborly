@@ -18,7 +18,7 @@ public sealed class CosineSimilarityCalculator : AbstractBatchDistanceCalculator
             {
                 dotProduct += p1[i] * p2[i];
                 magnitudeA += p1[i] * p1[i];
-                magnitudeB += p1[i] * p2[i];
+                magnitudeB += p2[i] * p2[i];
             }
         }
 

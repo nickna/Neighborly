@@ -1,13 +1,16 @@
 using System.Collections.Concurrent;
 using Neighborly.Distance;
+using Neighborly.Search.Configuration;
+using Neighborly.Search.Utilities;
 
 namespace Neighborly.Search;
 
 /// <summary>
 /// Immutable KD-tree supporting lock-free concurrent reads.
 /// Tree is rebuilt entirely on updates (copy-on-write semantics).
+/// Use static BuildAsync factory method to create instances.
 /// </summary>
-public sealed class ImmutableKDTree
+public sealed class ImmutableKDTree : ISearchIndex
 {
     /// <summary>
     /// The version of the file format that this class writes.
@@ -39,13 +42,18 @@ public sealed class ImmutableKDTree
     /// Builds a new immutable KD-tree from vectors.
     /// </summary>
     /// <param name="vectors">The vectors to index.</param>
+    /// <param name="configuration">Configuration for tree construction. Uses default if null.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A new immutable KD-tree containing all vectors.</returns>
     public static async Task<ImmutableKDTree> BuildAsync(
         VectorList vectors,
+        KDTreeConfiguration? configuration = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(vectors);
+
+        var config = configuration ?? KDTreeConfiguration.Default;
+        config.Validate();
 
         if (vectors.Count == 0)
         {
@@ -55,11 +63,11 @@ public sealed class ImmutableKDTree
         cancellationToken.ThrowIfCancellationRequested();
 
         var vectorList = vectors.ToList();
-        bool useParallel = KDTreeParallelConfig.EnableParallelConstruction &&
-                           vectorList.Count >= KDTreeParallelConfig.ParallelConstructionThreshold;
+        bool useParallel = config.EnableParallelConstruction &&
+                           vectorList.Count >= config.ParallelConstructionThreshold;
 
         var root = useParallel
-            ? await BuildParallelAsync(vectorList, 0, cancellationToken).ConfigureAwait(false)
+            ? await BuildParallelAsync(vectorList, 0, config, cancellationToken).ConfigureAwait(false)
             : BuildSequential(vectorList, 0, cancellationToken);
 
         return new ImmutableKDTree(root, EuclideanDistanceCalculator.Instance);
@@ -98,6 +106,7 @@ public sealed class ImmutableKDTree
     private static async Task<ImmutableKDTreeNode?> BuildParallelAsync(
         IList<Vector> vectors,
         int depth,
+        KDTreeConfiguration config,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -125,18 +134,18 @@ public sealed class ImmutableKDTree
         Task<ImmutableKDTreeNode?> leftTask;
         Task<ImmutableKDTreeNode?> rightTask;
 
-        if (leftVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        if (leftVectors.Count >= config.MinParallelSubtreeSize)
         {
-            leftTask = BuildParallelAsync(leftVectors, depth + 1, cancellationToken);
+            leftTask = BuildParallelAsync(leftVectors, depth + 1, config, cancellationToken);
         }
         else
         {
             leftTask = Task.FromResult(BuildSequential(leftVectors, depth + 1, cancellationToken));
         }
 
-        if (rightVectors.Count >= KDTreeParallelConfig.MinParallelSubtreeSize)
+        if (rightVectors.Count >= config.MinParallelSubtreeSize)
         {
-            rightTask = BuildParallelAsync(rightVectors, depth + 1, cancellationToken);
+            rightTask = BuildParallelAsync(rightVectors, depth + 1, config, cancellationToken);
         }
         else
         {
@@ -151,6 +160,15 @@ public sealed class ImmutableKDTree
             Left = leftTask.Result,
             Right = rightTask.Result
         };
+    }
+
+    /// <summary>
+    /// Implements ISearchIndex.Search - delegates to NearestNeighbors for backward compatibility.
+    /// This method is lock-free and can be called concurrently.
+    /// </summary>
+    public IList<Vector> Search(Vector query, int k)
+    {
+        return NearestNeighbors(query, k);
     }
 
     /// <summary>
@@ -172,10 +190,10 @@ public sealed class ImmutableKDTree
         var root = Root;
         if (root is null)
         {
-            return Array.Empty<Vector>();
+            return [];
         }
 
-        var candidates = new BoundedPriorityQueue(k);
+        var candidates = new BoundedPriorityQueue<Vector>(k);
         SearchNearestNeighbors(root, query, k, 0, candidates);
 
         return candidates.GetResults();
@@ -186,7 +204,7 @@ public sealed class ImmutableKDTree
         Vector query,
         int k,
         int depth,
-        BoundedPriorityQueue candidates)
+        IBoundedPriorityQueue<Vector> candidates)
     {
         if (node is null)
         {
@@ -242,7 +260,7 @@ public sealed class ImmutableKDTree
         var root = Root;
         if (root is null)
         {
-            return Array.Empty<Vector>();
+            return [];
         }
 
         var results = new List<(Vector vector, float distance)>();
@@ -326,67 +344,4 @@ public sealed class ImmutableKDTree
         return new ImmutableKDTree(root, EuclideanDistanceCalculator.Instance);
     }
 
-    /// <summary>
-    /// Bounded priority queue for k-NN search.
-    /// Uses a max-heap to keep the worst element at the top for easy removal.
-    /// </summary>
-    private sealed class BoundedPriorityQueue
-    {
-        private readonly int _capacity;
-        private readonly PriorityQueue<Vector, float> _heap;
-
-        public BoundedPriorityQueue(int capacity)
-        {
-            _capacity = capacity;
-            _heap = new PriorityQueue<Vector, float>();
-        }
-
-        public bool IsFull => _heap.Count >= _capacity;
-
-        public float WorstDistance
-        {
-            get
-            {
-                if (_heap.Count == 0)
-                    return float.MaxValue;
-
-                _heap.TryPeek(out _, out var priority);
-                return -priority; // Convert back from negated value
-            }
-        }
-
-        public void TryAdd(Vector vector, float distance)
-        {
-            if (_heap.Count < _capacity)
-            {
-                // Use negative distance to create max-heap behavior (worst at top)
-                _heap.Enqueue(vector, -distance);
-            }
-            else if (_heap.TryPeek(out _, out var worstPriority) && distance < -worstPriority)
-            {
-                _heap.Dequeue(); // Remove worst
-                _heap.Enqueue(vector, -distance);
-            }
-        }
-
-        public IList<Vector> GetResults()
-        {
-            var results = new List<Vector>(_heap.Count);
-            var tempQueue = new PriorityQueue<Vector, float>();
-
-            // Extract all elements and re-negate to get correct distances for sorting
-            while (_heap.TryDequeue(out var vector, out var priority))
-            {
-                tempQueue.Enqueue(vector, priority); // Keep negative for min-heap ordering
-            }
-
-            // Dequeue in ascending distance order (best first)
-            while (tempQueue.TryDequeue(out var vector, out _))
-            {
-                results.Add(vector);
-            }
-
-            return results;
-        }
-    }
 }

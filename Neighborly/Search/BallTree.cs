@@ -1,6 +1,8 @@
+using Neighborly.Search.Utilities;
+
 namespace Neighborly.Search;
 
-public class BallTree
+public class BallTree : ISerializableSearchIndex
 {
 
     /// <summary>
@@ -10,13 +12,15 @@ public class BallTree
 
     private BallTreeNode? root;
 
-    public void Build(VectorList vectors)
-    {
-        if (vectors.Count == 0)
-            return;
+    /// <summary>
+    /// Returns true if the index has been built and is ready for searches.
+    /// </summary>
+    public bool IsBuilt => root != null;
 
-        root = BuildNodes(vectors);
-    }
+    /// <summary>
+    /// The file format version this implementation writes.
+    /// </summary>
+    public int FileFormatVersion => s_currentFileVersion;
 
     /// <summary>
     /// Builds the BallTree index asynchronously with cancellation support.
@@ -45,8 +49,8 @@ public class BallTree
                 Radius = 0
             };
 
-        var center = Aggregate(vectors) / vectors.Length;
-        var radius = MaxDistance(vectors, center);
+        var center = TreeBuildingUtilities.AggregateSum(vectors) / vectors.Length;
+        var radius = TreeBuildingUtilities.CalculateMaxDistance(vectors, center);
 
         return new BallTreeNode
         {
@@ -176,8 +180,8 @@ public class BallTree
             };
         }
 
-        var center = Aggregate(vectors, cancellationToken);
-        var radius = MaxDistance(vectors, center, cancellationToken);
+        var center = TreeBuildingUtilities.CalculateCentroid(vectors, cancellationToken);
+        var radius = TreeBuildingUtilities.CalculateMaxDistance(vectors, center, cancellationToken);
 
         return new BallTreeNode
         {
@@ -188,94 +192,27 @@ public class BallTree
         };
     }
 
-    private static float MaxDistance(Span<Vector> vectors, Vector center)
-    {
-        var max = 0.0f;
-        foreach (var vector in vectors)
-        {
-            var distance = vector.Distance(center);
-            if (distance > max)
-            {
-                max = distance;
-            }
-        }
-
-        return max;
-    }
-
-    private static float MaxDistance(IList<Vector> vectors, Vector center, CancellationToken cancellationToken)
-    {
-        var max = 0.0f;
-        foreach (var vector in vectors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var distance = vector.Distance(center);
-            if (distance > max)
-            {
-                max = distance;
-            }
-        }
-
-        return max;
-    }
-
-    private static Vector Aggregate(Span<Vector> vectors)
-    {
-        Vector? sum = null;
-        foreach (var vector in vectors)
-        {
-            if (sum == null)
-            {
-                sum = vector;
-            }
-            else
-            {
-                sum += vector;
-            }
-        }
-
-        return sum!;
-    }
-
-    private static Vector Aggregate(IList<Vector> vectors, CancellationToken cancellationToken)
-    {
-        Vector? sum = null;
-        foreach (var vector in vectors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (sum == null)
-            {
-                sum = vector;
-            }
-            else
-            {
-                sum += vector;
-            }
-        }
-
-        return sum! / vectors.Count;
-    }
 
     public IList<Vector> Search(Vector query, int k)
     {
-        var result = new CappedDistanceSortedList(k);
+        var result = new BoundedPriorityQueue<Vector>(k);
         Search(root, query, k, result);
-        return result.Select(static x => x.vector).ToList();
+        return result.GetResults();
     }
 
 
-    private static void Search(BallTreeNode? node, Vector query, int k, CappedDistanceSortedList values)
+    private static void Search(BallTreeNode? node, Vector query, int k, IBoundedPriorityQueue<Vector> values)
     {
         if (node == null)
             return;
 
         var distance = query.Distance(node.Center);
-        if (values.Count == values.Capacity && distance - node.Radius > values.MaxDistance)
+        if (values.IsFull && distance - node.Radius > values.WorstDistance)
             return;
 
         if (node.Left == null && node.Right == null)
         {
-            values.Add(distance, node.Center);
+            values.TryAdd(node.Center, distance);
             return;
         }
 
@@ -298,24 +235,6 @@ public class BallTree
     public override int GetHashCode()
     {
         return root?.GetHashCode() ?? 0;
-    }
-
-    private sealed class CappedDistanceSortedList(int k) : List<(float distance, Vector vector)>(k + 1)
-    {
-        private readonly int _k = k;
-
-        public float MaxDistance => Count > 0 ? this[0].distance : float.MaxValue;
-
-        public void Add(float distance, Vector vector)
-        {
-            ArgumentNullException.ThrowIfNull(vector);
-            Add((distance, vector));
-            Sort(static (a, b) => a.distance.CompareTo(b.distance));
-            if (Count > _k)
-            {
-                RemoveAt(Count - 1);
-            }
-        }
     }
 }
 

@@ -95,8 +95,12 @@ public class ResilienceTests
         // Stop searches
         cts.Cancel();
 
-        // Wait with timeout
-        await Task.WhenAny(Task.WhenAll(searchTasks), Task.Delay(TimeSpan.FromSeconds(5)));
+        // Wait for all search tasks to complete (with timeout for safety)
+        var completionTask = Task.WhenAll(searchTasks);
+        if (await Task.WhenAny(completionTask, Task.Delay(TimeSpan.FromSeconds(5))) != completionTask)
+        {
+            Assert.Fail("Search tasks did not complete within timeout after cancellation");
+        }
 
         // Assert - Operations completed without error
         Assert.That(searchErrors, Is.Empty, "No search errors during save");

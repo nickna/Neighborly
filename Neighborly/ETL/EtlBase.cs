@@ -47,6 +47,7 @@ public abstract class EtlBase : IETL
         }
 
         var exceptions = new ConcurrentBag<Exception>();
+        var lockObj = new object();
 
         await Parallel.ForEachAsync(
             files,
@@ -63,11 +64,14 @@ public abstract class EtlBase : IETL
                     var localVectors = new List<Vector>();
                     await ImportFileAsync(file, localVectors, ct).ConfigureAwait(false);
 
-                    // Batch add to shared collection
-                    // VectorList is thread-safe (ConcurrentDictionary internally)
-                    foreach (var vector in localVectors)
+                    // Batch add to shared collection (thread-safe)
+                    // Lock required because ICollection<Vector> may not be thread-safe (e.g., List<Vector>)
+                    lock (lockObj)
                     {
-                        vectors.Add(vector);
+                        foreach (var vector in localVectors)
+                        {
+                            vectors.Add(vector);
+                        }
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

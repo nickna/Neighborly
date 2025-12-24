@@ -27,7 +27,7 @@ public class BatchOptimizedLinearSearch
 
         if (vectors.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         // Use batch distance calculation if supported
@@ -77,7 +77,7 @@ public class BatchOptimizedLinearSearch
 
         if (vectors.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         // Use parallel batch distance calculation

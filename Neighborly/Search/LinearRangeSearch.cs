@@ -28,7 +28,7 @@ public class LinearRangeSearch
 
         if (vectors.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         distanceCalculator ??= EuclideanDistanceCalculator.Instance;

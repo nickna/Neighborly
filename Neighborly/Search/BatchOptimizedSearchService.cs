@@ -99,7 +99,7 @@ public class BatchOptimizedSearchService : SearchService
         
         if (candidates.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         // Use batch distance calculation for verification
@@ -124,7 +124,7 @@ public class BatchOptimizedSearchService : SearchService
         
         if (candidates.Count == 0)
         {
-            return new List<Vector>();
+            return [];
         }
 
         // Use batch distance calculation for final ranking

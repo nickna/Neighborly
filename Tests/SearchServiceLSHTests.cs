@@ -240,7 +240,8 @@ public class SearchServiceLSHTests
             vectors.Add(new Vector(new[] { 3.0f, 4.0f }, "test3"));
 
             var query = new Vector(new[] { 1.5f, 2.5f });
-            var results = LSHSearch.Search(vectors, query, 2);
+            var lshSearch = new LSHSearch(vectors);
+            var results = lshSearch.Search(query, 2);
 
             Assert.That(results, Is.Not.Null);
             Assert.That(results.Count, Is.GreaterThan(0));

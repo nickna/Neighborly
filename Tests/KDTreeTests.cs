@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using System.Text;
 using Neighborly.Search;
+using Neighborly.Search.Configuration;
 
 namespace Neighborly.Tests;
 
@@ -8,25 +9,25 @@ namespace Neighborly.Tests;
 public class KDTreeTests
 {
     [Test]
-    public void CanSaveAndLoad()
+    public async Task CanSaveAndLoad()
     {
         // Arrange
         KDTree originalTree = new();
         VectorList vectors = [new Vector([1f, 2, 3]), new Vector([4f, 5, 6]), new Vector([7f, 8, 9])];
-        originalTree.Build(vectors);
+        await originalTree.BuildAsync(vectors);
 
         // Act
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
         {
-            originalTree.Save(writer, vectors);
+            await originalTree.SaveAsync(writer);
         }
 
         stream.Seek(0, SeekOrigin.Begin);
         KDTree loadedTree = new();
         using (var reader = new BinaryReader(stream))
         {
-            loadedTree.Load(reader, vectors);
+            await loadedTree.LoadAsync(reader, vectors);
         }
 
         // Assert
@@ -46,7 +47,7 @@ public class KDTreeTests
             new Vector([1f, 1f], "diagonal"),
             new Vector([-1f, -1f], "opposite")
         };
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
         var query = new Vector([0.5f, 0.5f], "query");
 
         // Act
@@ -80,7 +81,7 @@ public class KDTreeTests
             new Vector([1f, 1f], "diagonal"),
             new Vector([-1f, -1f], "opposite")
         };
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
         var query = new Vector([0.5f, 0.5f], "query");
 
         // Act
@@ -110,7 +111,7 @@ public class KDTreeTests
             new Vector([1f, 1f], "diagonal"),
             new Vector([3f, 3f], "far")
         };
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
         var query = new Vector([0f, 0f], "query");
         var radius = 1.5f;
 
@@ -151,13 +152,13 @@ public class KDTreeTests
         }
 
         // Act - Build trees with both methods
-        KDTreeParallelConfig.EnableParallelConstruction = false;
-        var sequentialTree = new KDTree();
-        await sequentialTree.Build(vectors);
+        var sequentialConfig = new KDTreeConfiguration { EnableParallelConstruction = false };
+        var sequentialTree = new KDTree(sequentialConfig);
+        await sequentialTree.BuildAsync(vectors);
 
-        KDTreeParallelConfig.EnableParallelConstruction = true;
-        var parallelTree = new KDTree();
-        await parallelTree.Build(vectors);
+        var parallelConfig = new KDTreeConfiguration { EnableParallelConstruction = true };
+        var parallelTree = new KDTree(parallelConfig);
+        await parallelTree.BuildAsync(vectors);
 
         // Assert - Both trees should produce equivalent search results
         var query = vectors[100];
@@ -165,14 +166,11 @@ public class KDTreeTests
         var parResults = parallelTree.NearestNeighbors(query, 10);
 
         Assert.That(parResults.Count, Is.EqualTo(seqResults.Count));
-        
+
         // Both should find the same nearest neighbors (order may differ due to parallel construction)
         var seqIds = seqResults.Select(v => v.Id).ToHashSet();
         var parIds = parResults.Select(v => v.Id).ToHashSet();
         Assert.That(parIds, Is.EqualTo(seqIds));
-
-        // Reset to default
-        KDTreeParallelConfig.EnableParallelConstruction = true;
     }
 
     [Test]
@@ -186,21 +184,16 @@ public class KDTreeTests
         }
 
         // Act & Assert - Parallel construction should be disabled for small datasets
-        var originalThreshold = KDTreeParallelConfig.ParallelConstructionThreshold;
-        KDTreeParallelConfig.ParallelConstructionThreshold = 1000;
-
-        var tree = new KDTree();
+        var config1 = new KDTreeConfiguration { ParallelConstructionThreshold = 1000 };
+        var tree = new KDTree(config1);
         // Should use sequential construction since dataset is below threshold
-        Assert.DoesNotThrowAsync(async () => await tree.Build(vectors));
+        Assert.DoesNotThrowAsync(async () => await tree.BuildAsync(vectors));
 
         // Test with lowered threshold
-        KDTreeParallelConfig.ParallelConstructionThreshold = 100;
-        var tree2 = new KDTree();
+        var config2 = new KDTreeConfiguration { ParallelConstructionThreshold = 100 };
+        var tree2 = new KDTree(config2);
         // Should use parallel construction since dataset is above new threshold
-        Assert.DoesNotThrowAsync(async () => await tree2.Build(vectors));
-
-        // Reset
-        KDTreeParallelConfig.ParallelConstructionThreshold = originalThreshold;
+        Assert.DoesNotThrowAsync(async () => await tree2.BuildAsync(vectors));
     }
 
     [Test]
@@ -227,7 +220,7 @@ public class KDTreeTests
         }
 
         var tree = new KDTree();
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
 
         // Generate query vectors
         var queries = new List<Vector>();
@@ -324,17 +317,17 @@ public class KDTreeTests
             }
 
             // Sequential construction
-            var seqTree = new KDTree();
-            KDTreeParallelConfig.EnableParallelConstruction = false;
+            var seqConfig = new KDTreeConfiguration { EnableParallelConstruction = false };
+            var seqTree = new KDTree(seqConfig);
             var seqStopwatch = Stopwatch.StartNew();
-            await seqTree.Build(vectors);
+            await seqTree.BuildAsync(vectors);
             seqStopwatch.Stop();
 
             // Parallel construction
-            var parTree = new KDTree();
-            KDTreeParallelConfig.EnableParallelConstruction = true;
+            var parConfig = new KDTreeConfiguration { EnableParallelConstruction = true };
+            var parTree = new KDTree(parConfig);
             var parStopwatch = Stopwatch.StartNew();
-            await parTree.Build(vectors);
+            await parTree.BuildAsync(vectors);
             parStopwatch.Stop();
 
             // Verify correctness by comparing search results
@@ -347,9 +340,6 @@ public class KDTreeTests
 
             Console.WriteLine($"{size,-8} {seqStopwatch.ElapsedMilliseconds,-15} {parStopwatch.ElapsedMilliseconds,-13} {speedup:F2}x{"",-4} {(correctness ? "✓" : "✗"),-11}");
         }
-
-        // Reset to default
-        KDTreeParallelConfig.EnableParallelConstruction = true;
     }
 
     [Test]
@@ -376,7 +366,7 @@ public class KDTreeTests
         }
 
         var tree = new KDTree();
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
 
         // Generate query vectors
         var queries = new List<Vector>();
@@ -465,7 +455,7 @@ public class KDTreeTests
         }
 
         var tree = new KDTree();
-        await tree.Build(vectors);
+        await tree.BuildAsync(vectors);
 
         // Generate query vectors
         var queries = new List<Vector>();
@@ -552,10 +542,10 @@ public class KDTreeTests
         var initialMemory = GC.GetTotalMemory(false);
 
         // Sequential construction
-        KDTreeParallelConfig.EnableParallelConstruction = false;
-        var seqTree = new KDTree();
+        var seqConfig = new KDTreeConfiguration { EnableParallelConstruction = false };
+        var seqTree = new KDTree(seqConfig);
         var seqStopwatch = Stopwatch.StartNew();
-        await seqTree.Build(vectors);
+        await seqTree.BuildAsync(vectors);
         seqStopwatch.Stop();
 
         var seqMemory = GC.GetTotalMemory(false) - initialMemory;
@@ -567,10 +557,10 @@ public class KDTreeTests
         GC.Collect();
 
         // Parallel construction
-        KDTreeParallelConfig.EnableParallelConstruction = true;
-        var parTree = new KDTree();
+        var parConfig = new KDTreeConfiguration { EnableParallelConstruction = true };
+        var parTree = new KDTree(parConfig);
         var parStopwatch = Stopwatch.StartNew();
-        await parTree.Build(vectors);
+        await parTree.BuildAsync(vectors);
         parStopwatch.Stop();
 
         var parMemory = GC.GetTotalMemory(false) - initialMemory;
@@ -578,9 +568,6 @@ public class KDTreeTests
         Console.WriteLine($"Sequential: {seqStopwatch.ElapsedMilliseconds}ms, {seqMemory / 1024.0 / 1024.0:F2} MB");
         Console.WriteLine($"Parallel:   {parStopwatch.ElapsedMilliseconds}ms, {parMemory / 1024.0 / 1024.0:F2} MB");
         Console.WriteLine($"Memory Overhead: {((double)parMemory / seqMemory - 1) * 100:F1}%");
-
-        // Reset to default
-        KDTreeParallelConfig.EnableParallelConstruction = true;
     }
 
 }

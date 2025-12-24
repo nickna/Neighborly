@@ -271,7 +271,8 @@ public class BinaryQuantizationTests
             vectors.Add(new Vector(new[] { 3.0f, 4.0f, 5.0f }, "test3"));
 
             var query = new Vector(new[] { 1.5f, 2.5f, 3.5f });
-            var results = BinaryQuantization.Search(vectors, query, 2);
+            var binaryQuantization = new BinaryQuantization(vectors);
+            var results = binaryQuantization.Search(query, 2);
 
             Assert.That(results, Is.Not.Null);
             Assert.That(results.Count, Is.GreaterThan(0));

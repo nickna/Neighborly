@@ -124,7 +124,8 @@ public class BatchDistanceCalculationBenchmarks
     [Benchmark]
     public IList<Vector> LinearSearch_Original()
     {
-        return LinearSearch.Search(_vectors, _queryVector, 10);
+        var search = new LinearSearch(_vectors);
+        return search.Search(_queryVector, 10);
     }
 
     [Benchmark]

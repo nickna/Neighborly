@@ -1,10 +1,13 @@
+using Neighborly.Search.Utilities;
+
 namespace Neighborly.Search;
 
 /// <summary>
 /// Immutable Ball-tree supporting lock-free concurrent reads.
 /// Tree is rebuilt entirely on updates (copy-on-write semantics).
+/// Use static BuildAsync factory method to create instances.
 /// </summary>
-public sealed class ImmutableBallTree
+public sealed class ImmutableBallTree : ISearchIndex
 {
     /// <summary>
     /// The version of the file format that this class writes.
@@ -70,8 +73,8 @@ public sealed class ImmutableBallTree
             };
         }
 
-        var center = Aggregate(vectors, cancellationToken);
-        var radius = MaxDistance(vectors, center, cancellationToken);
+        var center = TreeBuildingUtilities.CalculateCentroid(vectors, cancellationToken);
+        var radius = TreeBuildingUtilities.CalculateMaxDistance(vectors, center, cancellationToken);
 
         return new ImmutableBallTreeNode
         {
@@ -82,40 +85,6 @@ public sealed class ImmutableBallTree
         };
     }
 
-    private static Vector Aggregate(IList<Vector> vectors, CancellationToken cancellationToken)
-    {
-        Vector? sum = null;
-        foreach (var vector in vectors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (sum is null)
-            {
-                sum = vector;
-            }
-            else
-            {
-                sum += vector;
-            }
-        }
-
-        return sum! / vectors.Count;
-    }
-
-    private static float MaxDistance(IList<Vector> vectors, Vector center, CancellationToken cancellationToken)
-    {
-        var max = 0.0f;
-        foreach (var vector in vectors)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var distance = vector.Distance(center);
-            if (distance > max)
-            {
-                max = distance;
-            }
-        }
-
-        return max;
-    }
 
     /// <summary>
     /// Finds the k nearest neighbors to the query vector.
@@ -136,16 +105,16 @@ public sealed class ImmutableBallTree
         var root = Root;
         if (root is null)
         {
-            return Array.Empty<Vector>();
+            return [];
         }
 
-        var result = new CappedDistanceSortedList(k);
+        var result = new BoundedPriorityQueue<Vector>(k);
         SearchNodes(root, query, k, result);
 
-        return result.Select(static x => x.vector).ToList();
+        return result.GetResults();
     }
 
-    private static void SearchNodes(ImmutableBallTreeNode? node, Vector query, int k, CappedDistanceSortedList values)
+    private static void SearchNodes(ImmutableBallTreeNode? node, Vector query, int k, IBoundedPriorityQueue<Vector> values)
     {
         if (node is null)
         {
@@ -155,7 +124,7 @@ public sealed class ImmutableBallTree
         var distance = query.Distance(node.Center);
 
         // Prune if this ball cannot contain any closer points
-        if (values.Count == values.Capacity && distance - node.Radius > values.MaxDistance)
+        if (values.IsFull && distance - node.Radius > values.WorstDistance)
         {
             return;
         }
@@ -163,7 +132,7 @@ public sealed class ImmutableBallTree
         // Leaf node
         if (node.Left is null && node.Right is null)
         {
-            values.Add(distance, node.Center);
+            values.TryAdd(node.Center, distance);
             return;
         }
 
@@ -281,29 +250,4 @@ public sealed class ImmutableBallTree
         }
     }
 
-    /// <summary>
-    /// Sorted list capped at k elements, keeping the k smallest distances.
-    /// </summary>
-    private sealed class CappedDistanceSortedList : List<(float distance, Vector vector)>
-    {
-        private readonly int _k;
-
-        public CappedDistanceSortedList(int k) : base(k + 1)
-        {
-            _k = k;
-        }
-
-        public float MaxDistance => Count > 0 ? this[Count - 1].distance : float.MaxValue;
-
-        public void Add(float distance, Vector vector)
-        {
-            ArgumentNullException.ThrowIfNull(vector);
-            Add((distance, vector));
-            Sort(static (a, b) => a.distance.CompareTo(b.distance));
-            if (Count > _k)
-            {
-                RemoveAt(Count - 1);
-            }
-        }
-    }
 }

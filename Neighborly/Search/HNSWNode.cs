@@ -1,47 +1,44 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Neighborly.Search;
 
 /// <summary>
-/// Represents a node in the HNSW (Hierarchical Navigable Small World) graph
+/// Represents a node in the HNSW (Hierarchical Navigable Small World) graph.
+/// Sealed class with required properties for better type safety.
 /// </summary>
-public class HNSWNode : IEquatable<HNSWNode>
+public sealed class HNSWNode : IEquatable<HNSWNode>
 {
     /// <summary>
     /// The vector data associated with this node
     /// </summary>
-    public Vector Vector { get; set; }
+    public required Vector Vector { get; set; }
 
     /// <summary>
     /// Node ID for fast lookups and serialization
     /// </summary>
-    public int Id { get; set; }
+    public required int Id { get; set; }
 
     /// <summary>
     /// The maximum layer this node appears in (0-based)
     /// </summary>
-    public int MaxLayer { get; set; }
+    public required int MaxLayer { get; set; }
 
     /// <summary>
     /// Connections per layer. Index represents layer level.
     /// Each layer contains a list of connected node IDs.
     /// </summary>
-    public List<HashSet<int>> Connections { get; set; }
+    public required List<HashSet<int>> Connections { get; set; }
 
-    public HNSWNode()
-    {
-        Vector = null!;
-        Connections = new List<HashSet<int>>();
-    }
-
+    [SetsRequiredMembers]
     public HNSWNode(Vector vector, int id, int maxLayer)
     {
         Vector = vector ?? throw new ArgumentNullException(nameof(vector));
         Id = id;
         MaxLayer = maxLayer;
         Connections = new List<HashSet<int>>();
-        
+
         // Initialize connection sets for each layer (0 to maxLayer)
         for (int i = 0; i <= maxLayer; i++)
         {
@@ -77,8 +74,8 @@ public class HNSWNode : IEquatable<HNSWNode>
     public HashSet<int> GetConnections(int layer)
     {
         if (layer < 0 || layer > MaxLayer)
-            return new HashSet<int>();
-            
+            return [];
+
         return Connections[layer];
     }
 
