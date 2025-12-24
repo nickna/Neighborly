@@ -57,6 +57,7 @@ public class VectorList : IList<Vector>, IDisposable
             {
                 IsReadOnly = true;
                 _vectors.Clear();
+                _tags.Dispose();
             }
             _disposed = true;
         }

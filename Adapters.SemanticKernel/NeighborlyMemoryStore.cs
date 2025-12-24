@@ -110,8 +110,7 @@ namespace NeighborlyMemory
         public IAsyncEnumerable<string> GetCollectionsAsync(CancellationToken cancellationToken = default)
         {
             // Get Vector Tags
-            var collections = _vectorDatabase.Vectors.Tags.GetAll();
-            return collections;
+            return _vectorDatabase.Vectors.Tags.GetAllAsync(cancellationToken);
         }
 
         public Task<bool> DoesCollectionExistAsync(string collectionName, CancellationToken cancellationToken = default)
