@@ -1035,9 +1035,7 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Synchronous wrapper for backwards compatibility with IDisposable.
-    /// Signals cancellation but does NOT block waiting for the task to complete.
-    /// This prevents thread pool starvation when many VectorDatabase instances
-    /// are disposed concurrently (e.g., during test runs).
+    /// Signals cancellation and waits for the task to complete to ensure proper cleanup.
     /// </summary>
     private void StopIndexService()
     {
@@ -1048,10 +1046,23 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         if (_indexingTask is null || _indexingTask.IsCompleted)
             return;
 
-        // Signal cancellation - the task will stop on its own when it checks the token.
-        // We intentionally do NOT wait here to avoid blocking thread pool threads.
-        // The task is a background indexing operation that will terminate gracefully.
-        _shutdownCts.Cancel();
+        try
+        {
+            // Signal cancellation
+            _shutdownCts.Cancel();
+
+            // Wait for the task to complete gracefully
+            // We wait to ensure we don't leak background tasks that could corrupt state or consume resources
+            _indexingTask.Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (AggregateException ae) when (ae.InnerException is OperationCanceledException)
+        {
+            // Expected
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error while stopping indexing service synchronously.");
+        }
     }
 
     /// <summary>
