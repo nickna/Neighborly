@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
@@ -23,10 +24,13 @@ public sealed class Csv : EtlBase
     };
 
     /// <inheritdoc />
+    private protected override IStreamProvider StreamProvider => FileStreamProvider.Instance;
+
+    /// <inheritdoc />
     public override string FileExtension => ".csv";
 
     /// <inheritdoc />
-    public async override Task ExportDataAsync(IEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
+    public override async Task ExportDataAsync(IEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(vectors);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -39,7 +43,20 @@ public sealed class Csv : EtlBase
     }
 
     /// <inheritdoc />
-    protected async override Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken = default)
+    public override async Task ExportDataAsync(IAsyncEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vectors);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        using var stream = CreateWriteStream(path);
+        using var textWriter = new StreamWriter(stream, Encoding.UTF8);
+        using var writer = new CsvWriter(textWriter, s_configuration);
+        writer.Context.RegisterClassMap<VectorRecordMap>();
+        await writer.WriteRecordsAsync(ConvertToRecordsAsync(vectors, cancellationToken), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    protected override async Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(vectors);
@@ -51,6 +68,16 @@ public sealed class Csv : EtlBase
         await foreach (var record in reader.EnumerateRecordsAsync(new VectorRecord(Guid.Empty, [], [], string.Empty), cancellationToken).ConfigureAwait(false))
         {
             vectors.Add(new Vector(record.Id, record.Values, record.Tags ?? [], record.OriginalText ?? string.Empty));
+        }
+    }
+
+    private static async IAsyncEnumerable<VectorRecord> ConvertToRecordsAsync(
+        IAsyncEnumerable<Vector> vectors,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await foreach (var vector in vectors.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            yield return ConvertToRecord(vector);
         }
     }
 

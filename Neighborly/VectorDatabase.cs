@@ -1007,8 +1007,7 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         {
             ImportingData(contentType, path);
             IETL etl = EtlFactory.CreateEtl(contentType);
-            etl.IsDirectory = isDirectory;
-            await etl.ImportDataAsync(path, Vectors, cancellationToken).ConfigureAwait(false);
+            await etl.ImportDataAsync(path, Vectors, isDirectory, cancellationToken).ConfigureAwait(false);
             ImportedData(path);
             activity?.SetStatus(ActivityStatusCode.Ok);
         }

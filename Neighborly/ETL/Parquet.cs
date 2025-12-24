@@ -9,6 +9,9 @@ namespace Neighborly.ETL;
 public sealed class Parquet : EtlBase
 {
     /// <inheritdoc />
+    private protected override IStreamProvider StreamProvider => FileStreamProvider.Instance;
+
+    /// <inheritdoc />
     public override string FileExtension => ".parquet";
 
     /// <inheritdoc />
@@ -22,15 +25,36 @@ public sealed class Parquet : EtlBase
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Note: Parquet.Net library does not support streaming serialization with IAsyncEnumerable.
+    /// The collection must be materialized before writing to Parquet format.
+    /// </remarks>
+    public override async Task ExportDataAsync(IAsyncEnumerable<Vector> vectors, string path, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(vectors);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // Parquet library limitation - must materialize collection
+        var materializedVectors = new List<VectorRecord>();
+        await foreach (var vector in vectors.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            materializedVectors.Add(ConvertToRecord(vector));
+        }
+
+        using var fs = CreateWriteStream(path);
+        await ParquetSerializer.SerializeAsync(materializedVectors, fs, cancellationToken: cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     protected override async Task ImportFileAsync(string path, ICollection<Vector> vectors, CancellationToken cancellationToken)
     {
         using var fs = CreateReadStream(path);
         var records = await ParquetSerializer.DeserializeAsync<VectorRecord>(fs, cancellationToken: cancellationToken).ConfigureAwait(false);
-        
+
         foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            
+
             var vector = new Vector(
                 id: record.Id,
                 values: record.Values,

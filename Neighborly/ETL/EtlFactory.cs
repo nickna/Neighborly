@@ -13,7 +13,6 @@ public static class EtlFactory
 
         return contentType switch
         {
-            ContentType.HDF5 => new HDF5(),
             ContentType.CSV => new Csv(),
             ContentType.Parquet => new Parquet(),
             ContentType.JSON => new JSON(),
