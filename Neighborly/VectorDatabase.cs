@@ -716,20 +716,25 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
         {
             // Phase 1: Load vectors into temporary dictionary WITHOUT holding any lock
             var tempDict = new ConcurrentDictionary<Guid, Vector>();
-            int fileVersion;
-            bool hasSerializedIndexes = false;
+            Persistence.LoadResult result;
+            Persistence.IVersionHandler handler;
 
             _logger.LogInformation("Starting background load from {FilePath}...", filePath);
 
-            using (var inputStream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            await using (var inputStream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
                 FileShare.Read, bufferSize: 81920, useAsync: true))
-            using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
+            await using (var decompressionStream = new GZipStream(inputStream, CompressionMode.Decompress))
             using (var reader = new BinaryReader(decompressionStream))
             {
-                // Read file version and load vectors only (no indexes yet)
-                fileVersion = reader.ReadInt32();
-                var vectorCount = await LoadVectorsOnlyAsync(reader, tempDict, combinedToken).ConfigureAwait(false);
-                _logger.LogInformation("Loaded {VectorCount} vectors into temporary storage.", vectorCount);
+                // Read file version and get appropriate handler
+                int fileVersion = reader.ReadInt32();
+                handler = Persistence.VersionHandlerRegistry.GetHandler(fileVersion);
+
+                _logger.LogInformation("Loading database file version {Version}...", fileVersion);
+
+                // Phase 1: Load vectors using version handler (no lock)
+                result = await handler.LoadVectorsAsync(reader, tempDict, combinedToken).ConfigureAwait(false);
+                _logger.LogInformation("Loaded {VectorCount} vectors into temporary storage.", result.VectorCount);
 
                 // Phase 2: Atomic dictionary swap - write lock held only for microseconds
                 _rwLock.EnterWriteLock();
@@ -746,17 +751,16 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
 
                 _logger.LogInformation("Atomic dictionary swap completed.");
 
-                // Phase 3: Load indexes from file if V1 format (now that vectors are in _vectors)
-                if (fileVersion == 1)
+                // Phase 3: Load indexes from file if available (now that vectors are in _vectors)
+                if (!result.IndexesNeedRebuild)
                 {
-                    await _searchService.LoadAsync(reader, combinedToken).ConfigureAwait(false);
-                    hasSerializedIndexes = true;
+                    await handler.LoadIndexesAsync(reader, _searchService, combinedToken).ConfigureAwait(false);
                     _logger.LogInformation("Loaded serialized indexes from file.");
                 }
             }
 
             // Phase 4: Rebuild indexes if not loaded from file
-            if (!hasSerializedIndexes && !_shutdownCts.IsCancellationRequested)
+            if (result.IndexesNeedRebuild && !_shutdownCts.IsCancellationRequested)
             {
                 combinedToken.ThrowIfCancellationRequested();
                 await RebuildSearchIndexesAsync(combinedToken).ConfigureAwait(false);
@@ -765,130 +769,6 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
             activity?.SetStatus(ActivityStatusCode.Ok);
         }
     }
-
-    /// <summary>
-    /// Loads only the vectors from the file (not indexes) into the specified dictionary.
-    /// </summary>
-    private Task<int> LoadVectorsOnlyAsync(
-        BinaryReader reader,
-        ConcurrentDictionary<Guid, Vector> targetDict,
-        CancellationToken cancellationToken)
-    {
-        var vectorCount = reader.ReadInt32();
-
-        // Sanity check: vector count should be reasonable
-        if (vectorCount < 0 || vectorCount > 100_000_000)
-            throw new InvalidDataException($"Invalid vector count in file: {vectorCount}");
-
-        for (int i = 0; i < vectorCount; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var nextVectorSize = reader.ReadInt32();
-
-            // Sanity check: vector size should be reasonable
-            if (nextVectorSize <= 0 || nextVectorSize > 100_000_000)
-                throw new InvalidDataException($"Invalid vector size at index {i}: {nextVectorSize}");
-
-            var bytes = reader.ReadBytes(nextVectorSize);
-
-            // Validate that we got all expected bytes (detects truncated files)
-            if (bytes.Length != nextVectorSize)
-                throw new InvalidDataException(
-                    $"Truncated file: expected {nextVectorSize} bytes for vector {i}, got {bytes.Length}");
-
-            var vector = new Vector(bytes);
-            targetDict.TryAdd(vector.Id, vector);
-        }
-
-        return Task.FromResult(vectorCount);
-    }
-
-    internal async Task<(int vectorCount, bool indexesAreDirty)> ReadFromAsync(
-        BinaryReader reader,
-        ConcurrentDictionary<Guid, Vector> targetDict,
-        bool includeIndexes,
-        CancellationToken cancellationToken)
-    {
-        var fileVersion = reader.ReadInt32();   // File version
-
-        Func<BinaryReader, ConcurrentDictionary<Guid, Vector>, bool, CancellationToken, Task<(int vectorCount, bool indexesAreDirty)>> importFunc = fileVersion switch
-        {
-            1 => LoadV1Async,
-            _ => LoadV0Async
-        };
-
-        return await importFunc(reader, targetDict, includeIndexes, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Imports vectors from a specified file path with the V1 layout.
-    /// </summary>
-    /// <remarks>
-    /// The V1 layout has a leading integer that indicates the total number of vectors in the database
-    /// followed by the binary representation of each vector. Up to this, the V0 layout is the same.
-    /// However, it is followed by the binary representation the indexes.
-    /// </remarks>
-    private async Task<(int vectorCount, bool indexesAreDirty)> LoadV1Async(
-        BinaryReader reader,
-        ConcurrentDictionary<Guid, Vector> targetDict,
-        bool includeIndexes,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Loading vectors from the V1 layout.");
-        var (vectorCount, _) = await LoadV0Async(reader, targetDict, includeIndexes, cancellationToken).ConfigureAwait(false);
-
-        if (includeIndexes)
-        {
-            await _searchService.LoadAsync(reader, cancellationToken).ConfigureAwait(false);
-            return (vectorCount, false);
-        }
-
-        return (vectorCount, true);
-    }
-
-    /// <summary>
-    /// Imports vectors from a specified file path with the original layout.
-    /// </summary>
-    /// <remarks>
-    /// The original layout has a leading integer that indicates the total number of vectors in the database
-    /// followed by the binary representation of each vector.
-    /// </remarks>
-    private Task<(int vectorCount, bool indexesAreDirty)> LoadV0Async(
-        BinaryReader reader,
-        ConcurrentDictionary<Guid, Vector> targetDict,
-        bool includeIndexes,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Loading vectors from the original (V0) layout.");
-        var vectorCount = reader.ReadInt32();   // Total number of Vectors in the database
-
-        // Sanity check: vector count should be reasonable
-        if (vectorCount < 0 || vectorCount > 100_000_000)
-            throw new InvalidDataException($"Invalid vector count in file: {vectorCount}");
-
-        for (int i = 0; i < vectorCount; i++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var nextVectorSize = reader.ReadInt32();    // Size of the next Vector
-
-            // Sanity check: vector size should be reasonable
-            if (nextVectorSize <= 0 || nextVectorSize > 100_000_000)
-                throw new InvalidDataException($"Invalid vector size at index {i}: {nextVectorSize}");
-
-            var bytes = reader.ReadBytes(nextVectorSize);
-
-            // Validate that we got all expected bytes (detects truncated files)
-            if (bytes.Length != nextVectorSize)
-                throw new InvalidDataException(
-                    $"Truncated file: expected {nextVectorSize} bytes for vector {i}, got {bytes.Length}");
-
-            var vector = new Vector(bytes);
-            targetDict.TryAdd(vector.Id, vector);  // Add to temp dictionary
-        }
-
-        return Task.FromResult((vectorCount, true));
-    }
-
 
     /// <summary>
     /// Performs the actual index rebuild operations.
@@ -1087,8 +967,8 @@ public partial class VectorDatabase : IDisposable, IAsyncDisposable
 
     internal async Task WriteToAsync(BinaryWriter writer, bool includeIndexes, CancellationToken cancellationToken = default)
     {
-        // TODO -- This should be async and potentially parallelized
-        writer.Write(s_currentFileVersion);
+        // Write current file format version
+        writer.Write(Persistence.VersionHandlerRegistry.CurrentVersion);
         writer.Write(_vectors.Count);
         foreach (Vector v in _vectors)
         {
