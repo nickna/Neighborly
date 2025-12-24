@@ -6,7 +6,7 @@ namespace Neighborly.Distance;
 /// <summary>
 /// SIMD-optimized Manhattan distance calculator using System.Numerics.Vector&lt;T&gt;.
 /// </summary>
-public sealed class SimdManhattanDistanceCalculator : AbstractDistanceCalculator
+public sealed class SimdManhattanDistanceCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="SimdManhattanDistanceCalculator"/>, which can be used directly

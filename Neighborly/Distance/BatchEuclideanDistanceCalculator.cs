@@ -1,7 +1,4 @@
-using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.Intrinsics;
-using System.Runtime.Intrinsics.X86;
 
 namespace Neighborly.Distance;
 
@@ -30,7 +27,7 @@ public sealed class BatchEuclideanDistanceCalculator : OptimizedBatchDistanceCal
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (results.Length < candidates.Count)
             throw new ArgumentException($"Results span must have at least {candidates.Count} elements", nameof(results));
 
@@ -51,23 +48,23 @@ public sealed class BatchEuclideanDistanceCalculator : OptimizedBatchDistanceCal
         // Convert to cache-optimized format for better performance
         using var queryOpt = CacheOptimizedVector.FromVector(query);
         var calculator = CacheOptimizedEuclideanDistance.Instance;
-        
+
         int batchSize = GetOptimalBatchSize(query.Dimension);
-        
+
         // Process in batches for optimal cache usage
         for (int start = 0; start < candidates.Count; start += batchSize)
         {
             int end = Math.Min(start + batchSize, candidates.Count);
-            
+
             // Create optimized batch for this chunk
             var batchCandidates = new List<Vector>(end - start);
             for (int i = start; i < end; i++)
             {
                 batchCandidates.Add(candidates[i]);
             }
-            
+
             using var batch = new CacheOptimizedVectorBatch(batchCandidates);
-            
+
             // Calculate distances for this batch
             for (int i = 0; i < batchCandidates.Count; i++)
             {
@@ -81,13 +78,13 @@ public sealed class BatchEuclideanDistanceCalculator : OptimizedBatchDistanceCal
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (startIndex < 0 || startIndex >= candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(startIndex));
-        
+
         if (count < 0 || startIndex + count > candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(count));
-        
+
         if (results.Length < count)
             throw new ArgumentException($"Results span must have at least {count} elements", nameof(results));
 
@@ -99,7 +96,7 @@ public sealed class BatchEuclideanDistanceCalculator : OptimizedBatchDistanceCal
             {
                 rangeList.Add(candidates[startIndex + i]);
             }
-            
+
             CalculateDistancesOptimized(query, rangeList, results);
         }
         else
@@ -121,7 +118,7 @@ public static class BatchDistanceExtensions
     public static float[] BatchDistance(this Vector query, IList<Vector> candidates, IDistanceCalculator? calculator = null)
     {
         calculator ??= BatchEuclideanDistanceCalculator.Instance;
-        
+
         if (calculator is IBatchDistanceCalculator batchCalc)
         {
             return batchCalc.CalculateDistances(query, candidates);
@@ -145,13 +142,13 @@ public static class BatchDistanceExtensions
     {
         calculator ??= BatchEuclideanDistanceCalculator.Instance;
         float[] results = new float[candidates.Count];
-        
+
         if (calculator is IBatchDistanceCalculator batchCalc)
         {
             int batchSize = batchCalc.GetOptimalBatchSize(query.Dimension);
             int degreeOfParallelism = Environment.ProcessorCount;
-            
-            Parallel.For(0, candidates.Count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfParallelism }, 
+
+            Parallel.For(0, candidates.Count, new ParallelOptions { MaxDegreeOfParallelism = degreeOfParallelism },
                         i =>
             {
                 results[i] = calculator.CalculateDistance(query, candidates[i]);
@@ -165,7 +162,7 @@ public static class BatchDistanceExtensions
                 results[i] = calculator.CalculateDistance(query, candidates[i]);
             });
         }
-        
+
         return results;
     }
 }

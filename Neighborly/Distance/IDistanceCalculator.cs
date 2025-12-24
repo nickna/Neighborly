@@ -1,4 +1,4 @@
-﻿namespace Neighborly.Distance;
+namespace Neighborly.Distance;
 
 /// <summary>
 /// Represents a distance calculator that calculates the distance between two vectors.

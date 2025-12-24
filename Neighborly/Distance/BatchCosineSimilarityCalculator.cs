@@ -17,7 +17,7 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
         float dotProduct = 0;
         float magnitudeA = 0;
         float magnitudeB = 0;
-        
+
         for (int i = 0; i < vector1.Dimension; i++)
         {
             dotProduct += vector1.Values[i] * vector2.Values[i];
@@ -27,7 +27,7 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
 
         magnitudeA = MathF.Sqrt(magnitudeA);
         magnitudeB = MathF.Sqrt(magnitudeB);
-        
+
         return dotProduct / (magnitudeA * magnitudeB);
     }
 
@@ -35,7 +35,7 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (results.Length < candidates.Count)
             throw new ArgumentException($"Results span must have at least {candidates.Count} elements", nameof(results));
 
@@ -58,27 +58,27 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
     {
         // Pre-compute query magnitude once
         float queryMagnitude = CalculateQueryMagnitude(query);
-        
+
         // Convert to cache-optimized format
         using var queryOpt = CacheOptimizedVector.FromVector(query);
         var calculator = CacheOptimizedCosineSimilarity.Instance;
-        
+
         int batchSize = GetOptimalBatchSize(query.Dimension);
-        
+
         // Process in batches for optimal cache usage
         for (int start = 0; start < candidates.Count; start += batchSize)
         {
             int end = Math.Min(start + batchSize, candidates.Count);
-            
+
             // Create optimized batch for this chunk
             var batchCandidates = new List<Vector>(end - start);
             for (int i = start; i < end; i++)
             {
                 batchCandidates.Add(candidates[i]);
             }
-            
+
             using var batch = new CacheOptimizedVectorBatch(batchCandidates);
-            
+
             // Calculate distances for this batch
             for (int i = 0; i < batchCandidates.Count; i++)
             {
@@ -104,13 +104,13 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
     {
         float dotProduct = 0;
         float candidateMagnitude = 0;
-        
+
         for (int i = 0; i < query.Dimension; i++)
         {
             dotProduct += query.Values[i] * candidate.Values[i];
             candidateMagnitude += candidate.Values[i] * candidate.Values[i];
         }
-        
+
         candidateMagnitude = MathF.Sqrt(candidateMagnitude);
         return dotProduct / (queryMagnitude * candidateMagnitude);
     }
@@ -119,13 +119,13 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (startIndex < 0 || startIndex >= candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(startIndex));
-        
+
         if (count < 0 || startIndex + count > candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(count));
-        
+
         if (results.Length < count)
             throw new ArgumentException($"Results span must have at least {count} elements", nameof(results));
 
@@ -137,7 +137,7 @@ public sealed class BatchCosineSimilarityCalculator : OptimizedBatchDistanceCalc
             {
                 rangeList.Add(candidates[startIndex + i]);
             }
-            
+
             CalculateDistancesOptimized(query, rangeList, results);
         }
         else

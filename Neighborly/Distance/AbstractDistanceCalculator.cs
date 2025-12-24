@@ -1,4 +1,4 @@
-﻿namespace Neighborly.Distance;
+namespace Neighborly.Distance;
 
 public abstract class AbstractDistanceCalculator : IDistanceCalculator
 {

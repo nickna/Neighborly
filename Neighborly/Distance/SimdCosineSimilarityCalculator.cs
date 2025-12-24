@@ -6,7 +6,7 @@ namespace Neighborly.Distance;
 /// <summary>
 /// SIMD-optimized Cosine similarity calculator using System.Numerics.Vector&lt;T&gt;.
 /// </summary>
-public sealed class SimdCosineSimilarityCalculator : AbstractDistanceCalculator
+public sealed class SimdCosineSimilarityCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="SimdCosineSimilarityCalculator"/>, which can be used directly
@@ -49,7 +49,7 @@ public sealed class SimdCosineSimilarityCalculator : AbstractDistanceCalculator
         {
             var vec1 = new Vector<float>(values1, i);
             var vec2 = new Vector<float>(values2, i);
-            
+
             dotProductVector += vec1 * vec2;
             magnitudeAVector += vec1 * vec1;
             magnitudeBVector += vec2 * vec2;
@@ -79,7 +79,7 @@ public sealed class SimdCosineSimilarityCalculator : AbstractDistanceCalculator
         var dotProduct = 0f;
         var magnitudeA = 0f;
         var magnitudeB = 0f;
-        
+
         for (var i = 0; i < dimension; i++)
         {
             dotProduct += values1[i] * values2[i];

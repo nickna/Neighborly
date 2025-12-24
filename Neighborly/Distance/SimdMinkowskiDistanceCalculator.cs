@@ -6,7 +6,7 @@ namespace Neighborly.Distance;
 /// <summary>
 /// SIMD-optimized Minkowski distance calculator using System.Numerics.Vector&lt;T&gt;.
 /// </summary>
-public sealed class SimdMinkowskiDistanceCalculator : AbstractDistanceCalculator
+public sealed class SimdMinkowskiDistanceCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="SimdMinkowskiDistanceCalculator"/>, which can be used directly
@@ -54,7 +54,7 @@ public sealed class SimdMinkowskiDistanceCalculator : AbstractDistanceCalculator
             var vec2 = new Vector<float>(values2, i);
             var diff = vec1 - vec2;
             var absDiff = System.Numerics.Vector.Abs(diff);
-            
+
             // For p=3, we need to compute |diff|^3
             // We can do this by multiplying absDiff * absDiff * absDiff
             sumVector += absDiff * absDiff * absDiff;

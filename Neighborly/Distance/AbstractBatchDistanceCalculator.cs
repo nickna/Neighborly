@@ -19,7 +19,7 @@ public abstract class AbstractBatchDistanceCalculator : AbstractDistanceCalculat
         int bytesPerVector = dimension * sizeof(float);
         int l1CacheSize = 32 * 1024; // 32KB typical L1 data cache
         int maxVectorsInL1 = l1CacheSize / bytesPerVector;
-        
+
         // Leave room for query vector and other data
         return Math.Max(1, Math.Min(maxVectorsInL1 - 2, 64));
     }
@@ -29,7 +29,7 @@ public abstract class AbstractBatchDistanceCalculator : AbstractDistanceCalculat
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (results.Length < candidates.Count)
             throw new ArgumentException($"Results span must have at least {candidates.Count} elements", nameof(results));
 
@@ -56,13 +56,13 @@ public abstract class AbstractBatchDistanceCalculator : AbstractDistanceCalculat
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(candidates);
-        
+
         if (startIndex < 0 || startIndex >= candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(startIndex));
-        
+
         if (count < 0 || startIndex + count > candidates.Count)
             throw new ArgumentOutOfRangeException(nameof(count));
-        
+
         if (results.Length < count)
             throw new ArgumentException($"Results span must have at least {count} elements", nameof(results));
 
@@ -85,18 +85,18 @@ public abstract class OptimizedBatchDistanceCalculator : AbstractBatchDistanceCa
     /// <summary>
     /// Performs optimized batch distance calculations using cache-friendly memory access patterns.
     /// </summary>
-    protected void ProcessBatchOptimized(Vector query, IList<Vector> candidates, Span<float> results, 
+    protected void ProcessBatchOptimized(Vector query, IList<Vector> candidates, Span<float> results,
                                        Func<float[], ReadOnlySpan<float[]>, Span<float>, int, int, bool> simdProcessor)
     {
         int dimension = query.Dimension;
         int batchSize = GetOptimalBatchSize(dimension);
-        
+
         // Process in cache-friendly batches
         for (int start = 0; start < candidates.Count; start += batchSize)
         {
             int end = Math.Min(start + batchSize, candidates.Count);
             int count = end - start;
-            
+
             // Try SIMD processing first
             bool processed = false;
             if (count >= 4) // Minimum for SIMD efficiency
@@ -107,10 +107,10 @@ public abstract class OptimizedBatchDistanceCalculator : AbstractBatchDistanceCa
                 {
                     batchData[i] = candidates[start + i].Values;
                 }
-                
+
                 processed = simdProcessor(query.Values, batchData, results.Slice(start, count), 0, count);
             }
-            
+
             // Fallback to scalar processing if SIMD not available or failed
             if (!processed)
             {

@@ -6,7 +6,7 @@ namespace Neighborly.Distance;
 /// <summary>
 /// SIMD-optimized Euclidean distance calculator using System.Numerics.Vector&lt;T&gt;.
 /// </summary>
-public sealed class SimdEuclideanDistanceCalculator : AbstractDistanceCalculator
+public sealed class SimdEuclideanDistanceCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="SimdEuclideanDistanceCalculator"/>, which can be used directly

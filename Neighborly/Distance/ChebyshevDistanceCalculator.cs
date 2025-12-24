@@ -1,4 +1,4 @@
-﻿namespace Neighborly.Distance;
+namespace Neighborly.Distance;
 
 /// <summary>
 /// Calculates distance metric using Chebyshev distance
@@ -10,7 +10,7 @@ public sealed class ChebyshevDistanceCalculator : AbstractBatchDistanceCalculato
         float max = 0;
         for (int i = 0; i < vector1.Dimension; i++)
         {
-            float diff = Math.Abs(vector1.Values[i] - vector2.Values[i]);
+            float diff = MathF.Abs(vector1.Values[i] - vector2.Values[i]);
             if (diff > max)
             {
                 max = diff;

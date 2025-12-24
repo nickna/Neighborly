@@ -6,7 +6,7 @@ namespace Neighborly.Distance;
 /// <summary>
 /// SIMD-optimized Chebyshev distance calculator using System.Numerics.Vector&lt;T&gt;.
 /// </summary>
-public sealed class SimdChebyshevDistanceCalculator : AbstractDistanceCalculator
+public sealed class SimdChebyshevDistanceCalculator : AbstractBatchDistanceCalculator
 {
     /// <summary>
     /// Static instance of the <see cref="SimdChebyshevDistanceCalculator"/>, which can be used directly
@@ -52,15 +52,16 @@ public sealed class SimdChebyshevDistanceCalculator : AbstractDistanceCalculator
             maxVector = System.Numerics.Vector.Max(maxVector, absDiff);
         }
 
-        // Find the maximum value in the vector
+        // Find the maximum value in the vector using Span<T> - no heap allocation!
+        Span<float> maxSpan = stackalloc float[vectorSize];
+        maxVector.CopyTo(maxSpan);
+
         var max = 0f;
-        var maxArray = new float[vectorSize];
-        maxVector.CopyTo(maxArray);
         for (var j = 0; j < vectorSize; j++)
         {
-            if (maxArray[j] > max)
+            if (maxSpan[j] > max)
             {
-                max = maxArray[j];
+                max = maxSpan[j];
             }
         }
 

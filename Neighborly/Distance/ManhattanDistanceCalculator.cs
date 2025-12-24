@@ -1,4 +1,4 @@
-﻿namespace Neighborly.Distance;
+namespace Neighborly.Distance;
 
 /// <summary>
 /// Calculate distance metric using Manhattan distance
@@ -11,7 +11,7 @@ public sealed class ManhattanDistanceCalculator : AbstractBatchDistanceCalculato
         for (int i = 0; i < vector1.Dimension; i++)
         {
             float diff = vector1.Values[i] - vector2.Values[i];
-            sum += Math.Abs(diff);
+            sum += MathF.Abs(diff);
         }
 
         return sum;
