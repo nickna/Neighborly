@@ -1,4 +1,7 @@
-﻿using System.Text;
+﻿using System.Numerics;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Collections.Generic;
 using Neighborly.Distance;
 
@@ -108,8 +111,7 @@ public partial class Vector : IEquatable<Vector>
         Values = values;
         OriginalText = originalText;
         Id = Guid.NewGuid();
-        Tags = new short[0];
-
+        Tags = Array.Empty<short>();
     }
 
     /// <summary>
@@ -121,7 +123,7 @@ public partial class Vector : IEquatable<Vector>
         Values = EmbeddingGenerator.Instance.GenerateEmbedding(originalText);
         OriginalText = originalText;
         Id = Guid.NewGuid();
-        Tags = new short[0];
+        Tags = Array.Empty<short>();
     }
 
     public Vector(BinaryReader stream) : this(ReadAllBytes(stream))
@@ -159,20 +161,14 @@ public partial class Vector : IEquatable<Vector>
 
             var valuesBytesLength = valuesLength * sizeof(float);
             var valuesSource = source[valuesOffset..(valuesOffset + valuesBytesLength)];
-            for (int i = 0; i < valuesLength; i++)
-            {
-                values[i] = BitConverter.ToSingle(valuesSource[(i * sizeof(float))..((i + 1) * sizeof(float))]);
-            }
+            MemoryMarshal.Cast<byte, float>(valuesSource).CopyTo(values);
 
             int tagsLengthOffset = valuesOffset + valuesBytesLength;
             int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
             var tagsLength = BitConverter.ToInt16(source[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)]);
             var tagsSource = source[tagsOffset..(tagsOffset + (tagsLength * sizeof(short)))];
             var tags = new short[tagsLength];
-            for (int i = 0; i < tagsLength; i++)
-            {
-                tags[i] = BitConverter.ToInt16(tagsSource[(i * sizeof(short))..((i + 1) * sizeof(short))]);
-            }
+            MemoryMarshal.Cast<byte, short>(tagsSource).CopyTo(tags);
 
             int attributesOffset = tagsOffset + (tagsLength * sizeof(short));
             var attributes = new VectorAttributes(new BinaryReader(new MemoryStream(source[attributesOffset..].ToArray())));
@@ -198,20 +194,14 @@ public partial class Vector : IEquatable<Vector>
 
             var valuesBytesLength = valuesLength * sizeof(float);
             var valuesSource = source[valuesOffset..(valuesOffset + valuesBytesLength)];
-            for (int i = 0; i < valuesLength; i++)
-            {
-                values[i] = BitConverter.ToSingle(valuesSource[(i * sizeof(float))..((i + 1) * sizeof(float))]);
-            }
+            MemoryMarshal.Cast<byte, float>(valuesSource).CopyTo(values);
 
             int tagsLengthOffset = valuesOffset + valuesBytesLength;
             int tagsOffset = tagsLengthOffset + s_tagsLengthBytesLength;
             var tagsLength = BitConverter.ToInt16(source[tagsLengthOffset..(tagsLengthOffset + s_tagsLengthBytesLength)]);
             var tagsSource = source[tagsOffset..(tagsOffset + (tagsLength * sizeof(short)))];
             var tags = new short[tagsLength];
-            for (int i = 0; i < tagsLength; i++)
-            {
-                tags[i] = BitConverter.ToInt16(tagsSource[(i * sizeof(short))..((i + 1) * sizeof(short))]);
-            }
+            MemoryMarshal.Cast<byte, short>(tagsSource).CopyTo(tags);
 
             int attributesOffset = tagsOffset + (tagsLength * sizeof(short));
             var attributes = new VectorAttributes(new BinaryReader(new MemoryStream(source[attributesOffset..].ToArray())));
@@ -303,12 +293,29 @@ public partial class Vector : IEquatable<Vector>
     public static Vector operator +(Vector a, Vector b)
     {
         GuardDimensionsMatch(a, b);
+        var dimension = a.Dimension;
+        float[] result = new float[dimension];
 
-        float[] result = new float[a.Dimension];
-        for (int i = 0; i < a.Dimension; i++)
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            result[i] = a[i] + b[i];
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v1 = new Vector<float>(a.Values, i);
+                var v2 = new Vector<float>(b.Values, i);
+                (v1 + v2).CopyTo(result, i);
+            }
+            for (; i < dimension; i++)
+                result[i] = a.Values[i] + b.Values[i];
         }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                result[i] = a.Values[i] + b.Values[i];
+        }
+
         return new Vector(result);
     }
 
@@ -320,11 +327,30 @@ public partial class Vector : IEquatable<Vector>
     /// <returns>A new vector representing the element-wise division of the vector by the scalar.</returns>
     public static Vector operator /(Vector a, int n)
     {
-        float[] result = new float[a.Dimension];
-        for (int i = 0; i < a.Dimension; i++)
+        var dimension = a.Dimension;
+        float[] result = new float[dimension];
+        var divisor = (float)n;
+
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            result[i] = a[i] / n;
+            var divisorVector = new Vector<float>(divisor);
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v = new Vector<float>(a.Values, i);
+                (v / divisorVector).CopyTo(result, i);
+            }
+            for (; i < dimension; i++)
+                result[i] = a.Values[i] / divisor;
         }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                result[i] = a.Values[i] / divisor;
+        }
+
         return new Vector(result);
     }
 
@@ -338,12 +364,29 @@ public partial class Vector : IEquatable<Vector>
     public static Vector operator -(Vector a, Vector b)
     {
         GuardDimensionsMatch(a, b);
+        var dimension = a.Dimension;
+        float[] result = new float[dimension];
 
-        float[] result = new float[a.Dimension];
-        for (int i = 0; i < a.Dimension; i++)
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            result[i] = a[i] - b[i];
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v1 = new Vector<float>(a.Values, i);
+                var v2 = new Vector<float>(b.Values, i);
+                (v1 - v2).CopyTo(result, i);
+            }
+            for (; i < dimension; i++)
+                result[i] = a.Values[i] - b.Values[i];
         }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                result[i] = a.Values[i] - b.Values[i];
+        }
+
         return new Vector(result);
     }
 
@@ -363,7 +406,46 @@ public partial class Vector : IEquatable<Vector>
     /// </summary>
     public float Magnitude
     {
-        get { return (float)Math.Sqrt(Values.Sum(x => x * x)); }
+        get
+        {
+            var values = Values;
+            var dimension = values.Length;
+
+            if (dimension < 16 || !System.Numerics.Vector.IsHardwareAccelerated)
+                return CalculateMagnitudeScalar(values, dimension);
+
+            return CalculateMagnitudeSimd(values, dimension);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float CalculateMagnitudeScalar(float[] values, int dimension)
+    {
+        var sum = 0f;
+        for (var i = 0; i < dimension; i++)
+            sum += values[i] * values[i];
+        return MathF.Sqrt(sum);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float CalculateMagnitudeSimd(float[] values, int dimension)
+    {
+        var sumVector = Vector<float>.Zero;
+        var vectorSize = Vector<float>.Count;
+        var simdBoundary = dimension - (dimension % vectorSize);
+        var i = 0;
+
+        for (; i < simdBoundary; i += vectorSize)
+        {
+            var vec = new Vector<float>(values, i);
+            sumVector += vec * vec;
+        }
+
+        var sum = System.Numerics.Vector.Dot(sumVector, Vector<float>.One);
+        for (; i < dimension; i++)
+            sum += values[i] * values[i];
+
+        return MathF.Sqrt(sum);
     }
 
     /// <summary>
@@ -376,10 +458,26 @@ public partial class Vector : IEquatable<Vector>
     {
         ArgumentNullException.ThrowIfNull(addend);
         GuardDimensionsMatch(addend);
+        var dimension = Dimension;
 
-        for (int i = 0; i < Dimension; i++)
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            Values[i] = Values[i] + addend[i];
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v1 = new Vector<float>(Values, i);
+                var v2 = new Vector<float>(addend.Values, i);
+                (v1 + v2).CopyTo(Values, i);
+            }
+            for (; i < dimension; i++)
+                Values[i] += addend.Values[i];
+        }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                Values[i] += addend.Values[i];
         }
     }
 
@@ -393,10 +491,26 @@ public partial class Vector : IEquatable<Vector>
     {
         ArgumentNullException.ThrowIfNull(subtrahend);
         GuardDimensionsMatch(subtrahend);
+        var dimension = Dimension;
 
-        for (int i = 0; i < Dimension; i++)
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            Values[i] = Values[i] - subtrahend[i];
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v1 = new Vector<float>(Values, i);
+                var v2 = new Vector<float>(subtrahend.Values, i);
+                (v1 - v2).CopyTo(Values, i);
+            }
+            for (; i < dimension; i++)
+                Values[i] -= subtrahend.Values[i];
+        }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                Values[i] -= subtrahend.Values[i];
         }
     }
 
@@ -406,9 +520,27 @@ public partial class Vector : IEquatable<Vector>
     /// <param name="n">The scalar value to divide by.</param>
     public void InPlaceDivide(int n)
     {
-        for (int i = 0; i < Dimension; i++)
+        var dimension = Dimension;
+        var divisor = (float)n;
+
+        if (dimension >= 16 && System.Numerics.Vector.IsHardwareAccelerated)
         {
-            Values[i] = Values[i] / n;
+            var divisorVector = new Vector<float>(divisor);
+            var vectorSize = Vector<float>.Count;
+            var simdBoundary = dimension - (dimension % vectorSize);
+            var i = 0;
+            for (; i < simdBoundary; i += vectorSize)
+            {
+                var v = new Vector<float>(Values, i);
+                (v / divisorVector).CopyTo(Values, i);
+            }
+            for (; i < dimension; i++)
+                Values[i] /= divisor;
+        }
+        else
+        {
+            for (int i = 0; i < dimension; i++)
+                Values[i] /= divisor;
         }
     }
 
@@ -484,29 +616,17 @@ public partial class Vector : IEquatable<Vector>
         }
 
         Span<byte> valuesBytes = result[valuesOffset..(valuesOffset + valuesBytesLength)];
-        for (int i = 0; i < Values.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(valuesBytes[(i * sizeof(float))..], Values[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
+        MemoryMarshal.Cast<float, byte>(Values.AsSpan()).CopyTo(valuesBytes);
 
         Span<byte> tagsBytes = result[tagsOffset..(tagsOffset + tagsBytesLength)];
-        for (int i = 0; i < Tags.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(tagsBytes[(i * sizeof(short))..], Tags[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
+        MemoryMarshal.Cast<short, byte>(Tags.AsSpan()).CopyTo(tagsBytes);
 
         Span<byte> attributesBytesSpan = result[attributesOffset..(attributesOffset + attributesBytesLength)];
         attributesBytes.CopyTo(attributesBytesSpan);
 
         return result.ToArray();
     }
-    
+
     /// <summary>
     /// Converts the vector to binary format V2 (with metadata).
     /// </summary>
@@ -566,26 +686,14 @@ public partial class Vector : IEquatable<Vector>
         }
 
         Span<byte> valuesBytes = result[valuesOffset..(valuesOffset + valuesBytesLength)];
-        for (int i = 0; i < Values.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(valuesBytes[(i * sizeof(float))..], Values[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
+        MemoryMarshal.Cast<float, byte>(Values.AsSpan()).CopyTo(valuesBytes);
 
         Span<byte> tagsBytes = result[tagsOffset..(tagsOffset + tagsBytesLength)];
-        for (int i = 0; i < Tags.Length; i++)
-        {
-            if (!BitConverter.TryWriteBytes(tagsBytes[(i * sizeof(short))..], Tags[i]))
-            {
-                throw new InvalidOperationException($"Failed to write Value[{i}] to bytes");
-            }
-        }
+        MemoryMarshal.Cast<short, byte>(Tags.AsSpan()).CopyTo(tagsBytes);
 
         Span<byte> attributesBytesSpan = result[attributesOffset..(attributesOffset + attributesBytesLength)];
         attributesBytes.CopyTo(attributesBytesSpan);
-        
+
         Span<byte> metadataLengthBytes = result[metadataLengthOffset..(metadataLengthOffset + s_metadataLengthBytesLength)];
         if (!BitConverter.TryWriteBytes(metadataLengthBytes, metadataBytesLength))
         {
@@ -641,14 +749,11 @@ public partial class Vector : IEquatable<Vector>
     /// <inheritdoc/>
     public override int GetHashCode()
     {
-        // TODO: Define if Guid, OriginalText, or Tags should be included in the hash code
-        return HashCode.Combine(Values);
+        var hash = new HashCode();
+        foreach (var value in Values)
+            hash.Add(value);
+        return hash.ToHashCode();
     }
-
-    /// <summary>
-    /// Gets the number of dimensions in the vector.
-    /// </summary>
-    public int Dimensions => Values.Length;
 
     private void GuardDimensionsMatch(Vector other) => GuardDimensionsMatch(this, other);
 

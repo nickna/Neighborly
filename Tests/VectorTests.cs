@@ -60,6 +60,7 @@ public class VectorTests
         Assert.That(newBinary, Is.EqualTo(binary));
     }
 
+    [Test]
     public void InPlaceAdd()
     {
         // Arrange
@@ -146,5 +147,120 @@ public class VectorTests
         // Assert
         Assert.That(vector.OriginalText, Is.EqualTo(originalText));
         Assert.That(vector.Values, Is.EqualTo(expectedEmbeddings));
+    }
+
+    [Test]
+    public void OperatorPlus_AddsVectorsElementWise()
+    {
+        // Arrange
+        Vector a = new([1.0f, 2.0f, 3.0f]);
+        Vector b = new([4.0f, 5.0f, 6.0f]);
+
+        // Act
+        Vector result = a + b;
+
+        // Assert
+        Assert.That(result.Values, Is.EqualTo(new[] { 5.0f, 7.0f, 9.0f }));
+    }
+
+    [Test]
+    public void OperatorMinus_SubtractsVectorsElementWise()
+    {
+        // Arrange
+        Vector a = new([5.0f, 7.0f, 9.0f]);
+        Vector b = new([1.0f, 2.0f, 3.0f]);
+
+        // Act
+        Vector result = a - b;
+
+        // Assert
+        Assert.That(result.Values, Is.EqualTo(new[] { 4.0f, 5.0f, 6.0f }));
+    }
+
+    [Test]
+    public void OperatorDivide_DividesVectorByScalar()
+    {
+        // Arrange
+        Vector a = new([10.0f, 20.0f, 30.0f]);
+
+        // Act
+        Vector result = a / 2;
+
+        // Assert
+        Assert.That(result.Values, Is.EqualTo(new[] { 5.0f, 10.0f, 15.0f }));
+    }
+
+    [Test]
+    public void Magnitude_ReturnsCorrectValue()
+    {
+        // Arrange - 3-4-5 triangle
+        Vector v = new([3.0f, 4.0f]);
+
+        // Act
+        float magnitude = v.Magnitude;
+
+        // Assert
+        Assert.That(magnitude, Is.EqualTo(5.0f).Within(0.0001f));
+    }
+
+    [Test]
+    public void Magnitude_LargeVector_UsesSimd()
+    {
+        // Arrange - Large vector to trigger SIMD path (128 dimensions)
+        float[] values = new float[128];
+        for (int i = 0; i < 128; i++) values[i] = 1.0f;
+        Vector v = new(values);
+
+        // Act
+        float magnitude = v.Magnitude;
+
+        // Assert - sqrt(128 * 1^2) = sqrt(128)
+        Assert.That(magnitude, Is.EqualTo(MathF.Sqrt(128)).Within(0.0001f));
+    }
+
+    [Test]
+    public void GetHashCode_SameValues_ReturnsSameHash()
+    {
+        // Arrange
+        Vector v1 = new([1.0f, 2.0f, 3.0f]);
+        Vector v2 = new([1.0f, 2.0f, 3.0f]);
+
+        // Act & Assert
+        Assert.That(v1.GetHashCode(), Is.EqualTo(v2.GetHashCode()));
+    }
+
+    [Test]
+    public void GetHashCode_DifferentValues_ReturnsDifferentHash()
+    {
+        // Arrange
+        Vector v1 = new([1.0f, 2.0f, 3.0f]);
+        Vector v2 = new([4.0f, 5.0f, 6.0f]);
+
+        // Act & Assert
+        Assert.That(v1.GetHashCode(), Is.Not.EqualTo(v2.GetHashCode()));
+    }
+
+    [Test]
+    public void OperatorPlus_LargeVector_UsesSimd()
+    {
+        // Arrange - Large vectors to trigger SIMD path
+        float[] values1 = new float[128];
+        float[] values2 = new float[128];
+        for (int i = 0; i < 128; i++)
+        {
+            values1[i] = i;
+            values2[i] = i * 2;
+        }
+        Vector a = new(values1);
+        Vector b = new(values2);
+
+        // Act
+        Vector result = a + b;
+
+        // Assert
+        for (int i = 0; i < 128; i++)
+        {
+            Assert.That(result.Values[i], Is.EqualTo(i * 3.0f).Within(0.0001f));
+        }
     }
 }

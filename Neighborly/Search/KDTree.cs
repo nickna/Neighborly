@@ -104,12 +104,12 @@ public class KDTree : ISerializableSearchIndex
         }
 
         var firstVector = vectors[0];
-        if (firstVector.Dimensions == 0)
+        if (firstVector.Dimension == 0)
         {
             return null;
         }
 
-        var axis = depth % firstVector.Dimensions;
+        var axis = depth % firstVector.Dimension;
         var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
 
         var median = sortedVectors.Count / 2;
@@ -132,12 +132,12 @@ public class KDTree : ISerializableSearchIndex
         }
 
         var firstVector = vectors[0];
-        if (firstVector.Dimensions == 0)
+        if (firstVector.Dimension == 0)
         {
             return null;
         }
 
-        var axis = depth % firstVector.Dimensions;
+        var axis = depth % firstVector.Dimension;
         var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -277,7 +277,7 @@ public class KDTree : ISerializableSearchIndex
         if (node?.Vector == null)
             return;
 
-        var axis = depth % query.Dimensions;
+        var axis = depth % query.Dimension;
         var distance = distanceCalculator.CalculateDistance(node.Vector, query);
         
         // Add current node if it's within radius
@@ -320,7 +320,7 @@ public class KDTree : ISerializableSearchIndex
             return;
         }
 
-        int axis = depth % query.Dimensions;
+        int axis = depth % query.Dimension;
         float queryAxisValue = query.Values[axis];
 
         KDTreeNode? nearChild = queryAxisValue < node.Vector.Values[axis] ? node.Left : node.Right;
@@ -367,7 +367,7 @@ public class KDTree : ISerializableSearchIndex
             return;
         }
 
-        int axis = depth % query.Dimensions;
+        int axis = depth % query.Dimension;
         float queryAxisValue = query.Values[axis];
 
         KDTreeNode? nearChild = queryAxisValue < node.Vector.Values[axis] ? node.Left : node.Right;
@@ -388,7 +388,7 @@ public class KDTree : ISerializableSearchIndex
         if (node?.Vector == null)
             return;
 
-        var axis = depth % query.Dimensions;
+        var axis = depth % query.Dimension;
         var distance = _distanceCalculator.CalculateDistance(query, node.Vector);
         
         // Add current node to candidates

@@ -21,7 +21,7 @@ public class LSHSearch : IBuildableSearchIndex
         public CacheKey(VectorList vectors)
         {
             vectorCount = vectors.Count;
-            dimensions = vectors.Count > 0 ? vectors[0].Dimensions : 0;
+            dimensions = vectors.Count > 0 ? vectors[0].Dimension : 0;
 
             // Create fingerprint from first/last/middle vector IDs for quick comparison
             var hash = new HashCode();

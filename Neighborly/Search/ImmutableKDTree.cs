@@ -86,12 +86,12 @@ public sealed class ImmutableKDTree : ISearchIndex
         }
 
         var firstVector = vectors[0];
-        if (firstVector.Dimensions == 0)
+        if (firstVector.Dimension == 0)
         {
             return null;
         }
 
-        var axis = depth % firstVector.Dimensions;
+        var axis = depth % firstVector.Dimension;
         var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
         var median = sortedVectors.Count / 2;
 
@@ -117,12 +117,12 @@ public sealed class ImmutableKDTree : ISearchIndex
         }
 
         var firstVector = vectors[0];
-        if (firstVector.Dimensions == 0)
+        if (firstVector.Dimension == 0)
         {
             return null;
         }
 
-        var axis = depth % firstVector.Dimensions;
+        var axis = depth % firstVector.Dimension;
         var sortedVectors = vectors.OrderBy(v => v[axis]).ToList();
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -220,7 +220,7 @@ public sealed class ImmutableKDTree : ISearchIndex
             return;
         }
 
-        var axis = depth % query.Dimensions;
+        var axis = depth % query.Dimension;
         var queryAxisValue = query.Values[axis];
         var nodeAxisValue = node.Vector.Values[axis];
 
@@ -287,7 +287,7 @@ public sealed class ImmutableKDTree : ISearchIndex
             return;
         }
 
-        var axis = depth % query.Dimensions;
+        var axis = depth % query.Dimension;
         var distance = distanceCalculator.CalculateDistance(node.Vector, query);
 
         // Add current node if it's within radius
