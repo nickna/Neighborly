@@ -82,6 +82,55 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         s_tombStoneBytes = tombStoneBytes.ToArray();
     }
 
+    /// <summary>
+    /// Creates a new memory-mapped list with dynamic file growth.
+    /// Files start small and grow automatically as needed.
+    /// </summary>
+    /// <param name="flushPolicy">The flush policy for WAL checkpoints.</param>
+    /// <param name="enableGrowth">If true, files will grow automatically. If false, uses fixed capacity.</param>
+    public MemoryMappedList(FlushPolicy flushPolicy = FlushPolicy.Batched, bool enableGrowth = true)
+    {
+        if (enableGrowth)
+        {
+            // Dynamic growth mode - start small
+            _indexFile = new RandomAccessFileHolder(FileGrowthStrategy.ForIndexFile());
+            _dataFile = new RandomAccessFileHolder(FileGrowthStrategy.ForDataFile());
+        }
+        else
+        {
+            // Legacy fixed mode - use reasonable defaults
+            long capacity = 10000; // Support 10K vectors initially
+            _indexFile = new RandomAccessFileHolder(s_indexEntryByteLength * capacity);
+            _dataFile = new RandomAccessFileHolder(4096L * capacity);
+        }
+
+        _wal = new WriteAheadLog(_indexFile.Filename);
+
+        // Create CheckpointManager with WAL reference for coordinated durability
+        _checkpointManager = new CheckpointManager(_wal, flushPolicy);
+
+        // Register files with checkpoint manager
+        _checkpointManager.RegisterFile(_indexFile);
+        _checkpointManager.RegisterFile(_dataFile);
+
+        // Initialize defrag tracking
+        _newDataPosition = 0;
+
+        // Cleanup orphaned temp files from crashed resize operations
+        CleanupOrphanedTempFiles();
+
+        // Recovery on startup
+        RecoverFromWAL();
+
+        // Initialize append metadata after recovery
+        InitializeAppendMetadata();
+    }
+
+    /// <summary>
+    /// Creates a new memory-mapped list with fixed capacity (backward compatibility).
+    /// </summary>
+    /// <param name="capacity">The number of vectors to pre-allocate space for.</param>
+    /// <param name="flushPolicy">The flush policy for WAL checkpoints.</param>
     public MemoryMappedList(long capacity, FlushPolicy flushPolicy = FlushPolicy.Batched)
     {
         _indexFile = new RandomAccessFileHolder(s_indexEntryByteLength * capacity);
@@ -99,8 +148,8 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         // Initialize defrag tracking
         _newDataPosition = 0;
 
-        // Validate file integrity (temporarily disabled)
-        // ValidateFileIntegrity();
+        // Cleanup orphaned temp files from crashed resize operations
+        CleanupOrphanedTempFiles();
 
         // Recovery on startup
         RecoverFromWAL();
@@ -349,6 +398,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         long dataPosition = _nextDataPosition;
         byte[] data = vector.ToBinary();
 
+        // CRITICAL FIX: Ensure capacity BEFORE any writes
+        EnsureCapacity(s_indexEntryByteLength, data.Length);
+
         long lsn = 0;
         if (logToWAL)
         {
@@ -381,6 +433,9 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         long indexPosition = _nextIndexPosition;
         long dataPosition = _nextDataPosition;
         byte[] data = vector.ToBinary();
+
+        // CRITICAL FIX: Ensure capacity BEFORE any writes
+        await EnsureCapacityAsync(s_indexEntryByteLength, data.Length, cancellationToken).ConfigureAwait(false);
 
         long lsn = 0;
         if (logToWAL)
@@ -481,17 +536,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
             {
                 // Reuse existing space
                 newDataPosition = result.DataOffset;
+
+                // FIXED: Still check for threshold-triggered growth even when reusing space
+                EnsureCapacity(0, 0);
             }
             else
             {
                 // Need more space - append at end of data
                 newDataPosition = _nextDataPosition;
 
-                // Check if we have enough capacity
-                if (newDataPosition + newData.Length > _dataFile.Capacity)
-                {
-                    return false;
-                }
+                // FIXED: Removed inadequate capacity check (lines 491-493)
+                // Old code: if (newDataPosition + newData.Length > _dataFile.Capacity) return false;
+                // New code: Ensure capacity (will grow if needed)
+                EnsureCapacity(0, newData.Length);
 
                 // Update data position
                 _nextDataPosition += newData.Length;
@@ -535,17 +592,19 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
             {
                 // Reuse existing space
                 newDataPosition = result.DataOffset;
+
+                // FIXED: Still check for threshold-triggered growth even when reusing space
+                await EnsureCapacityAsync(0, 0, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 // Need more space - append at end of data
                 newDataPosition = _nextDataPosition;
 
-                // Check if we have enough capacity
-                if (newDataPosition + newData.Length > _dataFile.Capacity)
-                {
-                    return false;
-                }
+                // FIXED: Removed inadequate capacity check (lines 545-547)
+                // Old code: if (newDataPosition + newData.Length > _dataFile.Capacity) return false;
+                // New code: Ensure capacity (will grow if needed)
+                await EnsureCapacityAsync(0, newData.Length, cancellationToken).ConfigureAwait(false);
 
                 // Update data position
                 _nextDataPosition += newData.Length;
@@ -1069,6 +1128,11 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         long dataPosition = entry.DataPosition >= 0 ? entry.DataPosition : _nextDataPosition;
         byte[] data = vector.ToBinary();
 
+        // FIXED: Ensure capacity during recovery
+        long indexSpaceNeeded = indexPosition >= _nextIndexPosition ? s_indexEntryByteLength : 0;
+        long dataSpaceNeeded = dataPosition >= _nextDataPosition ? data.Length : 0;
+        EnsureCapacity(indexSpaceNeeded, dataSpaceNeeded);
+
         WriteVectorData(dataPosition, data);
         WriteIndexEntry(indexPosition, vector.Id, dataPosition, data.Length);
 
@@ -1423,6 +1487,110 @@ public class MemoryMappedList : IDisposable, IEnumerable<Vector>, IAsyncEnumerab
         }
     }
     
+    /// <summary>
+    /// Cleans up orphaned temporary files from crashed resize operations.
+    /// Called during constructor before recovery.
+    /// </summary>
+    private void CleanupOrphanedTempFiles()
+    {
+        try
+        {
+            // Find temp files in same directory as our files
+            string directory = Path.GetDirectoryName(_indexFile.Filename) ?? Path.GetTempPath();
+            if (!Directory.Exists(directory))
+                return;
+
+            var tempFiles = Directory.GetFiles(directory, "*.tmp");
+
+            foreach (var tempFile in tempFiles)
+            {
+                try
+                {
+                    // Check if temp file is old (within last hour)
+                    // to avoid deleting active temp files from other processes
+                    var fileInfo = new FileInfo(tempFile);
+                    if (DateTime.UtcNow - fileInfo.LastWriteTimeUtc > TimeSpan.FromHours(1))
+                    {
+                        File.Delete(tempFile);
+                        Logging.Logger.Information("Deleted orphaned temp file: {TempFile}", tempFile);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logging.Logger.Warning(ex, "Failed to delete temp file: {TempFile}", tempFile);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logging.Logger.Warning(ex, "Failed to cleanup orphaned temp files");
+        }
+    }
+
+    /// <summary>
+    /// Ensures sufficient capacity for upcoming write operation.
+    /// Grows files if needed based on growth strategy.
+    /// Caller MUST hold _lock.
+    /// </summary>
+    /// <param name="indexSpaceNeeded">Additional index space required (bytes).</param>
+    /// <param name="dataSpaceNeeded">Additional data space required (bytes).</param>
+    private void EnsureCapacity(long indexSpaceNeeded, long dataSpaceNeeded)
+    {
+        // Check and grow index file if needed
+        long? newIndexCapacity = _indexFile.CheckAndCalculateGrowth(_nextIndexPosition + indexSpaceNeeded);
+        if (newIndexCapacity.HasValue)
+        {
+            Logging.Logger.Information(
+                "Growing index file from {CurrentCapacity} to {NewCapacity} bytes (usage: {Usage} bytes)",
+                _indexFile.Capacity, newIndexCapacity.Value, _nextIndexPosition);
+
+            _indexFile.ResizeFile(newIndexCapacity.Value);
+        }
+
+        // Check and grow data file if needed
+        long? newDataCapacity = _dataFile.CheckAndCalculateGrowth(_nextDataPosition + dataSpaceNeeded);
+        if (newDataCapacity.HasValue)
+        {
+            Logging.Logger.Information(
+                "Growing data file from {CurrentCapacity} to {NewCapacity} bytes (usage: {Usage} bytes)",
+                _dataFile.Capacity, newDataCapacity.Value, _nextDataPosition);
+
+            _dataFile.ResizeFile(newDataCapacity.Value);
+        }
+    }
+
+    /// <summary>
+    /// Async version of EnsureCapacity for async code paths.
+    /// Caller MUST hold _asyncLock.
+    /// </summary>
+    private async ValueTask EnsureCapacityAsync(
+        long indexSpaceNeeded,
+        long dataSpaceNeeded,
+        CancellationToken cancellationToken)
+    {
+        // Check and grow index file if needed
+        long? newIndexCapacity = _indexFile.CheckAndCalculateGrowth(_nextIndexPosition + indexSpaceNeeded);
+        if (newIndexCapacity.HasValue)
+        {
+            Logging.Logger.Information(
+                "Growing index file from {CurrentCapacity} to {NewCapacity} bytes (usage: {Usage} bytes)",
+                _indexFile.Capacity, newIndexCapacity.Value, _nextIndexPosition);
+
+            await _indexFile.ResizeFileAsync(newIndexCapacity.Value, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Check and grow data file if needed
+        long? newDataCapacity = _dataFile.CheckAndCalculateGrowth(_nextDataPosition + dataSpaceNeeded);
+        if (newDataCapacity.HasValue)
+        {
+            Logging.Logger.Information(
+                "Growing data file from {CurrentCapacity} to {NewCapacity} bytes (usage: {Usage} bytes)",
+                _dataFile.Capacity, newDataCapacity.Value, _nextDataPosition);
+
+            await _dataFile.ResizeFileAsync(newDataCapacity.Value, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
     private void ThrowIfDisposed()
     {
         if (_disposedValue)
