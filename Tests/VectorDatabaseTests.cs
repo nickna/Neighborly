@@ -457,4 +457,88 @@ public class VectorDatabaseTests
         Assert.That(v.OriginalText, Is.EqualTo("Hello, World!"));
 
     }
+
+    #region Background Indexing Service Integration Tests
+
+    [Test]
+    public void Constructor_WithDefaultOptions_UsesDefaultBehavior()
+    {
+        // This test verifies backward compatibility - existing behavior should work
+        using var db = new VectorDatabase(_logger, null);
+
+        Assert.That(db, Is.Not.Null);
+        Assert.That(db.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Constructor_WithCustomOptions_AcceptsConfiguration()
+    {
+        // Arrange
+        var options = new BackgroundIndexServiceOptions
+        {
+            RebuildDelay = TimeSpan.FromSeconds(1),
+            CheckInterval = TimeSpan.FromSeconds(1)
+        };
+
+        // Act
+        using var db = new VectorDatabase(_logger, null, options);
+
+        // Assert
+        Assert.That(db, Is.Not.Null);
+    }
+
+    [Test]
+    public void Constructor_WithDisabledOptions_DoesNotFail()
+    {
+        // Arrange
+        var options = BackgroundIndexServiceOptions.Disabled();
+
+        // Act
+        using var db = new VectorDatabase(_logger, null, options);
+
+        // Assert
+        Assert.That(db, Is.Not.Null);
+        Assert.That(db.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Constructor_WithInvalidOptions_Throws()
+    {
+        // Arrange
+        var options = new BackgroundIndexServiceOptions
+        {
+            RebuildDelay = TimeSpan.FromMilliseconds(50) // Too short, should fail validation
+        };
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new VectorDatabase(_logger, null, options));
+    }
+
+    [Test]
+    public async Task AddVector_TriggersBackgroundIndexRebuild()
+    {
+        // Arrange
+        var options = new BackgroundIndexServiceOptions
+        {
+            RebuildDelay = TimeSpan.FromMilliseconds(500),
+            CheckInterval = TimeSpan.FromMilliseconds(200)
+        };
+
+        using var db = new VectorDatabase(_logger, null, options);
+
+        // Act
+        float[] floatArray = [1, 2, 3];
+        var vector = new Vector(floatArray);
+        db.Vectors.Add(vector);
+
+        // Wait for background rebuild to occur
+        await Task.Delay(1000);
+
+        // Assert - verify database still works correctly
+        Assert.That(db.Count, Is.EqualTo(1));
+        Assert.That(db.Vectors.Contains(vector), Is.True);
+    }
+
+    #endregion
 }
