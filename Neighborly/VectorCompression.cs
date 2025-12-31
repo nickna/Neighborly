@@ -1,55 +1,43 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
+using FpZip;
 
 namespace Neighborly
 {
     public partial class Vector
     {
+        // Marker byte to identify empty vector compressed format
+        private static readonly byte[] EmptyVectorMarker = new byte[] { 0x00, 0x00, 0x00, 0x00 };
+
+        /// <summary>
+        /// Compresses the vector values to a binary format using FpZip lossless compression.
+        /// </summary>
+        /// <returns>Compressed byte array.</returns>
         public byte[] ToCompressedBinary()
         {
-            using (var compressor = new FpZipCompression())
+            // FpZip requires nx > 0, handle empty vectors specially
+            if (Values.Length == 0)
             {
-                // Initialize the compressor for writing
-                compressor.InitializeForWriting(
-                    type: 0, // Assuming type 0 for float
-                    prec: 32, // Assuming 32-bit precision for float
-                    nx: Values.Length, // Number of elements in the vector
-                    ny: 1,
-                    nz: 1,
-                    nf: 1,
-                    bufferSize: Values.Length * sizeof(float)
-                );
-
-                // Compress the vector values
-                return compressor.Compress(Values);
+                return EmptyVectorMarker;
             }
+
+            return FpZipCompressor.Compress(Values, nx: Values.Length);
         }
 
+        /// <summary>
+        /// Creates a Vector from compressed binary data.
+        /// </summary>
+        /// <param name="data">Compressed byte array from ToCompressedBinary.</param>
+        /// <returns>Decompressed Vector instance.</returns>
         public static Vector FromCompressedBinary(byte[] data)
         {
-            using (var decompressor = new FpZipCompression())
+            // Check for empty vector marker
+            if (data.Length == EmptyVectorMarker.Length &&
+                data[0] == 0x00 && data[1] == 0x00 && data[2] == 0x00 && data[3] == 0x00)
             {
-                // Extract the original length of the Values array from the data
-                int originalLength = BitConverter.ToInt32(data, 0);
-
-                // Extract the compressed data
-                byte[] compressedData = new byte[data.Length - sizeof(int)];
-                Buffer.BlockCopy(data, sizeof(int), compressedData, 0, compressedData.Length);
-
-                // Initialize the decompressor for reading
-                decompressor.InitializeForReading(compressedData);
-
-                // Decompress the data
-                float[] decompressedValues = decompressor.Decompress(originalLength);
-
-                // Create a new Vector instance with the decompressed values
-                return new Vector(decompressedValues);
+                return new Vector(Array.Empty<float>());
             }
+
+            float[] decompressedValues = FpZipCompressor.DecompressFloat(data);
+            return new Vector(decompressedValues);
         }
     }
 }

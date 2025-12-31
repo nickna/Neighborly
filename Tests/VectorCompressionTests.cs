@@ -175,5 +175,49 @@ namespace Neighborly.Tests.Compression
             // The compressed versions should be at least 18% less than the original
             Assert.That(median > TestConstants.Compression.MinRatio512_768, "Compression ratio is not at least 18% less than the original");
         }
+
+
+        [Test]
+        public void TestRoundTripCompression()
+        {
+            // Test that compress then decompress returns the original data
+            float[] original = new float[TestConstants.Dimensions.Embedding768];
+            for (int i = 0; i < TestConstants.Dimensions.Embedding768; i++)
+            {
+                original[i] = (float)Random.Shared.NextDouble();
+            }
+
+            var vector = new Vector(original);
+            byte[] compressed = vector.ToCompressedBinary();
+            Vector restored = Vector.FromCompressedBinary(compressed);
+
+            Assert.That(restored.Values, Is.EqualTo(original), "Round-trip compression should preserve exact values");
+        }
+
+
+        [Test]
+        public void TestRoundTripCompressionEmptyVector()
+        {
+            // Edge case: empty vector
+            float[] original = Array.Empty<float>();
+            var vector = new Vector(original);
+            byte[] compressed = vector.ToCompressedBinary();
+            Vector restored = Vector.FromCompressedBinary(compressed);
+
+            Assert.That(restored.Values, Is.EqualTo(original), "Empty vector round-trip should work");
+        }
+
+
+        [Test]
+        public void TestRoundTripCompressionSingleElement()
+        {
+            // Edge case: single element
+            float[] original = new float[] { 3.14159f };
+            var vector = new Vector(original);
+            byte[] compressed = vector.ToCompressedBinary();
+            Vector restored = Vector.FromCompressedBinary(compressed);
+
+            Assert.That(restored.Values, Is.EqualTo(original), "Single element round-trip should work");
+        }
     }
 }
