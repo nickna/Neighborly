@@ -29,15 +29,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CsvHelper" Version="33.0.1" />
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
     <PackageReference Include="Microsoft.ML" Version="5.0.0" />
-    <PackageReference Include="Parquet.Net" Version="5.1.0" />
+    <PackageReference Include="Parquet.Net" Version="5.4.0" />
     <PackageReference Include="Serilog.Extensions.Logging" Version="10.0.0" />
-    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
-    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
-    <PackageReference Include="Serilog.Sinks.InMemory" Version="0.11.0" />
-    <PackageReference Include="FpZip.Net" Version="1.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+    <PackageReference Include="Serilog.Sinks.InMemory" Version="2.0.0" />
+    <PackageReference Include="FpZip.Net" Version="1.0.1" />
   </ItemGroup>
 
   <ItemGroup>
